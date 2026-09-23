@@ -1,0 +1,29 @@
+{
+  "name": "@diffusionstudio/dapi",
+  "version": "0.1.0",
+  "description": "Frameyard's typed tool catalog for agents and the dapi CLI.",
+  "license": "MPL-2.0",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "keywords": [
+    "dapi",
+    "mcp",
+    "zod"
+  ],
+  "dependencies": {
+    "@diffusionstudio/jsx": "*",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "~5.9.3",
+    "vitest": "^4.0.0"
+  }
+}

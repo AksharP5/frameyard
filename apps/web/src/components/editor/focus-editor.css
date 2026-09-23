@@ -1,0 +1,331 @@
+.focus-editor {
+  display: grid;
+  padding-right: 12px;
+  overflow: hidden;
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 12px;
+}
+.focus-project-bar {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+  padding-left: 14px;
+}
+.focus-project-identity,
+.focus-project-actions,
+.focus-history {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.focus-project-identity {
+  gap: 16px;
+}
+.focus-project-identity > *,
+.focus-project-actions {
+  -webkit-app-region: no-drag;
+}
+.focus-project-name {
+  padding: 0;
+  height: 36px;
+  width: clamp(300px, 34vw, 450px);
+  min-width: 180px;
+  flex-shrink: 1;
+}
+.focus-wordmark {
+  font-size: 19px;
+  font-weight: 580;
+  letter-spacing: -0.7px;
+  margin: 0 9px 0 6px;
+  color: var(--foreground);
+}
+.focus-project-name input {
+  color: var(--foreground);
+  font-size: 14px;
+  height: 28px;
+  margin-left: 12px;
+  letter-spacing: -0.2px;
+}
+.focus-project-actions {
+  gap: 8px;
+}
+.focus-project-actions > button {
+  height: 36px;
+}
+.focus-history {
+  gap: 2px;
+}
+.focus-history button {
+  color: var(--muted-foreground);
+}
+.focus-export {
+  gap: 8px;
+  padding: 0 12px 0 16px;
+  min-width: 94px;
+  height: 36px;
+  color: var(--primary-foreground);
+}
+.focus-tool-rail {
+  grid-column: 1;
+  grid-row: 2 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 6px;
+  overflow-y: auto;
+}
+.focus-canvas-tools {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.focus-tool {
+  width: 48px;
+  min-height: 52px;
+  height: 52px;
+  padding: 5px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--muted-foreground);
+  border-radius: 6px;
+  box-shadow: none;
+  background: transparent;
+}
+.focus-tool svg {
+  width: 26px;
+  height: 26px;
+}
+.focus-tool[aria-pressed="true"] {
+  background: var(--secondary);
+  color: var(--foreground);
+}
+.focus-rail-divider {
+  width: 22px;
+  height: 1px;
+  margin: 8px 0;
+  background: var(--border);
+  flex-shrink: 0;
+}
+.focus-workarea {
+  grid-column: 2;
+  grid-row: 2;
+  display: flex;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  margin-left: 12px;
+}
+.focus-preview {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 9px 9px 0 0;
+  overflow: hidden;
+  background: var(--canvas);
+}
+.focus-preview-heading,
+.focus-library-heading {
+  height: 40px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 17px;
+  font-size: 12px;
+}
+.focus-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--muted-foreground);
+}
+.focus-breadcrumb > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.focus-breadcrumb svg {
+  width: 16px;
+  height: 16px;
+}
+.focus-breadcrumb strong {
+  font-weight: 450;
+  color: var(--foreground);
+}
+.focus-canvas {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+.focus-canvas > div {
+  background: var(--canvas);
+}
+.focus-library {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  margin-right: 12px;
+  background: var(--sidebar);
+  border: 1px solid var(--border);
+  border-radius: 9px 9px 0 0;
+  overflow: hidden;
+}
+.focus-library.hidden {
+  display: none;
+}
+.focus-library-overlay {
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 40;
+  margin: 0;
+  border-radius: 9px;
+  box-shadow: 8px 0 24px #0003;
+}
+.focus-library-heading {
+  border-bottom: 1px solid var(--border);
+}
+.focus-library-heading > button {
+  width: 28px;
+  height: 28px;
+}
+.focus-workspace {
+  grid-column: 4;
+  grid-row: 2;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: 9px 9px 0 0;
+  overflow: hidden;
+}
+.focus-workspace-resizer {
+  grid-column: 3;
+  grid-row: 2;
+  background: transparent;
+  width: 1px;
+  justify-self: center;
+}
+.focus-transport {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  height: 54px;
+  flex-shrink: 0;
+  padding: 0 17px;
+}
+.focus-transport-volume {
+  grid-column: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--muted-foreground);
+}
+.focus-play-controls {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.focus-play-controls > button {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+}
+.focus-play-controls svg {
+  width: 24px;
+  height: 24px;
+}
+.focus-play {
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--primary-foreground);
+}
+.focus-timecode {
+  grid-column: 3;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  font-size: 11px;
+  letter-spacing: -0.25px;
+}
+.focus-timecode > span:last-child {
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+.focus-timeline-resizer {
+  grid-column: 2 / -1;
+  grid-row: 3;
+  margin-left: 12px;
+}
+.focus-timeline {
+  grid-column: 2 / -1;
+  grid-row: 4;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  margin-left: 12px;
+  background: var(--sidebar);
+  border-top: 1px solid var(--border);
+}
+.focus-ui-hidden {
+  padding: 0;
+}
+.focus-ui-hidden .focus-project-bar,
+.focus-ui-hidden .focus-tool-rail {
+  display: none;
+}
+.focus-ui-hidden .focus-workarea {
+  grid-column: 1;
+  grid-row: 1;
+  margin: 0;
+}
+.focus-ui-hidden .focus-preview {
+  border: 0;
+  border-radius: 0;
+}
+.focus-ui-hidden .focus-preview-heading,
+.focus-ui-hidden .focus-transport {
+  display: none;
+}
+[data-platform="darwin"]:not([data-fullscreen="true"]) .focus-project-bar {
+  padding-left: 84px;
+}
+@media (max-width: 1150px) {
+  .focus-project-identity {
+    gap: 6px;
+  }
+  .focus-project-name {
+    width: 300px;
+  }
+  .focus-breadcrumb strong,
+  .focus-breadcrumb svg {
+    display: none;
+  }
+  .focus-timecode {
+    font-size: 10px;
+  }
+  .focus-timecode > span:last-child {
+    display: none;
+  }
+}

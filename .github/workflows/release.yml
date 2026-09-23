@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check package versions match tag
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync } from 'node:fs';
+          const tag = process.env.GITHUB_REF_NAME.slice(1);
+          for (const path of ['package.json', 'apps/desktop/package.json', 'apps/cli/package.json', 'apps/web/package.json']) {
+            const { version } = JSON.parse(readFileSync(path, 'utf8'));
+            if (version !== tag) throw new Error(`${path}: ${version} does not match ${tag}`);
+          }
+          JS
+  linux:
+    needs: version
+    uses: ./.github/workflows/linux.yml
+  publish:
+    needs: linux
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-x64
+          path: dist
+      - name: Publish verified Linux release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cd dist
+          sha256sum --check SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" ./*.tar.gz SHA256SUMS --verify-tag --generate-notes --title "Frameyard ${GITHUB_REF_NAME#v}"

@@ -1,0 +1,351 @@
+#!/usr/bin/env node
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+import { existsSync } from "node:fs";
+import { isAbsolute, resolve } from "node:path";
+import { Command } from "commander";
+import { z } from "zod";
+import { version } from "../../../package.json";
+import { MCP_URL, toolByName } from "@diffusionstudio/dapi";
+import { APP_NAME, call, isAppDown, launchApp, ping, waitForApp } from "./cli-client";
+import { runProxy } from "./mcp-proxy";
+import { writeEditPlan } from "./edit-plan";
+import { convertAnimation, exportAnimation, listAnimations, renderAnimation } from "./animation";
+
+import type { GenericTool, ToolInput, ToolName } from "@diffusionstudio/dapi";
+
+function fail(message: string): never {
+  console.error(message);
+  process.exit(1);
+}
+
+function appError(e: unknown): never {
+  if (isAppDown(e)) fail(`${APP_NAME} is not running. Launch the app first, then retry.`);
+  fail((e as Error).message);
+}
+
+/** The tool's description, verbatim. */
+function describe(name: ToolName): string {
+  return toolByName(name).description;
+}
+
+/** An input field's description, verbatim, for the option that maps onto it. */
+function field(name: ToolName, key: string): string {
+  const tool: GenericTool = toolByName(name);
+  const schema = tool.input.shape[key];
+  if (schema === undefined) throw new Error(`tool ${name} has no input field "${key}"`);
+  return schema.description ?? "";
+}
+
+/**
+ * Checks the input against the tool's schema, calls the tool, and prints
+ * what the app returns — its structured content, as one JSON object, the
+ * same thing an agent receives. Strings stay strings: times like "45f" are
+ * parsed by the schema on both sides.
+ */
+async function run<N extends ToolName>(name: N, input: ToolInput<N>): Promise<void> {
+  const parsed = toolByName(name).input.safeParse(input);
+  if (!parsed.success) fail(z.prettifyError(parsed.error));
+  const output = await call(name, input).catch(appError);
+  console.log(JSON.stringify(output));
+}
+
+// Numbers are converted so the schema can check them as numbers; an empty or
+// non-numeric string becomes NaN, which the schema rejects with its own message.
+const numeric = (value: string): number => (value.trim() === "" ? NaN : Number(value));
+
+/**
+ * A local file (or frames folder) that exists is sent as its absolute path;
+ * anything else — a URL, or a library path (`b-roll/clip.mp4`) — is passed
+ * through for the app to resolve. Library paths need an open project.
+ */
+function assetPath(ref: string): string {
+  const abs = resolve(ref);
+  if (existsSync(abs)) return abs;
+  if (isAbsolute(ref)) fail(`File not found: ${abs}`);
+  return ref;
+}
+
+const program = new Command();
+
+program
+  .name("dapi")
+  .description(
+    `The ${APP_NAME} CLI: understand, generate, and edit footage.
+Analyze video/audio/images, generate them with AI, and compose assets.
+Use for any media analysis, media generation, or video editing task. No ffmpeg needed.`)
+  .version(version);
+
+program
+  .command("edit-plan <plan>")
+  .description("Convert source cuts into a new editable JSX component; preserves existing files.")
+  .requiredOption("-o, --output <file>", "new .tsx component to create")
+  .action(async (plan: string, opts: { output: string }) => {
+    console.log(JSON.stringify(await writeEditPlan(plan, opts.output)));
+  });
+
+async function runAnimation<T>(run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
+  process.once("SIGINT", cancel);
+  process.once("SIGTERM", cancel);
+  try {
+    return await run(controller.signal);
+  } finally {
+    process.off("SIGINT", cancel);
+    process.off("SIGTERM", cancel);
+  }
+}
+
+const animations = program
+  .command("animation")
+  .description("Browse, render, and export retained Manim and HyperFrames animations");
+
+animations
+  .command("list")
+  .option("--project <dir>", "project containing diffusion.animations", ".")
+  .action(async (opts: { project: string }) => {
+    console.log(JSON.stringify(await listAnimations(opts.project)));
+  });
+
+animations
+  .command("render <id>")
+  .option("--project <dir>", "project containing diffusion.animations", ".")
+  .action(async (id: string, opts: { project: string }) => {
+    console.log(JSON.stringify(await runAnimation((signal) => renderAnimation(id, opts.project, undefined, signal))));
+  });
+
+animations
+  .command("editable <id>")
+  .description("Convert supported authored objects to fresh editable native JSX layers")
+  .option("--project <dir>", "project containing diffusion.animations", ".")
+  .option("--allow-partial", "create an incomplete editable study when features cannot be converted")
+  .action(async (id: string, opts: { project: string; allowPartial?: boolean }) => {
+    const { tree: _tree, ...report } = await runAnimation((signal) =>
+      convertAnimation(id, opts.project, { allowPartial: opts.allowPartial, signal }),
+    );
+    console.log(JSON.stringify(report));
+  });
+
+animations
+  .command("export <id> <output>")
+  .description("Export MP4 video or QuickTime MOV; transparent animations require MOV")
+  .option("--project <dir>", "project containing diffusion.animations", ".")
+  .option("--overwrite", "replace an existing export")
+  .action(async (id: string, output: string, opts: { project: string; overwrite?: boolean }) => {
+    console.log(JSON.stringify(
+      await runAnimation((signal) =>
+        exportAnimation(id, opts.project, output, { overwrite: opts.overwrite, signal }),
+      ),
+    ));
+  });
+
+program
+  .command("open")
+  .description(
+    `Launch ${APP_NAME} (or surface the running instance) and, given a path, open that folder as a project, creating the project files if the folder is not one yet. Prints the project's id, display name, and folder. Run this once before commands that need an open project (capture, check, export, context, and library paths in media commands).`,
+  )
+  .argument("[path]", `${field("open", "dir")} (default: none — just launch the app)`)
+  .option("-b, --background", "launch or keep the app in the background, without raising a window")
+  .action(async (path: string | undefined, opts: { background?: boolean }) => {
+    const launched = await launchApp(opts.background ?? false);
+    await (launched ? waitForApp() : ping()).catch(appError);
+    if (path !== undefined) await run("open", { dir: resolve(path) });
+  });
+
+program
+  .command("mcp")
+  .description(
+    `Serve ${APP_NAME}'s MCP server over stdio, for agents that cannot connect to it by URL (Claude Desktop). Launches the app in the background if it is not running. Agents that speak Streamable HTTP should use ${MCP_URL} directly.`,
+  )
+  .action(() => runProxy().catch(appError));
+
+program
+  .command("context")
+  .alias("ctx")
+  .description(describe("context"))
+  .action(() => run("context", {}));
+
+program
+  .command("tool <name>")
+  .description(describe("agent_tool"))
+  .option("--args <json>", field("agent_tool", "args"), "{}")
+  .action(async (name: string, opts: { args: string }) => {
+    let args: unknown;
+    try {
+      args = JSON.parse(opts.args);
+    } catch (error) {
+      fail(`--args must be valid JSON: ${(error as Error).message}`);
+    }
+    const input = toolByName("agent_tool").input.safeParse({ name, args });
+    if (!input.success) fail(z.prettifyError(input.error));
+    const output = await call("agent_tool", input.data).catch(appError);
+    console.log(JSON.stringify(output));
+    if (!output.success) process.exitCode = 1;
+  });
+
+program
+  .command("capture")
+  .description(describe("capture"))
+  .argument("<id>", field("capture", "id"))
+  .option("-t, --times <time...>", field("capture", "times"))
+  .option("-S, --separate", field("capture", "separate"))
+  .option("--scene-time", field("capture", "sceneTime"))
+  .option("--per-sheet <n>", field("capture", "perSheet"), numeric)
+  .option("-o, --output <dir>", field("capture", "output"))
+  .action((id: string, opts: Omit<ToolInput<"capture">, "id">) =>
+    run("capture", { id, ...opts, output: opts.output && resolve(opts.output) }),
+  );
+
+program
+  .command("export")
+  .description(describe("export"))
+  .argument("<id>", field("export", "id"))
+  .argument("[output]", field("export", "path"))
+  .action((id: string, output: string | undefined) => run("export", { id, path: output && resolve(output) }));
+
+program
+  .command("check")
+  .description(`${describe("check")} Exits 1 when an error-severity issue is found.`)
+  .argument("<id>", field("check", "id"))
+  .action(async (id: string) => {
+    const output = await call("check", { id }).catch(appError);
+    console.log(JSON.stringify(output));
+    if (output.issues.some((issue) => issue.severity === "error")) process.exitCode = 1;
+  });
+
+const media = program
+  .command("media")
+  .alias("m")
+  .description(
+    "Inspect a media file by path, without adding it to the project: probe metadata, transcribe speech, grab frames, render visual previews, and analyze with multimodal models. Local files work with or without an open project; library paths need one.",
+  );
+
+media
+  .command("probe")
+  .description(describe("media_probe"))
+  .argument("<path>", field("media_probe", "path"))
+  .action((ref: string) => run("media_probe", { path: assetPath(ref) }));
+
+media
+  .command("transcribe")
+  .description(describe("media_transcribe"))
+  .argument("<path>", field("media_transcribe", "path"))
+  .option("-o, --output <path>", field("media_transcribe", "output"))
+  .action((ref: string, opts: Omit<ToolInput<"media_transcribe">, "path">) =>
+    run("media_transcribe", { path: assetPath(ref), ...opts, output: opts.output && resolve(opts.output) }),
+  );
+
+media
+  .command("grab")
+  .alias("sample")
+  .description(describe("media_grab"))
+  .argument("<path>", field("media_grab", "path"))
+  .option("-t, --times <time...>", field("media_grab", "times"))
+  .option("-c, --count <n>", field("media_grab", "count"), numeric)
+  .option("-a, --auto", field("media_grab", "auto"))
+  .option("-s, --start <time>", field("media_grab", "start"))
+  .option("-e, --end <time>", field("media_grab", "end"))
+  .option("-q, --quality <preset>", field("media_grab", "quality"))
+  .option("-S, --separate", field("media_grab", "separate"))
+  .option("--per-sheet <n>", field("media_grab", "perSheet"), numeric)
+  .option("--uncapped", field("media_grab", "uncapped"))
+  .option("-o, --output <dir>", field("media_grab", "output"))
+  .action((ref: string, opts: Omit<ToolInput<"media_grab">, "path">) =>
+    run("media_grab", { path: assetPath(ref), ...opts, output: opts.output && resolve(opts.output) }),
+  );
+
+media
+  .command("filmstrip")
+  .alias("film")
+  .description(describe("media_filmstrip"))
+  .argument("<path>", field("media_filmstrip", "path"))
+  .option("-s, --start <time>", field("media_filmstrip", "start"))
+  .option("-e, --end <time>", field("media_filmstrip", "end"))
+  .option("-x, --scale <factor>", field("media_filmstrip", "scale"), numeric)
+  .option("-o, --output <path>", field("media_filmstrip", "output"))
+  .action((ref: string, opts: Omit<ToolInput<"media_filmstrip">, "path">) =>
+    run("media_filmstrip", { path: assetPath(ref), ...opts, output: opts.output && resolve(opts.output) }),
+  );
+
+media
+  .command("waveform")
+  .alias("wave")
+  .description(describe("media_waveform"))
+  .argument("<path>", field("media_waveform", "path"))
+  .option("-s, --start <time>", field("media_waveform", "start"))
+  .option("-e, --end <time>", field("media_waveform", "end"))
+  .option("-x, --scale <factor>", field("media_waveform", "scale"), numeric)
+  .option("-o, --output <path>", field("media_waveform", "output"))
+  .action((ref: string, opts: Omit<ToolInput<"media_waveform">, "path">) =>
+    run("media_waveform", { path: assetPath(ref), ...opts, output: opts.output && resolve(opts.output) }),
+  );
+
+media
+  .command("listen")
+  .description(describe("media_listen"))
+  .argument("<path>", field("media_listen", "path"))
+  .option("-p, --prompt <str>", field("media_listen", "prompt"))
+  .option("-s, --start <time>", field("media_listen", "start"))
+  .option("-e, --end <time>", field("media_listen", "end"))
+  .action((ref: string, opts: Omit<ToolInput<"media_listen">, "path">) => run("media_listen", { path: assetPath(ref), ...opts }));
+
+program
+  .command("models")
+  .description(describe("models"))
+  .argument("[type]", field("models", "type"))
+  .action((type: ToolInput<"models">["type"]) => run("models", { type }));
+
+program
+  .command("voices")
+  .description(describe("voices"))
+  .action(() => run("voices", {}));
+
+program
+  .command("whoami")
+  .description(describe("whoami"))
+  .action(() => run("whoami", {}));
+
+program
+  .command("logs")
+  .description(describe("logs"))
+  .option("-n, --tail <n>", field("logs", "tail"), numeric)
+  .option("-l, --level <level>", field("logs", "level"))
+  .option("--since <ms>", field("logs", "since"), numeric)
+  .option("-c, --contains <text>", field("logs", "contains"))
+  .action((opts: ToolInput<"logs">) => run("logs", opts));
+
+program
+  .command("screenshot")
+  .description(describe("screenshot"))
+  .option("-o, --output <dir>", field("screenshot", "output"))
+  .action((opts: ToolInput<"screenshot">) => run("screenshot", { output: opts.output && resolve(opts.output) }));
+
+program
+  .command("report")
+  .alias("issue")
+  .description(describe("report"))
+  .argument("<title>", field("report", "title"))
+  .option("-b, --body <text>", field("report", "body"))
+  .option("-c, --commands <cmd...>", field("report", "commands"))
+  .option("--logs <n>", field("report", "logs"), numeric)
+  .action((title: string, opts: Omit<ToolInput<"report">, "title">) => run("report", { title, ...opts }));
+
+program
+  .command("fonts")
+  .description(describe("fonts"))
+  .option("-f, --family <pattern>", field("fonts", "family"))
+  .option("-w, --weights <weights...>", field("fonts", "weights"))
+  .option("-s, --style <style>", field("fonts", "style"))
+  .option("-l, --limit <n>", field("fonts", "limit"), numeric)
+  .action((opts: ToolInput<"fonts">) => run("fonts", opts));
+
+// Explicit argv convention: the packaged wrapper runs this bundle on
+// Electron in ELECTRON_RUN_AS_NODE mode, where commander would otherwise
+// detect Electron and drop the script path from argv.
+program.parseAsync(process.argv, { from: "node" }).catch((error: unknown) => {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+});

@@ -1,0 +1,29 @@
+{
+  "name": "@diffusionstudio/cli",
+  "private": true,
+  "version": "0.205.2",
+  "license": "MPL-2.0",
+  "bin": {
+    "dapi": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --platform=node --format=cjs --outfile=dist/index.js && chmod +x dist/index.js",
+    "check": "tsc --noEmit",
+    "test": "node --test --test-reporter=tap test/*.test.ts",
+    "symlink:remove": "node scripts/symlink.mjs remove",
+    "symlink:create": "npm run build && node scripts/symlink.mjs create"
+  },
+  "dependencies": {
+    "@diffusionstudio/assets": "*",
+    "@diffusionstudio/dapi": "*",
+    "@diffusionstudio/jsx": "*",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "commander": "^14.0.3",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "esbuild": "^0.28.1",
+    "typescript": "~5.9.3"
+  }
+}

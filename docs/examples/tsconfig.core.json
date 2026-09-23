@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.json",
+  "exclude": [
+    "06-three.tsx",
+    "10-typegpu.tsx",
+    "11-redraw.tsx"
+  ]
+}

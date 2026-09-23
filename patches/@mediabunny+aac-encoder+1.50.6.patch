@@ -1,0 +1,39 @@
+diff --git a/node_modules/@mediabunny/aac-encoder/dist/bundles/mediabunny-aac-encoder.mjs b/node_modules/@mediabunny/aac-encoder/dist/bundles/mediabunny-aac-encoder.mjs
+index 938b9cb..264a6f2 100644
+--- a/node_modules/@mediabunny/aac-encoder/dist/bundles/mediabunny-aac-encoder.mjs
++++ b/node_modules/@mediabunny/aac-encoder/dist/bundles/mediabunny-aac-encoder.mjs
+@@ -3424,7 +3424,7 @@ var AacEncoder = class extends CustomAudioEncoder {
+       const packet = new EncodedPacket(
+         data,
+         "key",
+-        this.nextPacketTimestampInSamples / this.sampleRate,
++        (this.config.frameyardPreservePacketTimestamps ? p.pts : this.nextPacketTimestampInSamples) / this.sampleRate,
+         p.duration / this.sampleRate
+       );
+       this.nextPacketTimestampInSamples += p.duration;
+diff --git a/node_modules/@mediabunny/aac-encoder/dist/modules/src/encoder.js b/node_modules/@mediabunny/aac-encoder/dist/modules/src/encoder.js
+index 4710479..d3d0c03 100644
+--- a/node_modules/@mediabunny/aac-encoder/dist/modules/src/encoder.js
++++ b/node_modules/@mediabunny/aac-encoder/dist/modules/src/encoder.js
+@@ -188,7 +188,7 @@ class AacEncoder extends mediabunny_1.CustomAudioEncoder {
+                 adtsFrame.set(data, header.byteLength);
+                 data = adtsFrame;
+             }
+-            const packet = new mediabunny_1.EncodedPacket(data, 'key', this.nextPacketTimestampInSamples / this.sampleRate, p.duration / this.sampleRate);
++            const packet = new mediabunny_1.EncodedPacket(data, 'key', (this.config.frameyardPreservePacketTimestamps ? p.pts : this.nextPacketTimestampInSamples) / this.sampleRate, p.duration / this.sampleRate);
+             this.nextPacketTimestampInSamples += p.duration;
+             this.onPacket(packet, this.chunkMetadata);
+             this.chunkMetadata = {};
+diff --git a/node_modules/@mediabunny/aac-encoder/src/encoder.ts b/node_modules/@mediabunny/aac-encoder/src/encoder.ts
+index 7b80e5f..d0cfc00 100644
+--- a/node_modules/@mediabunny/aac-encoder/src/encoder.ts
++++ b/node_modules/@mediabunny/aac-encoder/src/encoder.ts
+@@ -239,7 +239,7 @@ class AacEncoder extends CustomAudioEncoder {
+ 			const packet = new EncodedPacket(
+ 				data,
+ 				'key',
+-				this.nextPacketTimestampInSamples / this.sampleRate,
++				((this.config as AudioEncoderConfig & { frameyardPreservePacketTimestamps?: boolean }).frameyardPreservePacketTimestamps ? p.pts : this.nextPacketTimestampInSamples) / this.sampleRate,
+ 				p.duration / this.sampleRate,
+ 			);
+ 

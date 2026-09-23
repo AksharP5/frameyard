@@ -1,0 +1,45 @@
+{
+  "name": "frameyard",
+  "version": "0.205.2",
+  "private": true,
+  "license": "MPL-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev:desktop",
+    "dev:web_v1": "npm run dev --workspace=@diffusionstudio/web",
+    "dev:desktop": "node scripts/dev-desktop.mjs",
+    "build": "npm run build --workspace=@diffusionstudio/web",
+    "build:web_v1": "npm run build --workspace=@diffusionstudio/web",
+    "build:desktop": "npm run build --workspace=@diffusionstudio/desktop",
+    "make": "npm run make --workspace=@diffusionstudio/desktop",
+    "install:linux": "node scripts/install-linux.mjs",
+    "setup:local": "node scripts/setup-local.mjs",
+    "release": "node scripts/release.mjs",
+    "postinstall": "patch-package",
+    "lint": "npm run lint --workspaces --if-present",
+    "check": "npm run check --workspaces --if-present && tsc -p docs/examples/tsconfig.core.json --noEmit",
+    "check:examples": "tsc -p docs/examples --noEmit",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "devDependencies": {
+    "patch-package": "^8.0.1",
+    "semver": "7.8.5"
+  },
+  "overrides": {
+    "extract-zip": {
+      "yauzl": "3.3.1"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AksharP5/frameyard.git"
+  },
+  "description": "Local video and motion editing with editable layers and coding agents."
+}

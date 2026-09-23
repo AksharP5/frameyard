@@ -1,0 +1,5 @@
+{
+  "name": "native-3d",
+  "private": true,
+  "main": "index.tsx"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "motion-workspace",
+  "private": true,
+  "main": "index.tsx"
+}

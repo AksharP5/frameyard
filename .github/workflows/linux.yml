@@ -1,0 +1,77 @@
+name: Linux
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      DIFFUSION_CHROMIUM_BIN: /usr/bin/google-chrome
+      DIFFUSION_TEST_VITE_URL: http://127.0.0.1:5173
+    steps:
+      - name: Configure isolated installation
+        run: |
+          echo "XDG_DATA_HOME=$RUNNER_TEMP/frameyard/data" >> "$GITHUB_ENV"
+          echo "XDG_CONFIG_HOME=$RUNNER_TEMP/frameyard/config" >> "$GITHUB_ENV"
+          echo "XDG_CACHE_HOME=$RUNNER_TEMP/frameyard/cache" >> "$GITHUB_ENV"
+          echo "TMPDIR=$RUNNER_TEMP/frameyard/tmp" >> "$GITHUB_ENV"
+          echo "DIFFUSION_TEST_GSAP=$RUNNER_TEMP/frameyard/test-assets/node_modules/gsap/dist/gsap.min.js" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/frameyard/tmp"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Prepare clean user directories and system dependencies
+        run: |
+          mkdir -p "$XDG_DATA_HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$TMPDIR"
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libcairo2-dev libpango1.0-dev pkg-config xvfb dbus-x11 libasound2t64 libatk-bridge2.0-0 libgtk-3-0 libgbm1 libnss3
+          test -x "$DIFFUSION_CHROMIUM_BIN"
+      - uses: astral-sh/setup-uv@v6
+      - run: npm ci
+      - run: npm run check
+      - run: npm run lint
+      - run: npm run setup:local
+      - name: Install pinned test animation fixture
+        run: npm install --prefix "${{ runner.temp }}/frameyard/test-assets" gsap@3.13.0 --save-exact --no-audit --no-fund
+      - name: Run full suite with browser and local engines
+        run: bash scripts/ci/test-linux.sh
+      - name: Build and install Linux application
+        run: npm run install:linux
+      - name: Verify installed application and video export
+        run: xvfb-run -a -s '-screen 0 1920x1080x24' dbus-run-session -- bash scripts/ci/smoke-linux.sh
+      - name: Archive tested application
+        run: |
+          diff -qr "$XDG_DATA_HOME/diffusion-studio/current" apps/desktop/out/Frameyard-linux-x64
+          mkdir -p dist
+          version=$(node -p "require('./package.json').version")
+          tar -C apps/desktop/out -czf "dist/frameyard-${version}-linux-x64.tar.gz" Frameyard-linux-x64
+          cd dist
+          sha256sum *.tar.gz > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x64
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Preserve verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-verification
+          path: |
+            ${{ runner.temp }}/frameyard/test.log
+            ${{ runner.temp }}/frameyard/vite.log
+            ${{ runner.temp }}/frameyard/smoke/
+          if-no-files-found: warn
+          retention-days: 14

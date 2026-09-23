@@ -1,0 +1,37 @@
+{
+  "name": "@diffusionstudio/runtime",
+  "version": "0.1.0",
+  "description": "Headless editor runtime: koota traits, world, actions, systems, media decoding, and capture. No DOM, no solid-js.",
+  "license": "MPL-2.0",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./traits": "./src/traits/index.ts",
+    "./systems": "./src/systems/index.ts",
+    "./media": "./src/media/index.ts"
+  },
+  "scripts": {
+    "check": "tsc --noEmit"
+  },
+  "keywords": [
+    "koota",
+    "ecs",
+    "video"
+  ],
+  "dependencies": {
+    "@diffusionstudio/assets": "*",
+    "@diffusionstudio/jsx": "*",
+    "@dimforge/rapier3d-compat": "0.20.0",
+    "animejs": "^4.4.1",
+    "colord": "^2.9.3",
+    "koota": "^0.6.6",
+    "mediabunny": "^1.32.2",
+    "three": "0.186.0"
+  },
+  "devDependencies": {
+    "@types/three": "0.186.0",
+    "@webgpu/types": "^0.1.71",
+    "typescript": "~5.9.3"
+  }
+}

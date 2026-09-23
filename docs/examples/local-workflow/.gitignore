@@ -1,0 +1,5 @@
+assets/
+.diffusion/
+node_modules/
+*.mp4
+animations/hyperframes/gsap.min.js

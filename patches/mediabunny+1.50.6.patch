@@ -1,0 +1,295 @@
+diff --git a/node_modules/mediabunny/dist/bundles/mediabunny.cjs b/node_modules/mediabunny/dist/bundles/mediabunny.cjs
+index bc2639d..91ff27d 100644
+--- a/node_modules/mediabunny/dist/bundles/mediabunny.cjs
++++ b/node_modules/mediabunny/dist/bundles/mediabunny.cjs
+@@ -26151,8 +26151,8 @@ var Mediabunny = (() => {
+     // eslint-disable-next-line @typescript-eslint/no-unused-vars
+     onTrackClose(track) {
+     }
+-    validateTimestamp(track, timestampInSeconds, isKeyPacket) {
+-      if (timestampInSeconds < 0) {
++    validateTimestamp(track, timestampInSeconds, isKeyPacket, allowNegative = false) {
++      if (timestampInSeconds < 0 && !allowNegative) {
+         throw new Error(`Timestamps must be non-negative (got ${timestampInSeconds}s).`);
+       }
+       let timestampInfo = this.trackTimestampInfo.get(track);
+@@ -26894,7 +26894,7 @@ var Mediabunny = (() => {
+   };
+   var trak = (trackData, creationTime) => {
+     const trackMetadata = getTrackMetadata(trackData);
+-    const needsEditList = trackData.startTimestampOffset !== null && trackData.startTimestampOffset > 0;
++    const needsEditList = trackData.startTimestampOffset !== null && trackData.startTimestampOffset !== 0;
+     return box("trak", void 0, [
+       tkhd(trackData, creationTime),
+       needsEditList ? edts(trackData, trackData.startTimestampOffset) : null,
+@@ -26952,6 +26952,19 @@ var Mediabunny = (() => {
+     ]);
+   };
+   var edts = (trackData, offset) => {
++    if (offset < 0) {
++        const mediaTime = intoTimescale(-offset, trackData.timescale);
++        const duration = Math.max(0, intoTimescale(presentationSpan(trackData) + offset, GLOBAL_TIMESCALE));
++        const needs64Bits = mediaTime > 0x7fffffff || !isU32(duration);
++        return box('edts', undefined, [
++            fullBox('elst', needs64Bits ? 1 : 0, 0, [
++                u32(1),
++                (needs64Bits ? u64 : u32)(duration),
++                (needs64Bits ? i64 : i32)(mediaTime),
++                fixed_16_16(1),
++            ]),
++        ]);
++    }
+     const startOffset = intoTimescale(offset, GLOBAL_TIMESCALE);
+     const mediaDuration = intoTimescale(presentationSpan(trackData), GLOBAL_TIMESCALE);
+     const needs64Bits = !isU32(startOffset) || !isU32(mediaDuration);
+@@ -29270,7 +29283,7 @@ var Mediabunny = (() => {
+         this.validateTimestamp(
+           trackData.track,
+           packet.timestamp,
+-          packet.type === "key"
++          packet.type === "key", !this.isFragmented && track.source._codec === 'aac'
+         );
+         let timestamp = packet.timestamp;
+         let duration = packet.duration;
+diff --git a/node_modules/mediabunny/dist/bundles/mediabunny.mjs b/node_modules/mediabunny/dist/bundles/mediabunny.mjs
+index db72d10..d704085 100644
+--- a/node_modules/mediabunny/dist/bundles/mediabunny.mjs
++++ b/node_modules/mediabunny/dist/bundles/mediabunny.mjs
+@@ -25994,8 +25994,8 @@ var Muxer = class {
+   // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   onTrackClose(track) {
+   }
+-  validateTimestamp(track, timestampInSeconds, isKeyPacket) {
+-    if (timestampInSeconds < 0) {
++  validateTimestamp(track, timestampInSeconds, isKeyPacket, allowNegative = false) {
++    if (timestampInSeconds < 0 && !allowNegative) {
+       throw new Error(`Timestamps must be non-negative (got ${timestampInSeconds}s).`);
+     }
+     let timestampInfo = this.trackTimestampInfo.get(track);
+@@ -26737,7 +26737,7 @@ var presentationSpan = (trackData) => {
+ };
+ var trak = (trackData, creationTime) => {
+   const trackMetadata = getTrackMetadata(trackData);
+-  const needsEditList = trackData.startTimestampOffset !== null && trackData.startTimestampOffset > 0;
++  const needsEditList = trackData.startTimestampOffset !== null && trackData.startTimestampOffset !== 0;
+   return box("trak", void 0, [
+     tkhd(trackData, creationTime),
+     needsEditList ? edts(trackData, trackData.startTimestampOffset) : null,
+@@ -26795,7 +26795,20 @@ var tkhd = (trackData, creationTime) => {
+   ]);
+ };
+ var edts = (trackData, offset) => {
+-  const startOffset = intoTimescale(offset, GLOBAL_TIMESCALE);
++  if (offset < 0) {
++        const mediaTime = intoTimescale(-offset, trackData.timescale);
++        const duration = Math.max(0, intoTimescale(presentationSpan(trackData) + offset, GLOBAL_TIMESCALE));
++        const needs64Bits = mediaTime > 0x7fffffff || !isU32(duration);
++        return box('edts', undefined, [
++            fullBox('elst', needs64Bits ? 1 : 0, 0, [
++                u32(1),
++                (needs64Bits ? u64 : u32)(duration),
++                (needs64Bits ? i64 : i32)(mediaTime),
++                fixed_16_16(1),
++            ]),
++        ]);
++    }
++    const startOffset = intoTimescale(offset, GLOBAL_TIMESCALE);
+   const mediaDuration = intoTimescale(presentationSpan(trackData), GLOBAL_TIMESCALE);
+   const needs64Bits = !isU32(startOffset) || !isU32(mediaDuration);
+   const u32OrU64 = needs64Bits ? u64 : u32;
+@@ -29113,7 +29126,7 @@ var IsobmffMuxer2 = class extends Muxer {
+       this.validateTimestamp(
+         trackData.track,
+         packet.timestamp,
+-        packet.type === "key"
++        packet.type === "key", !this.isFragmented && track.source._codec === 'aac'
+       );
+       let timestamp = packet.timestamp;
+       let duration = packet.duration;
+diff --git a/node_modules/mediabunny/dist/bundles/mediabunny.node.cjs b/node_modules/mediabunny/dist/bundles/mediabunny.node.cjs
+index f6f383f..fbad07a 100644
+--- a/node_modules/mediabunny/dist/bundles/mediabunny.node.cjs
++++ b/node_modules/mediabunny/dist/bundles/mediabunny.node.cjs
+@@ -26154,8 +26154,8 @@ var Mediabunny = (() => {
+     // eslint-disable-next-line @typescript-eslint/no-unused-vars
+     onTrackClose(track) {
+     }
+-    validateTimestamp(track, timestampInSeconds, isKeyPacket) {
+-      if (timestampInSeconds < 0) {
++    validateTimestamp(track, timestampInSeconds, isKeyPacket, allowNegative = false) {
++      if (timestampInSeconds < 0 && !allowNegative) {
+         throw new Error(`Timestamps must be non-negative (got ${timestampInSeconds}s).`);
+       }
+       let timestampInfo = this.trackTimestampInfo.get(track);
+@@ -26897,7 +26897,7 @@ var Mediabunny = (() => {
+   };
+   var trak = (trackData, creationTime) => {
+     const trackMetadata = getTrackMetadata(trackData);
+-    const needsEditList = trackData.startTimestampOffset !== null && trackData.startTimestampOffset > 0;
++    const needsEditList = trackData.startTimestampOffset !== null && trackData.startTimestampOffset !== 0;
+     return box("trak", void 0, [
+       tkhd(trackData, creationTime),
+       needsEditList ? edts(trackData, trackData.startTimestampOffset) : null,
+@@ -26955,6 +26955,19 @@ var Mediabunny = (() => {
+     ]);
+   };
+   var edts = (trackData, offset) => {
++    if (offset < 0) {
++        const mediaTime = intoTimescale(-offset, trackData.timescale);
++        const duration = Math.max(0, intoTimescale(presentationSpan(trackData) + offset, GLOBAL_TIMESCALE));
++        const needs64Bits = mediaTime > 0x7fffffff || !isU32(duration);
++        return box('edts', undefined, [
++            fullBox('elst', needs64Bits ? 1 : 0, 0, [
++                u32(1),
++                (needs64Bits ? u64 : u32)(duration),
++                (needs64Bits ? i64 : i32)(mediaTime),
++                fixed_16_16(1),
++            ]),
++        ]);
++    }
+     const startOffset = intoTimescale(offset, GLOBAL_TIMESCALE);
+     const mediaDuration = intoTimescale(presentationSpan(trackData), GLOBAL_TIMESCALE);
+     const needs64Bits = !isU32(startOffset) || !isU32(mediaDuration);
+@@ -29272,7 +29285,7 @@ var Mediabunny = (() => {
+         this.validateTimestamp(
+           trackData.track,
+           packet.timestamp,
+-          packet.type === "key"
++          packet.type === "key", !this.isFragmented && track.source._codec === 'aac'
+         );
+         let timestamp = packet.timestamp;
+         let duration = packet.duration;
+diff --git a/node_modules/mediabunny/dist/modules/src/isobmff/isobmff-boxes.js b/node_modules/mediabunny/dist/modules/src/isobmff/isobmff-boxes.js
+index 5b0ae37..1229a4b 100644
+--- a/node_modules/mediabunny/dist/modules/src/isobmff/isobmff-boxes.js
++++ b/node_modules/mediabunny/dist/modules/src/isobmff/isobmff-boxes.js
+@@ -340,7 +340,7 @@ const presentationSpan = (trackData) => {
+  */
+ export const trak = (trackData, creationTime) => {
+     const trackMetadata = getTrackMetadata(trackData);
+-    const needsEditList = trackData.startTimestampOffset !== null && trackData.startTimestampOffset > 0;
++    const needsEditList = trackData.startTimestampOffset !== null && trackData.startTimestampOffset !== 0;
+     return box('trak', undefined, [
+         tkhd(trackData, creationTime),
+         needsEditList ? edts(trackData, trackData.startTimestampOffset) : null,
+@@ -390,6 +390,19 @@ export const tkhd = (trackData, creationTime) => {
+ };
+ /** Edit Box: Specifies edits to the track's media. */
+ export const edts = (trackData, offset) => {
++    if (offset < 0) {
++        const mediaTime = intoTimescale(-offset, trackData.timescale);
++        const duration = Math.max(0, intoTimescale(presentationSpan(trackData) + offset, GLOBAL_TIMESCALE));
++        const needs64Bits = mediaTime > 0x7fffffff || !isU32(duration);
++        return box('edts', undefined, [
++            fullBox('elst', needs64Bits ? 1 : 0, 0, [
++                u32(1),
++                (needs64Bits ? u64 : u32)(duration),
++                (needs64Bits ? i64 : i32)(mediaTime),
++                fixed_16_16(1),
++            ]),
++        ]);
++    }
+     const startOffset = intoTimescale(offset, GLOBAL_TIMESCALE);
+     const mediaDuration = intoTimescale(presentationSpan(trackData), GLOBAL_TIMESCALE);
+     const needs64Bits = !isU32(startOffset) || !isU32(mediaDuration);
+diff --git a/node_modules/mediabunny/dist/modules/src/isobmff/isobmff-muxer.js b/node_modules/mediabunny/dist/modules/src/isobmff/isobmff-muxer.js
+index a55e563..f74ea3e 100644
+--- a/node_modules/mediabunny/dist/modules/src/isobmff/isobmff-muxer.js
++++ b/node_modules/mediabunny/dist/modules/src/isobmff/isobmff-muxer.js
+@@ -402,7 +402,7 @@ export class IsobmffMuxer extends Muxer {
+                     : MAX_ADTS_FRAME_HEADER_SIZE;
+                 packetData = packetData.subarray(headerLength);
+             }
+-            this.validateTimestamp(trackData.track, packet.timestamp, packet.type === 'key');
++            this.validateTimestamp(trackData.track, packet.timestamp, packet.type === 'key', !this.isFragmented && track.source._codec === 'aac');
+             let timestamp = packet.timestamp;
+             let duration = packet.duration;
+             if (trackData.info.requiresPcmTransformation) {
+diff --git a/node_modules/mediabunny/dist/modules/src/muxer.d.ts b/node_modules/mediabunny/dist/modules/src/muxer.d.ts
+index 67182c9..af03875 100644
+--- a/node_modules/mediabunny/dist/modules/src/muxer.d.ts
++++ b/node_modules/mediabunny/dist/modules/src/muxer.d.ts
+@@ -21,6 +21,6 @@ export declare abstract class Muxer {
+     abstract finalize(): Promise<void>;
+     onTrackClose(track: OutputTrack): void;
+     private trackTimestampInfo;
+-    protected validateTimestamp(track: OutputTrack, timestampInSeconds: number, isKeyPacket: boolean): void;
++    protected validateTimestamp(track: OutputTrack, timestampInSeconds: number, isKeyPacket: boolean, allowNegative?: boolean): void;
+ }
+ //# sourceMappingURL=muxer.d.ts.map
+\ No newline at end of file
+diff --git a/node_modules/mediabunny/dist/modules/src/muxer.js b/node_modules/mediabunny/dist/modules/src/muxer.js
+index 992a85d..58b7003 100644
+--- a/node_modules/mediabunny/dist/modules/src/muxer.js
++++ b/node_modules/mediabunny/dist/modules/src/muxer.js
+@@ -14,8 +14,8 @@ export class Muxer {
+     }
+     // eslint-disable-next-line @typescript-eslint/no-unused-vars
+     onTrackClose(track) { }
+-    validateTimestamp(track, timestampInSeconds, isKeyPacket) {
+-        if (timestampInSeconds < 0) {
++    validateTimestamp(track, timestampInSeconds, isKeyPacket, allowNegative = false) {
++        if (timestampInSeconds < 0 && !allowNegative) {
+             throw new Error(`Timestamps must be non-negative (got ${timestampInSeconds}s).`);
+         }
+         let timestampInfo = this.trackTimestampInfo.get(track);
+diff --git a/node_modules/mediabunny/src/isobmff/isobmff-boxes.ts b/node_modules/mediabunny/src/isobmff/isobmff-boxes.ts
+index e070e6e..d7b5896 100644
+--- a/node_modules/mediabunny/src/isobmff/isobmff-boxes.ts
++++ b/node_modules/mediabunny/src/isobmff/isobmff-boxes.ts
+@@ -453,7 +453,7 @@ const presentationSpan = (trackData: IsobmffTrackData) => {
+  */
+ export const trak = (trackData: IsobmffTrackData, creationTime: number) => {
+ 	const trackMetadata = getTrackMetadata(trackData);
+-	const needsEditList = trackData.startTimestampOffset !== null && trackData.startTimestampOffset > 0;
++	const needsEditList = trackData.startTimestampOffset !== null && trackData.startTimestampOffset !== 0;
+ 
+ 	return box('trak', undefined, [
+ 		tkhd(trackData, creationTime),
+@@ -512,6 +512,19 @@ export const tkhd = (
+ 
+ /** Edit Box: Specifies edits to the track's media. */
+ export const edts = (trackData: IsobmffTrackData, offset: number) => {
++	if (offset < 0) {
++		const mediaTime = intoTimescale(-offset, trackData.timescale);
++		const duration = Math.max(0, intoTimescale(presentationSpan(trackData) + offset, GLOBAL_TIMESCALE));
++		const needs64Bits = mediaTime > 0x7fffffff || !isU32(duration);
++		return box('edts', undefined, [
++			fullBox('elst', needs64Bits ? 1 : 0, 0, [
++				u32(1),
++				(needs64Bits ? u64 : u32)(duration),
++				(needs64Bits ? i64 : i32)(mediaTime),
++				fixed_16_16(1),
++			]),
++		]);
++	}
+ 	const startOffset = intoTimescale(offset, GLOBAL_TIMESCALE);
+ 	const mediaDuration = intoTimescale(presentationSpan(trackData), GLOBAL_TIMESCALE);
+ 
+diff --git a/node_modules/mediabunny/src/isobmff/isobmff-muxer.ts b/node_modules/mediabunny/src/isobmff/isobmff-muxer.ts
+index c9baf86..314717d 100644
+--- a/node_modules/mediabunny/src/isobmff/isobmff-muxer.ts
++++ b/node_modules/mediabunny/src/isobmff/isobmff-muxer.ts
+@@ -642,6 +642,7 @@ export class IsobmffMuxer extends Muxer {
+ 				trackData.track,
+ 				packet.timestamp,
+ 				packet.type === 'key',
++				!this.isFragmented && track.source._codec === 'aac',
+ 			);
+ 
+ 			let timestamp = packet.timestamp;
+diff --git a/node_modules/mediabunny/src/muxer.ts b/node_modules/mediabunny/src/muxer.ts
+index b945770..3f43990 100644
+--- a/node_modules/mediabunny/src/muxer.ts
++++ b/node_modules/mediabunny/src/muxer.ts
+@@ -42,8 +42,8 @@ export abstract class Muxer {
+ 		maxTimestampBeforeLastKeyPacket: number | null;
+ 	}>();
+ 
+-	protected validateTimestamp(track: OutputTrack, timestampInSeconds: number, isKeyPacket: boolean) {
+-		if (timestampInSeconds < 0) {
++	protected validateTimestamp(track: OutputTrack, timestampInSeconds: number, isKeyPacket: boolean, allowNegative = false) {
++		if (timestampInSeconds < 0 && !allowNegative) {
+ 			throw new Error(`Timestamps must be non-negative (got ${timestampInSeconds}s).`);
+ 		}
+ 

@@ -1,0 +1,21 @@
+{
+  "name": "local-workflow",
+  "private": true,
+  "main": "index.tsx",
+  "diffusion": {
+    "animations": {
+      "diagram": {
+        "engine": "manim",
+        "source": "animations/manim",
+        "entry": "scene.py",
+        "scene": "Diagram",
+        "output": "assets/diagram.mp4"
+      },
+      "title": {
+        "engine": "hyperframes",
+        "source": "animations/hyperframes",
+        "output": "assets/title.mp4"
+      }
+    }
+  }
+}
