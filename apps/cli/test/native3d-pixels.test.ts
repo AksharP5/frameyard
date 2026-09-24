@@ -109,6 +109,57 @@ test('native 3D pixels preserve depth, editable paints, focus and volume occlusi
     assert.ok(result.authored.old[0]! < 100 && result.authored.next[0]! > 150);
     assert.ok(result.animated.old[0]! < 100 && result.animated.next[0]! > 150);
   });
+  await t.test('unchanged 3D solid paint avoids texture uploads while edits and live fills redraw', async () => {
+    const result = await page.evaluate(async ({ runtimeUrl, reconcilerUrl }: { runtimeUrl: string; reconcilerUrl: string }) => {
+      const r = await import(runtimeUrl) as typeof import('../../../packages/runtime/src/index.ts');
+      const d = await import(reconcilerUrl) as typeof import('../../../packages/reconciler/src/index.ts');
+      const originalImage = WebGL2RenderingContext.prototype.texImage2D;
+      const originalSubImage = WebGL2RenderingContext.prototype.texSubImage2D;
+      let uploads = 0;
+      WebGL2RenderingContext.prototype.texImage2D = function (...args) { uploads++; return originalImage.apply(this, args); };
+      WebGL2RenderingContext.prototype.texSubImage2D = function (...args) { uploads++; return originalSubImage.apply(this, args); };
+      const world = r.createRuntimeWorld('native-3d-paint-cache'), document = d.createRuntimeDocument(world);
+      const canvas = new OffscreenCanvas(320, 200), ctx = canvas.getContext('2d')!;
+      try {
+        r.resetCamera(world);
+        world.set(r.Mode, { value: 'offline-video' });
+        world.set(r.RenderSurface, { canvas, ctx, resolution: 1 });
+        d.withDocument(document, () => d.insert(document.stage, d.renderAuthored({ tag: 'scene', props: { width: 320, height: 200, active: true, end: 2 }, children: [
+          { tag: 'scene3d', props: { width: 320, height: 200, end: 2 }, children: [
+            { tag: 'rect', props: { name: 'paint', x: 90, y: 60, width: 140, height: 80, fill: '#ff2200', end: 2 }, children: [] },
+          ] },
+        ] })));
+        const scene = r.getActiveEntity(world)!;
+        const paint = world.query(r.Geometry).find(entity => entity.get(r.Name)?.value === 'paint')!;
+        const sample = () => {
+          r.setPlayhead(world, scene, 0); r.playbackSystem(world); r.motionSystem(world); r.transformSystem(world); r.renderSystem(world);
+          return { uploads, pixel: Array.from(ctx.getImageData(160, 100, 1, 1).data) };
+        };
+        const first = sample(), stable = sample();
+        document.setProperty(paint.get(r.Host)!, 'fill', '#0066ff');
+        const edited = sample();
+        document.setProperty(paint.get(r.Host)!, 'cornerRadius', 12);
+        const rounded = sample();
+        document.setProperty(paint.get(r.Host)!, 'cornerRadius', 0);
+        const square = sample(), squareStable = sample();
+        paint.add(r.Generating);
+        const generating = sample(), generatingAgain = sample();
+        return { first, stable, edited, rounded, square, squareStable, generating, generatingAgain };
+      } finally {
+        document.dispose(); world.destroy();
+        WebGL2RenderingContext.prototype.texImage2D = originalImage;
+        WebGL2RenderingContext.prototype.texSubImage2D = originalSubImage;
+      }
+    }, { runtimeUrl, reconcilerUrl });
+    assert.equal(result.stable.uploads, result.first.uploads, 'stable solid paint stays on the GPU');
+    assert.ok(result.first.pixel[0]! > 200 && result.edited.pixel[2]! > 200, 'the paint edit changes visible pixels');
+    assert.ok(result.edited.uploads > result.stable.uploads);
+    assert.ok(result.rounded.uploads > result.edited.uploads);
+    assert.ok(result.square.uploads > result.rounded.uploads);
+    assert.equal(result.squareStable.uploads, result.square.uploads);
+    assert.ok(result.generating.uploads > result.squareStable.uploads);
+    assert.ok(result.generatingAgain.uploads > result.generating.uploads, 'live fills keep repainting');
+  });
   await t.test('mesh retains editable gradient paint', async () => {
     const pixels = await render([node('mesh', { shape: 'plane', x: 60, y: 50, width: 200, height: 100, lit: false }, [
       node('linearGradientPaint', { x1: 0, y1: .5, x2: 1, y2: .5 }, [node('colorStop', { offset: 0, color: '#ff0000' }), node('colorStop', { offset: 1, color: '#0000ff' })]),

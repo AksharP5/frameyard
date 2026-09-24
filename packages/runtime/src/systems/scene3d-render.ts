@@ -3,8 +3,8 @@ import { validatePointCloudGeometry } from '@diffusionstudio/jsx';
 import type { Entity, World } from 'koota';
 import { EffectType, GeometryType } from '../constants';
 import {
-  Cache, ChildOf, Color, Computed, Culled, Effect, Geometry, Hidden, HitRegions, Host, Interactive, IsMask, LightSource,
-  Mode, Playback, RenderSurface, Root, Scene3D, SpatialGeometry, SpatialMaterial, SpatialParameters, Stage, StrokeStyle,
+  Cache, ChildOf, ClipsContent, Color, Computed, Culled, Effect, Generating, Geometry, Hidden, HitRegions, Host, Interactive, IsMask, LightSource,
+  MixedCornerRadius, Mode, Paint, Playback, RenderSurface, Root, Scene3D, SourceError, SpatialGeometry, SpatialMaterial, SpatialParameters, Stage, StrokeStyle,
 } from '../traits';
 import { getParentEntity } from '../queries/hierarchy';
 import { sceneCamera, spatialNode } from './spatial';
@@ -22,7 +22,7 @@ type DrawVisual = (entity: Entity, projected?: ProjectedVisual) => void;
 type Entry = {
   object: THREE.Object3D; key: string; source?: OffscreenCanvas; texture?: THREE.CanvasTexture<OffscreenCanvas>;
   arrays?: readonly (readonly number[] | undefined)[]; path?: string;
-  width?: number; height?: number; padding?: number;
+  width?: number; height?: number; padding?: number; paintKey?: string;
 };
 type SceneRenderer = {
   canvas: OffscreenCanvas; renderer: THREE.WebGLRenderer; scene: THREE.Scene; camera: THREE.PerspectiveCamera;
@@ -220,12 +220,27 @@ function paintTexture(world: World, entity: Entity, entry: Entry, requestedResol
   const textureWidth = Math.max(1, Math.ceil((width + padding * 2) * resolution));
   const textureHeight = Math.max(1, Math.ceil((height + padding * 2) * resolution));
   const source = entry.source!;
+  let paintKey: string | undefined;
+  if (!projected && entity.get(Geometry)?.value === GeometryType.RECT && entity.has(Color)
+    && !entity.has(Paint) && !entity.has(Generating) && !entity.has(SourceError)
+    && c.blur === 0 && c.cornerRadius === 0 && !entity.has(MixedCornerRadius)
+    && !strokes.length && !shadows.length && !(entity.get(Cache)?.fills.length)
+    && !(entity.get(Cache)?.effects.length)) {
+    let simple = true;
+    for (let owner: Entity | null = entity; owner && !owner.has(Scene3D); owner = getParentEntity(owner)) {
+      if (owner.has(ClipsContent) || owner.get(Cache)?.masks.length) { simple = false; break; }
+    }
+    if (simple) paintKey = JSON.stringify([width, height, padding, resolution, textureWidth, textureHeight, c.color]);
+  }
+  if (paintKey && entry.paintKey === paintKey && source.width === textureWidth && source.height === textureHeight) return;
+  entry.paintKey = undefined;
   if (source.width !== textureWidth || source.height !== textureHeight) { source.width = textureWidth; source.height = textureHeight; }
   const ctx = source.getContext('2d')!;
   ctx.reset(); ctx.scale(resolution, resolution); ctx.clearRect(0, 0, source.width / resolution, source.height / resolution); ctx.translate(padding, padding);
   world.set(RenderSurface, { canvas: source, ctx, resolution });
   try { draw(entity, projected); } finally { world.set(RenderSurface, surface); }
   entry.texture!.needsUpdate = true;
+  entry.paintKey = paintKey;
   if (!meshPaint && (entry.width !== width || entry.height !== height || entry.padding !== padding)) {
     const mesh = entry.object as THREE.Mesh;
     mesh.geometry.dispose(); mesh.geometry = planeGeometry(width + padding * 2, height + padding * 2, -padding, -padding);
