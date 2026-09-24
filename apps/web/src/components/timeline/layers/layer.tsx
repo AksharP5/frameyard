@@ -10,17 +10,20 @@ import { KeyframeLayer } from './keyframe';
 import { NodeLayer } from './node';
 import { SubItemLayer } from './sub-item';
 
-import type { Component } from 'solid-js';
+import type { Accessor, Component } from 'solid-js';
 import type { TimelineNode, TimelineNodeKind } from '@diffusionstudio/runtime';
 
 type LayerProps = {
   layer: TimelineNode;
+  now: Accessor<number>;
   depth?: number;
   ancestorSelected?: boolean;
 }
 
 export type LayerRowProps = {
   layer: TimelineNode;
+  now: Accessor<number>;
+  selected: Accessor<boolean>;
   depth: number;
   expanded: boolean;
   ancestorSelected: boolean;
@@ -46,6 +49,8 @@ export function Layer(props: LayerProps) {
       <Dynamic
         component={LAYER_ROWS[props.layer.kind]}
         layer={props.layer}
+        now={props.now}
+        selected={selected}
         depth={depth()}
         expanded={props.layer.expanded}
         ancestorSelected={ancestorSelected()}
@@ -54,6 +59,7 @@ export function Layer(props: LayerProps) {
         {(child) => (
           <Layer
             layer={child()}
+            now={props.now}
             depth={depth() + 1}
             ancestorSelected={ancestorSelected() || selected()}
           />

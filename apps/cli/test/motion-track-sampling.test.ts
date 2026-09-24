@@ -8,7 +8,8 @@ const bundle = await build({
   stdin: {
     contents: `
       export { createWorld } from 'koota';
-      export { Geometry, Computed, Cache, Keyframe, KeyframeTrack, Paint, Color, ChildOf, Effect } from './traits';
+      export { Geometry, Computed, Cache, Keyframe, KeyframeTrack, Paint, Color, ChildOf, Effect, Animation, Opacity, Offset } from './traits';
+      export { AnimationType } from './constants';
       export { createRuntimeWorld } from './world/create-world';
       export { motionSystem } from './systems/motion';
     `,
@@ -19,12 +20,13 @@ const bundle = await build({
 });
 const module = { exports: {} as
   Pick<typeof import('koota'), 'createWorld'>
-  & Pick<typeof import('../../../packages/runtime/src/traits'), 'Geometry' | 'Computed' | 'Cache' | 'Keyframe' | 'KeyframeTrack' | 'Paint' | 'Color' | 'ChildOf' | 'Effect'>
+  & Pick<typeof import('../../../packages/runtime/src/traits'), 'Geometry' | 'Computed' | 'Cache' | 'Keyframe' | 'KeyframeTrack' | 'Paint' | 'Color' | 'ChildOf' | 'Effect' | 'Animation' | 'Opacity' | 'Offset'>
+  & Pick<typeof import('../../../packages/runtime/src/constants'), 'AnimationType'>
   & Pick<typeof import('../../../packages/runtime/src/world/create-world'), 'createRuntimeWorld'>
   & Pick<typeof import('../../../packages/runtime/src/systems/motion'), 'motionSystem'>
 };
 runInThisContext(`(function(module,exports){"use strict";${bundle.outputFiles[0].text}\n})`)(module, module.exports);
-const { createWorld, Geometry, Computed, Cache, Keyframe, KeyframeTrack, motionSystem, createRuntimeWorld, Paint, Color, ChildOf, Effect } = module.exports;
+const { createWorld, Geometry, Computed, Cache, Keyframe, KeyframeTrack, motionSystem, createRuntimeWorld, Paint, Color, ChildOf, Effect, Animation, AnimationType, Opacity, Offset } = module.exports;
 
 function fixture(frames: { time: number; value: number; easing?: string }[]) {
   const world = createWorld();
@@ -75,6 +77,43 @@ test('sampling preserves endpoints, duplicate timestamps and outgoing easing', (
     f.keyframes[2].set(Keyframe, { value: 70 });
     assert.equal(f.sample(12), 70, 'sampling observes edited values without a stale result cache');
   } finally { f.world.destroy(); }
+});
+
+test('an emptied keyframe track restores its authored value', () => {
+  const f = fixture([{ time: 0, value: 40 }]);
+  try {
+    assert.equal(f.sample(5), 40);
+    f.track.set(Cache, { keyframes: [] });
+    assert.equal(f.sample(5), 0);
+  } finally { f.world.destroy(); }
+});
+
+test('preset animation restores authored values after a seek and an edit', () => {
+  const world = createRuntimeWorld('preset-reset');
+  try {
+    const node = world.spawn(Geometry, Computed({ visibility: 1, start: 0, end: 10, origin: 0 }), Opacity({ value: 0.6 }), Offset({ x: 12, y: 4 }), Cache);
+    const fade = world.spawn(Animation({ type: AnimationType.FADE, duration: 3 }), ChildOf(node));
+    const sample = (frame: number) => {
+      node.set(Computed, { localTime: frame });
+      motionSystem(world);
+      return node.get(Computed)!;
+    };
+    assert.equal(sample(0).opacity, 0);
+    assert.equal(sample(4).opacity, 0.6);
+    node.set(Opacity, { value: 0.4 });
+    assert.equal(sample(4).opacity, 0.4);
+    assert.equal(sample(0).opacity, 0);
+    fade.destroy();
+
+    const slide = world.spawn(Animation({ type: AnimationType.SLIDE_LEFT, duration: 3 }), ChildOf(node));
+    assert.equal(sample(0).offsetX, 100);
+    node.set(Offset, { x: 24 });
+    assert.equal(sample(4).offsetX, 24);
+    assert.equal(sample(4).offsetY, 4);
+    assert.equal(sample(4).opacity, 0.4);
+    slide.destroy();
+    assert.equal(sample(4).offsetX, 24);
+  } finally { world.destroy(); }
 });
 
 

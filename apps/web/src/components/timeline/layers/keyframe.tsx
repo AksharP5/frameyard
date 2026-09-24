@@ -11,10 +11,10 @@ import {
   Hovering,
   Keyframe as KeyframeTrait,
   KeyframeTrack,
-  Selected,
   findClosestParentGeometry,
   getActiveEntity,
   setPlayhead,
+  store,
 } from '@diffusionstudio/runtime';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/ui/icon';
@@ -29,12 +29,17 @@ import type { Entity } from 'koota';
 import type { PropertyPath } from '@diffusionstudio/runtime';
 import type { LayerRowProps } from './layer';
 
+const EMPTY_FRAMES: number[] = [];
+
 /**
  * A row for one animated property, with a way to step between its keyframes
  * and to put one where the playhead is.
  */
 export function KeyframeLayer(props: LayerRowProps) {
   const world = useWorld();
+  const cache = store(world, Cache);
+  const keyframe = store(world, KeyframeTrait);
+  const computed = store(world, Computed);
 
   const entity = () => props.layer.entity;
 
@@ -44,7 +49,7 @@ export function KeyframeLayer(props: LayerRowProps) {
   const target = () => track()?.target ?? null;
 
   const hovering = useTag(entity, Hovering);
-  const selected = useTag(entity, Selected);
+  const selected = props.selected;
 
   /**
    * The track's keyframes as scene frames, in order. They are authored in the
@@ -52,28 +57,39 @@ export function KeyframeLayer(props: LayerRowProps) {
    * speed — so each is put back on the scene's the way `getNodeLocalFrame`
    * takes them off it.
    */
-  const frames = useDerived(
-    () => {
-      const clip = findClosestParentGeometry(entity());
-      const computed = clip?.get(Computed);
-      if (!computed) return [];
+  let lastKeyframes: Entity[] | undefined;
+  let lastOrigin = 0;
+  let lastRate = 1;
+  let projectedFrames: number[] = [];
+  const frames = useDerived(() => {
+    const clip = findClosestParentGeometry(entity());
+    if (!clip?.has(Computed)) return EMPTY_FRAMES;
 
-      const rate = computed.playbackRate || 1;
+    const clipId = clip.id();
+    const origin = computed.origin[clipId] ?? 0;
+    const rate = computed.playbackRate[clipId] || 1;
+    const keyframes = cache.keyframes[entity().id()];
+    if (keyframes === lastKeyframes && origin === lastOrigin && rate === lastRate) return projectedFrames;
 
-      return (entity().get(Cache)?.keyframes ?? [])
-        .map((keyframe) => computed.origin + (keyframe.get(KeyframeTrait)?.time ?? 0) / rate)
-        .sort((a, b) => a - b);
-    },
-    (prev, next) => prev.length === next.length && prev.every((frame, i) => frame === next[i]),
-  );
-
-  const now = useDerived(() => {
-    const scene = getActiveEntity(world);
-    return scene === null ? 0 : (scene.get(Computed)?.localTime ?? 0);
+    lastKeyframes = keyframes;
+    lastOrigin = origin;
+    lastRate = rate;
+    projectedFrames = (keyframes ?? [])
+      .map((item) => origin + (keyframe.time[item.id()] ?? 0) / rate)
+      .sort((a, b) => a - b);
+    return projectedFrames;
   });
 
-  const previous = createMemo(() => [...frames()].reverse().find((frame) => frame < now()));
-  const next = createMemo(() => frames().find((frame) => frame > now()));
+  const neighbors = createMemo(() => {
+    const current = props.now();
+    let previous: number | undefined;
+    let next: number | undefined;
+    for (const frame of frames()) {
+      if (frame < current) previous = frame;
+      else if (frame > current) { next = frame; break; }
+    }
+    return { previous, next };
+  });
 
   const goTo = (frame: number | undefined) => {
     const scene = getActiveEntity(world);
@@ -117,8 +133,8 @@ export function KeyframeLayer(props: LayerRowProps) {
             variant="ghost"
             size="icon"
             aria-label="Previous keyframe"
-            disabled={previous() === undefined}
-            onClick={() => goTo(previous())}
+            disabled={neighbors().previous === undefined}
+            onClick={() => goTo(neighbors().previous)}
           >
             <Icon name="caret-left" class="size-6" />
           </TooltipTrigger>
@@ -135,8 +151,8 @@ export function KeyframeLayer(props: LayerRowProps) {
             variant="ghost"
             size="icon"
             aria-label="Next keyframe"
-            disabled={next() === undefined}
-            onClick={() => goTo(next())}
+            disabled={neighbors().next === undefined}
+            onClick={() => goTo(neighbors().next)}
           >
             <Icon name="caret-right" class="size-6" />
           </TooltipTrigger>

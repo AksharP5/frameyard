@@ -285,7 +285,7 @@ export function Layers(props: { showTransport?: boolean } = {}) {
           >
             <LayerContextProvider>
               <Index each={layers()}>
-                {(layer) => <Layer layer={layer()} />}
+                {(layer) => <Layer layer={layer()} now={now} />}
               </Index>
               <DropIndicator />
             </LayerContextProvider>
