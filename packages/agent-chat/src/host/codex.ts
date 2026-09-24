@@ -180,9 +180,10 @@ class CodexSession implements HarnessSession {
     if (!resumeId) return start();
     try {
       const id = threadIdOf(await peer.request("thread/resume", { threadId: resumeId, ...CodexSession.threadParams(options, policy, options.model) }));
-      if (id) return id;
+      if (!id) throw new Error("Codex did not return a resumed thread id");
+      return id;
     } catch (error) {
-      if (!(error instanceof RpcError) && !/not found|no such|unknown thread/i.test((error as Error)?.message ?? "")) throw error;
+      if (!/\b(?:no rollout found for thread id|thread not found|no such thread|unknown thread)\b/i.test((error as Error)?.message ?? "")) throw error;
     }
     options.emit({
       type: "item.completed",
