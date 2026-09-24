@@ -88,6 +88,35 @@ test('an emptied keyframe track restores its authored value', () => {
   } finally { f.world.destroy(); }
 });
 
+test('changing a track property restores the property it previously animated', () => {
+  const world = createRuntimeWorld('retarget-track');
+  try {
+    const node = world.spawn(Geometry, Computed({ visibility: 1, localTime: 5 }), Cache);
+    const frame = world.spawn(Keyframe({ time: 0, value: 40 }));
+    const track = world.spawn(KeyframeTrack({ property: 'position.x', target: node }), Cache({ keyframes: [frame] }));
+    node.set(Cache, { keyframeTracks: [track] });
+    motionSystem(world);
+    assert.equal(node.get(Computed)!.positionX, 40);
+    track.set(KeyframeTrack, { property: 'position.y' });
+    motionSystem(world);
+    assert.equal(node.get(Computed)!.positionX, 0);
+    assert.equal(node.get(Computed)!.positionY, 40);
+  } finally { world.destroy(); }
+});
+
+test('changing a preset type restores fields used by the previous type', () => {
+  const world = createRuntimeWorld('change-preset-type');
+  try {
+    const node = world.spawn(Geometry, Computed({ visibility: 1, localTime: 0, start: 0, end: 10, origin: 0 }), Opacity({ value: .6 }), Cache);
+    const animation = world.spawn(Animation({ type: AnimationType.FADE, duration: 5 }), ChildOf(node));
+    motionSystem(world);
+    assert.equal(node.get(Computed)!.opacity, 0);
+    animation.set(Animation, { type: AnimationType.GROW });
+    motionSystem(world);
+    assert.equal(node.get(Computed)!.opacity, .6);
+  } finally { world.destroy(); }
+});
+
 test('preset animation restores authored values after a seek and an edit', () => {
   const world = createRuntimeWorld('preset-reset');
   try {
