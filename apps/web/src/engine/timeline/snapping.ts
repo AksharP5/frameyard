@@ -100,9 +100,20 @@ export function findSnapFrame(world: World, resolution: number, frame: number): 
 
 export function nearestSnap(frames: number[], edges: ReadonlySet<number> | readonly number[], resolution: number): { delta: number; frame: number } | null {
 	let best: { delta: number; frame: number; distance: number } | null = null;
+	const sortedEdges = [...edges].sort((a, b) => a - b);
 
 	for (const frame of frames) {
-		for (const edge of edges) {
+		// Only the edges on either side of a target can be its nearest.
+		let low = 0;
+		let high = sortedEdges.length;
+		while (low < high) {
+			const middle = (low + high) >>> 1;
+			if (sortedEdges[middle]! < frame) low = middle + 1;
+			else high = middle;
+		}
+
+		for (let i = Math.max(0, low - 1); i <= Math.min(low, sortedEdges.length - 1); i++) {
+			const edge = sortedEdges[i]!;
 			const delta = edge - frame;
 			const distance = Math.abs(framesToPixels(delta, resolution));
 			if (distance >= SNAP_DISTANCE) continue;

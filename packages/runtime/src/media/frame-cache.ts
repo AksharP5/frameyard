@@ -11,6 +11,7 @@ type FrameTile = {
   tileIndex: number;
   frameIndex: number;
   endFrameIndex: number;
+  revision: number;
 }
 
 type Frame = VideoFrame | ImageBitmap;
@@ -33,6 +34,7 @@ export class FrameCache {
   private tileHeight: number = 0;
   private columns: number = 0;
   private tiles: FrameTile[];
+  private nextRevision = 0;
 
   public rotation: number = 0;
   public leftFrameIndex: number;
@@ -118,7 +120,7 @@ export class FrameCache {
       tileIndex++;
     }
 
-    this.tiles.push({ tileIndex, frameIndex, endFrameIndex });
+    this.tiles.push({ tileIndex, frameIndex, endFrameIndex, revision: ++this.nextRevision });
 
     const ctx = this.atlasCtx;
     const x = (tileIndex % this.columns) * this.tileWidth;
@@ -191,7 +193,7 @@ export class FrameCache {
     const x = (tile.tileIndex % this.columns) * this.tileWidth;
     const y = Math.floor(tile.tileIndex / this.columns) * this.tileHeight;
 
-    return { x, y, width: this.tileWidth, height: this.tileHeight };
+    return { x, y, width: this.tileWidth, height: this.tileHeight, revision: tile.revision };
   }
 
   public dispose() {

@@ -68,6 +68,20 @@ export function renderKeyframeTrack(
 	const times = store(world, Keyframe).time;
 	const first = times[keyframes[0]!.id()] ?? 0;
 	const last = times[keyframes[keyframes.length - 1]!.id()] ?? 0;
+	let firstVisible = 0;
+	let lastVisibleTime = Infinity;
+	if (rate > 0) {
+		// The cache is sorted by time. Skip keyframes outside the viewport,
+		// leaving a pixel of slack for the rounded coordinate and hitbox.
+		const firstVisibleTime = ((viewportLeft - HITBOX_HALF - 1) / resolution - computed.origin) * rate;
+		lastVisibleTime = ((viewportRight + HITBOX_HALF + 1) / resolution - computed.origin) * rate;
+		let high = keyframes.length;
+		while (firstVisible < high) {
+			const middle = (firstVisible + high) >>> 1;
+			if ((times[keyframes[middle]!.id()] ?? 0) < firstVisibleTime) firstVisible = middle + 1;
+			else high = middle;
+		}
+	}
 
 	ctx.save();
 	ctx.setTransform(transform);
@@ -82,8 +96,10 @@ export function renderKeyframeTrack(
 
 	pointer.scope(String(track.id()));
 
-	for (const keyframe of keyframes) {
+	for (let i = firstVisible; i < keyframes.length; i++) {
+		const keyframe = keyframes[i]!;
 		const time = times[keyframe.id()] ?? 0;
+		if (time > lastVisibleTime) break;
 		const x = framesToPixels(computed.origin + time / rate, resolution);
 
 		if (x + HITBOX_HALF < viewportLeft || x - HITBOX_HALF > viewportRight) continue;

@@ -26,8 +26,17 @@ const module = { exports: {} as
 runInThisContext(`(function(module,exports,AudioContext){"use strict";${built.outputFiles[0].text}\n})`)(module, module.exports, class AudioContext {});
 const { createWorld, AudioEngine, Computed, Volume, resolveAudioBus, Playback, Workarea, FrameRate, setPlayhead, togglePlayback, playbackSystem, AudioPlayback, AudioDecoderHandle, AssetId, Audio, Group, Geometry, ChildOf, Root, Mode, Time, Soloed, Muted } = module.exports;
 
+class GainParam {
+  private current = 1;
+  writes = 0;
+  get value() { return this.current; }
+  set value(value: number) { this.current = Math.fround(value); this.writes++; }
+}
+
+const linearGain = (db: number) => Math.fround(Math.pow(10, db / 20));
+
 class Gain {
-  gain = { value: 1 };
+  gain = new GainParam();
   destination: unknown;
   connect(destination: unknown) { this.destination = destination; }
   disconnect() { this.destination = undefined; }
@@ -47,10 +56,10 @@ test("playback output can mute monitoring while the capture world retains the au
 
   assert.equal((bus.getOutput() as unknown as Gain).destination, monitor);
   monitor.gain.value = 0.25;
-  assert.equal(bus.getGain().gain.value, Math.pow(10, -6 / 20));
+  assert.equal(bus.getGain().gain.value, linearGain(-6));
   monitor.gain.value = 0;
   assert.equal(scene.get(Volume)?.value, -6);
-  assert.equal(bus.getGain().gain.value, Math.pow(10, -6 / 20));
+  assert.equal(bus.getGain().gain.value, linearGain(-6));
 
   const captureContext = audioContext();
   const capture = createWorld(AudioEngine({ context: captureContext }));
@@ -60,7 +69,7 @@ test("playback output can mute monitoring while the capture world retains the au
 
   assert.equal(capture.get(AudioEngine)?.output, null);
   assert.equal((capturedBus.getOutput() as unknown as Gain).destination, captureContext.destination);
-  assert.equal(capturedBus.getGain().gain.value, Math.pow(10, -6 / 20));
+  assert.equal(capturedBus.getGain().gain.value, linearGain(-6));
   editor.destroy();
   capture.destroy();
 });
@@ -94,9 +103,17 @@ test("soloing a group keeps its descendants audible and restores the mix when cl
   const otherBus = resolveAudioBus(world, other)!;
   try {
     playbackSystem(world);
-    assert.equal(clipBus.getGain().gain.value, Math.pow(10, -6 / 20), 'solo includes the full nested group');
+    assert.equal(clipBus.getGain().gain.value, linearGain(-6), 'solo includes the full nested group');
     assert.equal(mutedBus.getGain().gain.value, 0, 'an explicit mute still applies inside a soloed group');
     assert.equal(otherBus.getGain().gain.value, 0);
+    const otherGain = otherBus.getGain() as unknown as Gain;
+    const writes = otherGain.gain.writes;
+    playbackSystem(world);
+    playbackSystem(world);
+    assert.equal(otherGain.gain.writes, writes, 'a solo-muted bus cannot write gain twice on every tick');
+    other.set(Computed, { volume: -12 });
+    playbackSystem(world);
+    assert.equal(otherGain.gain.writes, writes, 'changes under solo mute do not touch the audio graph');
     group.remove(Soloed);
     clip.add(Soloed);
     playbackSystem(world);
@@ -104,7 +121,34 @@ test("soloing a group keeps its descendants audible and restores the mix when cl
     assert.equal(otherBus.getGain().gain.value, 0);
     clip.remove(Soloed);
     playbackSystem(world);
-    assert.equal(otherBus.getGain().gain.value, 1);
+    assert.equal(otherBus.getGain().gain.value, linearGain(-12), 'clearing solo restores the latest authored volume');
+  } finally { world.destroy(); }
+});
+
+test("stable volume and mute state do not write AudioParam on every playback tick", () => {
+  const world = createWorld(AudioEngine({ context: audioContext() }));
+  const root = world.spawn(); world.add(Root); world.set(Root, root);
+  const scene = world.spawn(Group, Computed, ChildOf(root));
+  const clip = world.spawn(Geometry, Computed({ volume: -6 }), ChildOf(scene));
+  const bus = resolveAudioBus(world, clip)!;
+  const gain = bus.getGain() as unknown as Gain;
+  try {
+    const initial = gain.gain.writes;
+    for (let tick = 0; tick < 10; tick++) playbackSystem(world);
+    assert.equal(gain.gain.writes, initial);
+    clip.set(Computed, { volume: -12 });
+    playbackSystem(world);
+    assert.equal(gain.gain.value, linearGain(-12));
+    assert.equal(gain.gain.writes, initial + 1);
+    clip.add(Muted);
+    playbackSystem(world);
+    assert.equal(gain.gain.value, 0);
+    const mutedWrites = gain.gain.writes;
+    playbackSystem(world);
+    assert.equal(gain.gain.writes, mutedWrites);
+    clip.remove(Muted);
+    playbackSystem(world);
+    assert.equal(gain.gain.value, linearGain(-12));
   } finally { world.destroy(); }
 });
 

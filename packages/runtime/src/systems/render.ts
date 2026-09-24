@@ -194,14 +194,11 @@ function effectFilter(world: World, sub: Entity): string | null {
 
 /** CSS filter string from the entity's own blur plus effect sub-entities. */
 function buildEffects(world: World, entity: Entity): string | null {
-	const parts: string[] = [];
-
 	const blurVal = store(world, Computed).blur[entity.id()]!;
-	if (blurVal > EPSILON) {
-		parts.push(`blur(${blurVal}px)`);
-	}
-
 	const effects = store(world, Cache).effects[entity.id()] ?? [];
+	if (!(blurVal > EPSILON) && effects.length === 0) return null;
+	const parts: string[] = [];
+	if (blurVal > EPSILON) parts.push(`blur(${blurVal}px)`);
 	for (const effect of effects) {
 		const f = effectFilter(world, effect);
 		if (f) parts.push(f);
@@ -892,19 +889,17 @@ function renderGlass(world: World, entity: Entity, plane: Mat2D): void {
 }
 
 function renderVisual(world: World, entity: Entity): void {
-	const eid = entity.id();
 	if (entity.has(Preset)) {
 		renderPreset(world, entity);
 	} else if (entity.has(Highlight)) {
 		renderHighlight(world, entity);
 	} else if (entity.has(Caption)) {
 		renderCaptionNode(world, entity);
-	} else if (store(world, Geometry).value[eid] === GeometryType.TEXT) {
-		renderTextNode(world, entity);
-	} else if ([GeometryType.RECT, GeometryType.PATH, GeometryType.ELLIPSE].includes(store(world, Geometry).value[eid]!)) {
-		renderShapeNode(world, entity);
+	} else {
+		const geometry = store(world, Geometry).value[entity.id()];
+		if (geometry === GeometryType.TEXT) renderTextNode(world, entity);
+		else if (geometry === GeometryType.RECT || geometry === GeometryType.PATH || geometry === GeometryType.ELLIPSE) renderShapeNode(world, entity);
 	}
-
 }
 
 /** Native paints render identically on ordinary planes and projected Cairo path contours. */
@@ -972,18 +967,21 @@ export function renderNode(world: World, entity: Entity): void {
 		local.f[eid]!,
 	);
 
-	const worldTransform = store(world, WorldTransform);
-	const matrix = (id: number): Mat2D => ({
-		a: worldTransform.a[id]!, b: worldTransform.b[id]!, c: worldTransform.c[id]!,
-		d: worldTransform.d[id]!, e: worldTransform.e[id]!, f: worldTransform.f[id]!,
-	});
-	for (const mask of store(world, Cache).masks[eid] ?? []) {
-		if (computed.visibility[mask.id()] === 0) continue;
-		const projected = spatialNode(world, mask);
-		if (projected && !projected.visible) continue;
-		clipSpatialGeometry(world, mask, projected?.scene === entity
-			? projected.plane
-			: multiply2D(invert2D(matrix(eid)), projected?.world ?? matrix(mask.id())));
+	const masks = store(world, Cache).masks[eid];
+	if (masks?.length) {
+		const worldTransform = store(world, WorldTransform);
+		const matrix = (id: number): Mat2D => ({
+			a: worldTransform.a[id]!, b: worldTransform.b[id]!, c: worldTransform.c[id]!,
+			d: worldTransform.d[id]!, e: worldTransform.e[id]!, f: worldTransform.f[id]!,
+		});
+		for (const mask of masks) {
+			if (computed.visibility[mask.id()] === 0) continue;
+			const projected = spatialNode(world, mask);
+			if (projected && !projected.visible) continue;
+			clipSpatialGeometry(world, mask, projected?.scene === entity
+				? projected.plane
+				: multiply2D(invert2D(matrix(eid)), projected?.world ?? matrix(mask.id())));
+		}
 	}
 
 	// Opacity and blend mode. The store slot may hold a destroyed entity's
@@ -1024,8 +1022,9 @@ export function renderNode(world: World, entity: Entity): void {
 		}
 
 		let transitioned: Set<Entity> | undefined;
-		if (hasSpatialCamera(world, entity)) renderSpatialChildren(world, entity, entity);
-		for (const child of hasSpatialCamera(world, entity) ? [] : children) {
+		const spatialCamera = hasSpatialCamera(world, entity);
+		if (spatialCamera) renderSpatialChildren(world, entity, entity);
+		for (const child of spatialCamera ? [] : children) {
 			if (transitioned?.has(child)) continue;
 			// Edge case: Child with transition
 			if (child.has(Transition)) {

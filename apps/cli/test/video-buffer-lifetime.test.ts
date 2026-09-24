@@ -19,10 +19,12 @@ const sequenceBuilt = await build({
 class Canvas {
   width: number; height: number;
   readonly pixels = new Map<string, number | undefined>();
+  draws = 0;
   constructor(width: number, height: number) { this.width = width; this.height = height; }
   getContext() { return {
     clearRect() {}, resetTransform() {}, translate() {}, rotate() {},
     drawImage: (source: { timestamp?: number; pixels?: Map<string, number | undefined> }, ...coordinates: number[]) => {
+      this.draws++;
       const crop = coordinates.length === 8;
       this.pixels.set(`${coordinates[crop ? 4 : 0]},${coordinates[crop ? 5 : 1]}`,
         source.timestamp ?? source.pixels?.get(crop ? `${coordinates[0]},${coordinates[1]}` : '0,0'));
@@ -232,6 +234,8 @@ test('cached VFR picture spans do not restart decoding for nominal frames inside
     await f.buffer.initialized;
     f.buffer.seekTo(0, 30);
     await setImmediate();
+    const canvas = f.buffer.toBitmap() as unknown as Canvas;
+    assert.equal(canvas.draws, 1);
     const decoded = f.decoded.length;
     const keyReads = f.keyReads();
     for (const target of [1, 2, 3, 2]) {
@@ -240,8 +244,21 @@ test('cached VFR picture spans do not restart decoding for nominal frames inside
       assert.ok(f.buffer.toBitmap());
       assert.equal(f.buffer.renderedFrame, 0);
     }
+    assert.equal(canvas.draws, 1, 'a held source picture is copied to the display only once');
     assert.equal(f.decoded.length, decoded, 'forward playback and a cached backward seek must reuse the covering picture');
     assert.equal(f.keyReads(), keyReads);
+
+    canvas.width = 0;
+    f.buffer.seekTo(3, 30);
+    assert.equal(f.buffer.toBitmap(), canvas);
+    assert.equal(canvas.draws, 2, 'a reset display canvas still needs its picture');
+
+    f.buffer.cache.dispose();
+    f.buffer.cache.insert({ width: 2, height: 2, timestamp: 123 } as unknown as ImageBitmap, 0, 12);
+    f.buffer.seekTo(1, 30);
+    assert.equal(f.buffer.toBitmap(), canvas);
+    assert.equal(canvas.draws, 3, 'replacing a tile at the same frame index redraws it');
+    assert.equal(canvas.pixels.get('0,0'), 123);
   } finally { f.buffer.dispose(); }
 });
 
