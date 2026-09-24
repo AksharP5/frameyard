@@ -17,6 +17,10 @@ async function serve(t: TestContext) {
   const settings = { rejectInitialized: false, deleteStatus: 200, hangDelete: false };
   let nextId = 0;
   const http = createServer(async (req, res) => {
+    if (new URL(req.url ?? "/", "http://localhost").searchParams.get("token") !== "test") {
+      res.writeHead(401).end();
+      return;
+    }
     if (req.method === "DELETE" && settings.hangDelete) return;
     if (req.method === "DELETE" && settings.deleteStatus !== 200) {
       res.writeHead(settings.deleteStatus).end();
@@ -55,7 +59,7 @@ async function serve(t: TestContext) {
     http.closeAllConnections();
     await new Promise<void>((resolve) => http.close(() => resolve()));
   });
-  return { url: `http://127.0.0.1:${address.port}/mcp`, sessions, settings };
+  return { url: `http://127.0.0.1:${address.port}/mcp?token=test`, sessions, settings };
 }
 
 async function bundle(url: string, contents: string) {
@@ -63,9 +67,11 @@ async function bundle(url: string, contents: string) {
     stdin: { contents, resolveDir: new URL("../src/", import.meta.url).pathname },
     bundle: true, platform: "node", format: "cjs", write: false,
     plugins: [{ name: "test-endpoint", setup(builder) {
-      builder.onResolve({ filter: /^@diffusionstudio\/dapi$/ }, () => ({ path: "dapi", namespace: "test-endpoint" }));
-      builder.onLoad({ filter: /.*/, namespace: "test-endpoint" }, () => ({
-        contents: `export {toolByName} from ${JSON.stringify(new URL("../../../packages/dapi/src/index.ts", import.meta.url).pathname)}; export const MCP_URL = ${JSON.stringify(url)};`,
+      builder.onResolve({ filter: /^@diffusionstudio\/dapi(?:\/mcp-auth-node)?$/ }, (args) => ({ path: args.path, namespace: "test-endpoint" }));
+      builder.onLoad({ filter: /.*/, namespace: "test-endpoint" }, (args) => ({
+        contents: args.path.endsWith("mcp-auth-node")
+          ? `export const readOrCreateMcpToken = () => "test"; export const authenticatedMcpUrl = () => ${JSON.stringify(url)};`
+          : `export {toolByName} from ${JSON.stringify(new URL("../../../packages/dapi/src/index.ts", import.meta.url).pathname)};`,
         loader: "js", resolveDir: new URL("../src/", import.meta.url).pathname,
       }));
     } }],

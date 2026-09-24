@@ -9,6 +9,9 @@
 // next send re-opens it from the session id we chose up front.
 
 import { randomUUID } from "node:crypto";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 
 import { HARNESS_LABELS } from "../protocol";
@@ -178,6 +181,7 @@ class ClaudeSession implements HarnessSession {
   private readonly policy: Policy;
   private readonly version: string;
   private readonly sessionId: string;
+  private readonly mcpConfigDir: string | null;
   private q: Query | null = null;
   private queue: Queue<SDKUserMessage> | null = null;
   private pump: Promise<void> | null = null;
@@ -200,6 +204,17 @@ class ClaudeSession implements HarnessSession {
     this.sessionId = resumed ?? randomUUID();
     this.started = resumed !== null;
     this.resume = { claude: { sessionId: this.sessionId } };
+    this.mcpConfigDir = options.mcp ? mkdtempSync(join(tmpdir(), "frameyard-chat-mcp-")) : null;
+    if (this.mcpConfigDir && options.mcp) {
+      try {
+        writeFileSync(join(this.mcpConfigDir, "config.json"), JSON.stringify({
+          mcpServers: { [options.mcp.name]: { type: "http", url: options.mcp.url } },
+        }), { flag: "wx", mode: 0o600 });
+      } catch (error) {
+        rmSync(this.mcpConfigDir, { recursive: true, force: true });
+        throw error;
+      }
+    }
   }
 
   private open(model: string): void {
@@ -208,7 +223,6 @@ class ClaudeSession implements HarnessSession {
     this.model = model;
     this.initialized = false;
     this.stderr = "";
-    const mcp = this.options.mcp;
     const bypass = this.policy.mode === "bypassPermissions";
     const options: Options = {
       cwd: this.options.cwd,
@@ -221,7 +235,8 @@ class ClaudeSession implements HarnessSession {
       includePartialMessages: true,
       settingSources: ["user", "project", "local"],
       systemPrompt: { type: "preset", preset: "claude_code", append: this.options.instructions },
-      mcpServers: mcp ? { [mcp.name]: { type: "http", url: mcp.url } } : {},
+      mcpServers: {},
+      ...(this.mcpConfigDir ? { extraArgs: { "mcp-config": join(this.mcpConfigDir, "config.json") } } : {}),
       // Under bypassPermissions the CLI approves every call before
       // `canUseTool` is consulted, so a question would run with no answers
       // and return nothing. A PreToolUse hook runs first in every mode: it
@@ -322,7 +337,11 @@ class ClaudeSession implements HarnessSession {
   }
 
   async close(): Promise<void> {
-    await this.interrupt();
+    try {
+      await this.interrupt();
+    } finally {
+      if (this.mcpConfigDir) rmSync(this.mcpConfigDir, { recursive: true, force: true });
+    }
   }
 
   // -------------------------------------------------------------------

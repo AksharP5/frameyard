@@ -10,7 +10,6 @@ import { cp, link, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFi
 import { createRequire } from "node:module";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { nanoid } from "nanoid";
-import { MCP_URL } from "@diffusionstudio/dapi";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 import type { PluginItem, TransformOptions } from "@babel/core";
@@ -550,9 +549,9 @@ on your machine.
 
 ## Agents
 
-Frameyard serves its tools and authoring instructions at \`${MCP_URL}\` while
-it is running. Connect an agent in Frameyard's Agents settings, then start a
-new agent session.
+Frameyard serves its tools and authoring instructions while it is running.
+Connect an agent in Frameyard's Agents settings, then start a new agent
+session. The connection URL is private to your user account.
 
 ## Structure
 

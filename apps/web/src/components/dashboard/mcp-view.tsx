@@ -178,7 +178,7 @@ function DashboardMcpServerSection() {
           leadingSize="sm"
           title="Frameyard MCP"
           leading={<Icon name="ai-mcp-cli" class="text-foreground" />}
-          description="Connect any other agent that supports MCP over Streamable HTTP."
+          description="Private URL for agents you trust that support MCP over HTTP."
           action={
             <div class="flex shrink-0 items-center gap-2">
               <div class="flex h-7 w-41 items-center rounded-md bg-input px-2">

@@ -56,6 +56,8 @@ def transcribe(path: Path, model: Path, language: str, threads: int) -> dict:
     engine_version = importlib.metadata.version("faster-whisper")
     cache_root = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
     cache = cache_root / "diffusion-studio/transcripts" / (cache_key(path, model, language, engine_version) + ".json")
+    cache.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    cache.parent.chmod(0o700)
     if cache.exists():
         try:
             return validate_transcript(json.loads(cache.read_text()))
@@ -81,7 +83,6 @@ def transcribe(path: Path, model: Path, language: str, threads: int) -> dict:
         ]}
         for segment in segments
     ]})
-    cache.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(mode="w", dir=cache.parent, delete=False) as output:
         temporary = Path(output.name)
         json.dump(result, output, ensure_ascii=False, allow_nan=False)

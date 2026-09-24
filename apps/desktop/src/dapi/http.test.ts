@@ -8,11 +8,13 @@ import { z } from "zod";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { authenticatedMcpUrl } from "@diffusionstudio/dapi/mcp-auth-node";
 import { DapiHttpServer } from "./http";
 
 // An ephemeral port: the fixed one may be held by a running app.
-const PORT = 3200 + Math.floor(Math.random() * 500);
+const PORT = 45000 + Math.floor(Math.random() * 1000);
 const PATH = "/mcp";
+const TOKEN = "a".repeat(64);
 let server: DapiHttpServer;
 let firstConnections = 0;
 let sessionsCreated = 0;
@@ -22,6 +24,7 @@ beforeAll(async () => {
     host: "127.0.0.1",
     port: PORT,
     path: PATH,
+    token: TOKEN,
     onFirstConnection: () => void firstConnections++,
     createSession() {
       sessionsCreated++;
@@ -44,11 +47,20 @@ afterAll(() => server.stop());
 
 async function connect(): Promise<Client> {
   const client = new Client({ name: "test-client", version: "0.0.0" });
-  await client.connect(new StreamableHTTPClientTransport(new URL(server.url)));
+  await client.connect(new StreamableHTTPClientTransport(new URL(authenticatedMcpUrl(TOKEN, server.url))));
   return client;
 }
 
 describe("mcp over http", () => {
+  it("rejects missing, incorrect, and duplicate credentials before creating a session", async () => {
+    const before = sessionsCreated;
+    for (const url of [server.url, authenticatedMcpUrl("b".repeat(64), server.url), `${authenticatedMcpUrl(TOKEN, server.url)}&token=${TOKEN}`]) {
+      const response = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+      expect(response.status).toBe(401);
+    }
+    expect(sessionsCreated).toBe(before);
+  });
+
   it("serves a session: instructions, tools, resources", async () => {
     const client = await connect();
     expect(client.getInstructions()).toBe("Test instructions.");
@@ -57,6 +69,15 @@ describe("mcp over http", () => {
     expect(result.structuredContent).toEqual({ text: "hi" });
     const note = await client.readResource({ uri: "dapi://note" });
     expect(note.contents[0]).toMatchObject({ text: "hello" });
+    await client.close();
+  });
+
+  it("accepts a bearer credential without putting it in the URL", async () => {
+    const client = new Client({ name: "bearer-client", version: "0.0.0" });
+    await client.connect(new StreamableHTTPClientTransport(new URL(server.url), {
+      requestInit: { headers: { authorization: `Bearer ${TOKEN}` } },
+    }));
+    expect((await client.listTools()).tools[0]?.name).toBe("echo");
     await client.close();
   });
 
@@ -71,7 +92,7 @@ describe("mcp over http", () => {
   });
 
   it("rejects a stale session id and a non-mcp path", async () => {
-    const stale = await fetch(server.url, {
+    const stale = await fetch(authenticatedMcpUrl(TOKEN, server.url), {
       method: "POST",
       headers: { "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-session-id": "nope" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
@@ -85,7 +106,7 @@ describe("mcp over http", () => {
     // node's fetch drops a custom Host header, so go through node:http.
     const status = await new Promise<number>((resolve, reject) => {
       const req = request(
-        { host: "127.0.0.1", port: PORT, path: PATH, method: "POST", headers: { host: "evil.example", "content-type": "application/json", accept: "application/json, text/event-stream" } },
+        { host: "127.0.0.1", port: PORT, path: `${PATH}?token=${TOKEN}`, method: "POST", headers: { host: "evil.example", "content-type": "application/json", accept: "application/json, text/event-stream" } },
         (res) => {
           res.resume();
           res.on("end", () => resolve(res.statusCode ?? 0));

@@ -456,7 +456,7 @@ if (app.requestSingleInstanceLock()) {
     dapi.mcpUrl().then((url) =>
       startAgentChat({
         dataDir: join(app.getPath("userData"), "agent-chat"),
-        mcpUrl: url ? `${url}?client=chat` : null,
+        mcpUrl: url ? `${url}&client=chat` : null,
         version: app.getVersion(),
         prepareTurn: codex.prepareTurn,
       }),

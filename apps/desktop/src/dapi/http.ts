@@ -5,11 +5,10 @@
 // MCP over Streamable HTTP on a fixed loopback port: the transport agents
 // register by URL. One MCP session per client, keyed by the session id the
 // transport hands out on `initialize`; later requests carry it in a header.
-// No token: the server binds to loopback and rejects any Host header that is
-// not the loopback address, which is what keeps browser pages from reaching
-// it. Everything else running as the user can already reach the app.
+// Every request carries the owning user's credential. The SDK's Host check
+// remains as a browser DNS-rebinding defense.
 
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 
@@ -21,6 +20,8 @@ export type HttpServerDeps = {
   port: number;
   /** The URL path the endpoint answers on; anything else is 404. */
   path: string;
+  /** Hex-encoded 32-byte credential stored in the current user's private directory. */
+  token: string;
   /** A fresh MCP server with the tools and resources registered, one per session. */
   createSession(): McpServer;
   /**
@@ -39,12 +40,15 @@ const SESSION_HEADER = "mcp-session-id";
 
 export class DapiHttpServer {
   private readonly deps: HttpServerDeps;
+  private readonly expectedToken: Buffer;
   private readonly sessions = new Map<string, Session>();
   private server: Server | null = null;
   private connected = false;
 
   constructor(deps: HttpServerDeps) {
     this.deps = deps;
+    this.expectedToken = Buffer.from(deps.token, "hex");
+    if (this.expectedToken.length !== 32) throw new Error("Invalid MCP credential");
   }
 
   /** Resolves once listening; rejects when the port is taken, so the caller can say so. */
@@ -76,12 +80,20 @@ export class DapiHttpServer {
   }
 
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const url = new URL(req.url ?? "/", this.url);
-    if (url.pathname !== this.deps.path) {
-      res.writeHead(404, { "content-type": "text/plain" }).end("Not found");
-      return;
-    }
     try {
+      const url = new URL(req.url ?? "/", this.url);
+      if (url.pathname !== this.deps.path) {
+        res.writeHead(404, { "content-type": "text/plain" }).end("Not found");
+        return;
+      }
+      const tokens = url.searchParams.getAll("token");
+      const bearer = /^Bearer ([a-f0-9]{64})$/.exec(header(req, "authorization") ?? "")?.[1];
+      const credential = bearer && tokens.length === 0 ? bearer : !bearer && tokens.length === 1 ? tokens[0] : null;
+      const supplied = credential && /^[a-f0-9]{64}$/.test(credential) ? Buffer.from(credential, "hex") : null;
+      if (!supplied || !timingSafeEqual(supplied, this.expectedToken)) {
+        res.writeHead(401, { "content-type": "text/plain", "cache-control": "no-store" }).end("Unauthorized");
+        return;
+      }
       const id = header(req, SESSION_HEADER);
       const existing = id === undefined ? undefined : this.sessions.get(id);
       if (existing) {
@@ -100,7 +112,7 @@ export class DapiHttpServer {
       // a new id, or a stray request it rejects with 400.
       await this.open(url.searchParams.get("client")).transport.handleRequest(req, res);
     } catch (error) {
-      console.error("[dapi] http request failed:", error);
+      console.error("[dapi] http request failed:", error instanceof Error ? error.name : "unknown error");
       if (!res.headersSent) res.writeHead(500, { "content-type": "text/plain" }).end("Internal error");
     }
   }

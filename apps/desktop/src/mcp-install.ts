@@ -3,16 +3,18 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 // Registers the app's MCP server with the agents on this machine, one agent
-// at a time as the settings page asks: the fixed loopback URL for agents
+// at a time as the settings page asks: an authenticated loopback URL for agents
 // that speak HTTP, the bundled `dapi mcp` proxy for the rest. No PATH
 // symlink and no admin prompt — that is `cli-install.ts`, for people who
 // type `dapi`.
 
 import { app } from "electron";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { MCP_URL } from "@diffusionstudio/dapi";
+import { authenticatedMcpUrl, readOrCreateMcpToken } from "@diffusionstudio/dapi/mcp-auth-node";
 import { AGENT_TARGETS, agentTarget, needsBinary, readServer, removeServer, upsertServer } from "./mcp-config";
 
 import type { AgentTarget, McpServerSpec } from "./mcp-config";
@@ -29,7 +31,7 @@ export function dapiBinary(): string | null {
 }
 
 function spec(): McpServerSpec {
-  return { url: MCP_URL, command: dapiBinary() ?? "", args: ["mcp"] };
+  return { url: authenticatedMcpUrl(readOrCreateMcpToken()), command: dapiBinary() ?? "", args: ["mcp"] };
 }
 
 function configPath(target: AgentTarget): string {
@@ -43,8 +45,24 @@ function readConfig(target: AgentTarget): string | null {
 
 function writeConfig(target: AgentTarget, text: string): void {
   const path = configPath(target);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, text);
+  const dir = dirname(path);
+  mkdirSync(dir, { recursive: true });
+  const directory = lstatSync(dir);
+  if (!directory.isDirectory() || directory.uid !== process.getuid?.() || (directory.mode & 0o022) !== 0) {
+    throw new Error(`Agent config directory must be owned by this user and not writable by others: ${dir}`);
+  }
+  const existing = lstatSync(path, { throwIfNoEntry: false });
+  if (existing && (!existing.isFile() || existing.uid !== process.getuid?.())) {
+    throw new Error(`Agent config must be a regular file owned by this user: ${path}`);
+  }
+  const temporary = join(dir, `.frameyard-mcp-${randomUUID()}.tmp`);
+  try {
+    writeFileSync(temporary, text, { flag: "wx", mode: 0o600 });
+    renameSync(temporary, path);
+  } catch (error) {
+    if (existsSync(temporary)) unlinkSync(temporary);
+    throw error;
+  }
 }
 
 /**
@@ -64,14 +82,20 @@ function unavailableReason(target: AgentTarget, current: McpServerSpec): string 
 }
 
 function agentStatus(target: AgentTarget, current: McpServerSpec): McpAgentStatus {
-  const registered = readServer(readConfig(target), target.format);
+  let registered: ReturnType<typeof readServer> = null;
+  let readError = false;
+  try {
+    registered = readServer(readConfig(target), target.format);
+  } catch {
+    readError = true;
+  }
   return {
     id: target.id,
     label: target.label,
     detected: existsSync(join(homedir(), target.marker)),
-    connected: registered !== null,
+    connected: registered !== null && (registered.url === undefined || registered.url === current.url),
     config: configPath(target),
-    unavailable: unavailableReason(target, current),
+    unavailable: readError ? "Cannot read this agent's config." : unavailableReason(target, current),
   };
 }
 
@@ -120,19 +144,40 @@ export function applyMcp(request: McpApplyRequest): McpApplyResult {
 }
 
 /**
- * Launch-time self-heal for the stdio agents: an entry that still runs the
- * proxy from a bundle that moved (or was translocated when it was written)
- * is rewritten to the binary this build has. Entries the user wrote by hand
- * for something else are left alone.
+ * Refresh our authenticated HTTP URLs and moved stdio binaries on launch.
+ * Entries the user wrote for something else are left alone.
  */
 export function healMcpRegistrations(): void {
-  if (!app.isPackaged) return;
   const current = spec();
-  if (current.command === "" || current.command.includes("/AppTranslocation/")) return;
 
   for (const target of AGENT_TARGETS) {
-    const text = readConfig(target);
-    const registered = readServer(text, target.format);
+    let text: string | null;
+    let registered: ReturnType<typeof readServer>;
+    try {
+      text = readConfig(target);
+      registered = readServer(text, target.format);
+    } catch {
+      continue;
+    }
+    if (registered?.url && !needsBinary(target)) {
+      let ours = false;
+      try {
+        const url = new URL(registered.url);
+        ours = `${url.origin}${url.pathname}` === MCP_URL && [...url.searchParams.keys()].every((key) => key === "token");
+      } catch {
+        // A custom or malformed URL is not ours to repair.
+      }
+      if (ours) {
+        try {
+          if (registered.url !== current.url) writeConfig(target, upsertServer(text, target.format, target.entry(current)));
+          else if (text !== null && (lstatSync(configPath(target)).mode & 0o077) !== 0) writeConfig(target, text);
+        } catch {
+          // The settings page remains available as a manual fix.
+        }
+      }
+      continue;
+    }
+    if (!app.isPackaged || current.command === "" || current.command.includes("/AppTranslocation/")) continue;
     if (!registered?.command) continue;
     const ours = registered.command.includes("Frameyard") || registered.command.includes("Diffusion Studio") || registered.command.includes("/AppTranslocation/");
     if (!ours) continue;

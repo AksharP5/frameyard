@@ -37,6 +37,7 @@ Media imported from outside a project stays at its original location. Before sha
 | `~/.local/share/diffusion-studio/models/` | Downloaded Whisper model |
 | `~/.local/share/diffusion-studio/tools/` | Animation CLIs |
 | `~/.cache/diffusion-studio/transcripts/` | Transcript cache |
+| `~/.frameyard/mcp-token` | Private credential for local agent connections |
 | `~/.config/Frameyard/` | Preferences and recent projects on fresh installs |
 
 Existing installations may continue using `~/.config/Diffusion Studio Linux/` for preferences and sessions. New projects default to `~/Videos/Frameyard`; existing projects are not moved. Data and cache paths respect `XDG_DATA_HOME` and `XDG_CACHE_HOME`.
