@@ -3,10 +3,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { MCP_URL } from "@diffusionstudio/dapi";
+import { authenticatedMcpUrl, readOrCreateMcpToken } from "@diffusionstudio/dapi/mcp-auth-node";
 
 export function createMcpTransport() {
-  return new StreamableHTTPClientTransport(new URL(MCP_URL), {
+  return new StreamableHTTPClientTransport(new URL(authenticatedMcpUrl(readOrCreateMcpToken())), {
     fetch: (url, init) => fetch(url, init?.method === "DELETE"
       // Initialization failures can already have closed the SDK transport.
       // Session deletion still needs a live signal, with a short cleanup limit.

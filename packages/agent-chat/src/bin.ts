@@ -98,13 +98,13 @@ async function main(): Promise<void> {
   }
 
   const args = parseArgs(process.argv.slice(2));
-  const token = str(args.token) ?? process.env.AGENT_CHAT_TOKEN;
+  const token = process.env.AGENT_CHAT_TOKEN;
   const dataDir = str(args["data-dir"]);
   if (!token || !dataDir) {
-    console.error("usage: agent-host --token <token> --data-dir <dir> [--host 127.0.0.1] [--port 0] [--mcp-url <url>] [--origin <origin>...]");
+    console.error("usage: AGENT_CHAT_TOKEN=<token> [AGENT_CHAT_MCP_URL=<url>] agent-host --data-dir <dir> [--host 127.0.0.1] [--port 0] [--origin <origin>...]");
     process.exit(2);
   }
-  const mcpUrl = str(args["mcp-url"]);
+  const mcpUrl = process.env.AGENT_CHAT_MCP_URL;
   const origins = str(args.origin)?.split(",");
   running = await createAgentHost({
     host: str(args.host),

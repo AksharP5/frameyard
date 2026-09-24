@@ -10,7 +10,7 @@ const grab = toolByName("media_grab");
 const args: ToolArgs<"media_grab"> = grab.input.parse({ path: "/clip.mp4", times: ["45f", "1:10"] });
 ```
 
-The package is free of Node built-ins so the renderer can import it. The MCP URL the app serves on (`MCP_URL`) is exported too, for the CLI and the docs the app writes.
+The default package entry is free of Node built-ins so the renderer can import it. The `mcp-auth-node` subpath stores the local MCP credential for desktop and CLI clients.
 
 See the [tool and CLI reference](../../docs/reference/tools/README.md) for
 commands, arguments, and results.

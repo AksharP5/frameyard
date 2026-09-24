@@ -2,7 +2,7 @@
 
 Frameyard exposes one set of tools, reachable two ways:
 
-- **MCP.** The running app serves an MCP server at `http://127.0.0.1:3274/mcp` (Streamable HTTP). A connected agent gets every tool in `tools/list`, with the descriptions on these pages and its input and output as JSON Schema 2020-12, and instructions that give the path of these docs in the installed app. A client that can only spawn a stdio server can bridge to the URL with a generic proxy such as `mcp-remote`.
+- **MCP.** The running app serves MCP over Streamable HTTP on loopback. Connect agents in Frameyard's Agents settings, or copy the authenticated URL shown there for another HTTP client. Keep that URL private: it grants control of the editor. Agents that only support stdio can run `dapi mcp`. A connected agent gets every tool in `tools/list`, with the descriptions on these pages and its input and output as JSON Schema 2020-12, and instructions that give the path of these docs in the installed app.
 - **CLI.** `dapi`, the command-line client shipped with the app, wraps every tool as a command for shells, scripts and CI. `dapi <command> --help` prints the same description and the same field help.
 
 Both validate against the same schemas and return the same result, so each tool is documented once, on its own page. The catalog behind all three (server, CLI, these pages) lives in `packages/dapi`.

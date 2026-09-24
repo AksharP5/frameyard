@@ -8,7 +8,7 @@
 
 /**
  * The two ways to reach the app. Agents that speak Streamable HTTP get the
- * URL, which is the same on every machine; the rest get the bundled `dapi`
+ * authenticated URL; the rest get the bundled `dapi`
  * binary in stdio proxy mode.
  */
 export type McpServerSpec = { url: string; command: string; args: string[] };

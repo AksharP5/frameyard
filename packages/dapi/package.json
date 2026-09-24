@@ -6,7 +6,8 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./mcp-auth-node": "./src/mcp-auth-node.ts"
   },
   "scripts": {
     "check": "tsc --noEmit",

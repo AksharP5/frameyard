@@ -4,6 +4,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { DapiError, MCP_HOST, MCP_PATH, MCP_PORT, toolByName, tools } from "@diffusionstudio/dapi";
+import { authenticatedMcpUrl, readOrCreateMcpToken } from "@diffusionstudio/dapi/mcp-auth-node";
 import { mainHandlers } from "./handlers";
 import { DapiHttpServer } from "./http";
 import { instructions } from "./docs";
@@ -43,6 +44,7 @@ export class DapiServer {
   private readonly deps: DapiServerDeps;
   private readonly renderer = new RendererCalls();
   private readonly http: DapiHttpServer;
+  private readonly token = readOrCreateMcpToken();
   private instructionsText: string | null = null;
   private httpReady: Promise<boolean> = Promise.resolve(false);
 
@@ -57,6 +59,7 @@ export class DapiServer {
       host: MCP_HOST,
       port: MCP_PORT,
       path: MCP_PATH,
+      token: this.token,
       createSession: () => this.createSession(),
       onFirstConnection: () => deps.onFirstConnection(),
     });
@@ -64,7 +67,7 @@ export class DapiServer {
 
   /** The URL agents register. */
   get url(): string {
-    return this.http.url;
+    return authenticatedMcpUrl(this.token, this.http.url);
   }
 
   start(): void {
@@ -74,7 +77,7 @@ export class DapiServer {
     this.httpReady = this.http.start().then(
       () => true,
       (error: Error) => {
-        console.error(`[dapi] cannot serve MCP at ${this.url}: ${error.message}`);
+        console.error(`[dapi] cannot serve MCP on ${MCP_HOST}:${MCP_PORT}: ${error.message}`);
         return false;
       },
     );
