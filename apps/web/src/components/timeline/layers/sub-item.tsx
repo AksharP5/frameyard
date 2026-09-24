@@ -12,7 +12,6 @@ import {
   Name,
   Paint,
   PaintType,
-  Selected,
   Shadow,
   Stroke,
 } from '@diffusionstudio/runtime';
@@ -50,7 +49,7 @@ export function SubItemLayer(props: LayerRowProps) {
   const entity = () => props.layer.entity;
 
   const hovering = useTag(entity, Hovering);
-  const selected = useTag(entity, Selected);
+  const selected = props.selected;
   const name = createMemo(() => describe(entity()));
 
   const toggleExpanded = () => {

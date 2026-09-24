@@ -14,7 +14,6 @@ import {
   Locked,
   Muted,
   Name,
-  Selected,
   Soloed,
   findGeometryAsset,
   getEntityChildren,
@@ -66,7 +65,7 @@ export function NodeLayer(props: LayerRowProps) {
   const soloed = useTag(entity, Soloed);
   const hidden = useTag(entity, Hidden);
   const hovering = useTag(entity, Hovering);
-  const selected = useTag(entity, Selected);
+  const selected = props.selected;
   const clipLink = useTrait(entity, ClipLink);
   const linked = () => !!clipLink()?.value;
   const locked = useTag(entity, Locked);

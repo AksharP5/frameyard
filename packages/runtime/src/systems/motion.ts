@@ -95,6 +95,49 @@ export function resetAnimatedValues(world: World, entity: Entity | null, ignore?
 	}
 }
 
+/** Restore only the authored fields a preset animation can change. */
+function resetPresetValues(world: World, entity: Entity, animations: Entity[]): void {
+	const animation = store(world, Animation);
+	let opacity = false, volume = false, scale = false, blur = false;
+	let offsetX = false, offsetY = false, rotation = false, chars = false;
+
+	for (const anim of animations) {
+		switch (animation.type[anim.id()]) {
+			case AnimationType.FADE: opacity = true; break;
+			case AnimationType.GAIN: volume = true; break;
+			case AnimationType.GROW:
+			case AnimationType.SHRINK: scale = true; break;
+			case AnimationType.BLUR: blur = true; break;
+			case AnimationType.SLIDE_LEFT:
+			case AnimationType.SLIDE_RIGHT: offsetX = opacity = true; break;
+			case AnimationType.SLIDE_UP:
+			case AnimationType.SLIDE_DOWN: offsetY = opacity = true; break;
+			case AnimationType.SPIN: scale = rotation = true; break;
+			case AnimationType.TWIST: scale = rotation = offsetX = offsetY = true; break;
+			case AnimationType.APPEAR_WORD:
+			case AnimationType.APPEAR_CHAR:
+			case AnimationType.SCRAMBLE: chars = true; break;
+			default: resetAnimatedValues(world, entity); return;
+		}
+	}
+
+	const computed = store(world, Computed);
+	const eid = entity.id();
+	if (opacity) computed.opacity[eid] = entity.get(Opacity)?.value ?? 1;
+	if (volume) computed.volume[eid] = entity.get(Volume)?.value ?? 0;
+	if (scale) {
+		const uniform = entity.get(UniformScale)?.value;
+		const authored = entity.get(Scale);
+		computed.scaleX[eid] = uniform ?? authored?.x ?? 1;
+		computed.scaleY[eid] = uniform ?? authored?.y ?? 1;
+	}
+	if (blur) computed.blur[eid] = entity.get(Blur)?.value ?? 0;
+	if (offsetX) computed.offsetX[eid] = entity.get(Offset)?.x ?? 0;
+	if (offsetY) computed.offsetY[eid] = entity.get(Offset)?.y ?? 0;
+	if (rotation) computed.rotation[eid] = entity.get(Rotation)?.value ?? 0;
+	if (chars) computed.chars[eid] = entity.get(Chars)?.value ?? '';
+}
+
 /**
  * Apply a preset animation to a node at the given normalized progress.
  */
@@ -108,23 +151,20 @@ function applyAnimation(world: World, entity: Entity, anim: Entity, progress: nu
 	switch (animation.type[aid]) {
 		case AnimationType.FADE: {
 			const phase = animation.phase[aid];
-			const func = cubicBezier(0.1, 0.7, 0.5, 1);
-			const eased = clamp01(func(progress));
+			const eased = clamp01(easeEnter(progress));
 			computed.opacity[eid] = phase === AnimationPhase.OUT ? 1 - eased : eased;
 			break;
 		}
 		case AnimationType.GAIN: {
 			const phase = animation.phase[aid];
-			const func = cubicBezier(0.4, 0.095, 0.546, 0.875);
-			const eased = clamp01(func(progress));
+			const eased = clamp01(easeGain(progress));
 			const amplitude = phase === AnimationPhase.OUT ? 1 - eased : eased;
 			computed.volume[eid] = (computed.volume[eid] ?? 0) + amplitudeToDecibels(amplitude);
 			break;
 		}
 		case AnimationType.GROW: {
 			const phase = animation.phase[aid];
-			const func = cubicBezier(0.1, 0.7, 0.5, 1);
-			const eased = clamp01(func(progress));
+			const eased = clamp01(easeEnter(progress));
 			const t = phase === AnimationPhase.OUT ? eased : 1 - eased;
 			const scale = 1 - 0.5 * t;
 			computed.scaleX[eid] = scale;
@@ -133,8 +173,7 @@ function applyAnimation(world: World, entity: Entity, anim: Entity, progress: nu
 		}
 		case AnimationType.SHRINK: {
 			const phase = animation.phase[aid];
-			const func = cubicBezier(0.1, 0.7, 0.5, 1);
-			const eased = clamp01(func(progress));
+			const eased = clamp01(easeEnter(progress));
 			const t = phase === AnimationPhase.OUT ? eased : 1 - eased;
 			const scale = 1 + 0.5 * t;
 			computed.scaleX[eid] = scale;
@@ -143,8 +182,7 @@ function applyAnimation(world: World, entity: Entity, anim: Entity, progress: nu
 		}
 		case AnimationType.BLUR: {
 			const phase = animation.phase[aid];
-			const func = phase === AnimationPhase.OUT ? cubicBezier(0.4, 0, 1, 1) : cubicBezier(0.33, 0, 0.2, 1);
-			const eased = clamp01(func(progress));
+			const eased = clamp01((phase === AnimationPhase.OUT ? easeBlurOut : easeBlurIn)(progress));
 			computed.blur[eid] = phase === AnimationPhase.OUT ? lerp(0, 24, eased) : lerp(24, 0, eased);
 			break;
 		}
@@ -154,8 +192,7 @@ function applyAnimation(world: World, entity: Entity, anim: Entity, progress: nu
 		case AnimationType.SLIDE_DOWN: {
 			const phase = animation.phase[aid];
 			const type = animation.type[aid];
-			const func = cubicBezier(0.1, 0.7, 0.5, 1);
-			const eased = clamp01(func(progress));
+			const eased = clamp01(easeEnter(progress));
 			const t = phase === AnimationPhase.OUT ? eased : 1 - eased;
 
 			const sign = phase === AnimationPhase.OUT ? -1 : 1;
@@ -173,8 +210,7 @@ function applyAnimation(world: World, entity: Entity, anim: Entity, progress: nu
 		}
 		case AnimationType.SPIN: {
 			const phase = animation.phase[aid];
-			const func = cubicBezier(0.44, 0.02, 0.252, 0.992);
-			const eased = clamp01(func(progress));
+			const eased = clamp01(easeSpin(progress));
 			const t = phase === AnimationPhase.OUT ? eased : 1 - eased;
 			const scale = 1 - t;
 			computed.scaleX[eid] = scale;
@@ -184,8 +220,7 @@ function applyAnimation(world: World, entity: Entity, anim: Entity, progress: nu
 		}
 		case AnimationType.TWIST: {
 			const phase = animation.phase[aid];
-			const func = cubicBezier(0.1, 0.7, 0.5, 1);
-			const eased = clamp01(func(progress));
+			const eased = clamp01(easeEnter(progress));
 			const t = phase === AnimationPhase.OUT ? eased : 1 - eased;
 			const scale = 1 + t;
 			computed.scaleX[eid] = scale;
@@ -234,7 +269,12 @@ export function motionSystem(world: World): void {
 		const keyframeTracks = cache.keyframeTracks[eid] ?? [];
 		if (animations.length === 0 && keyframeTracks.length === 0) continue;
 
-		resetAnimatedValues(world, entity);
+		// Every keyframe track writes its sampled value, including before its
+		// first keyframe and after its last. Only preset animations need their
+		// authored values restored when they enter or leave a time window,
+		// or when a track has lost its last keyframe.
+		if (keyframeTracks.some(track => !(cache.keyframes[track.id()]?.length))) resetAnimatedValues(world, entity);
+		else if (animations.length > 0) resetPresetValues(world, entity, animations);
 
 		const source = getLocalWindow(entity);
 
@@ -498,6 +538,11 @@ export type PropertyPath = keyof ReturnType<typeof getPropertyPaths>;
 type EasingFunction = (t: number) => number;
 
 const easingCache = new Map<string, EasingFunction>();
+const easeEnter = cubicBezier(0.1, 0.7, 0.5, 1);
+const easeGain = cubicBezier(0.4, 0.095, 0.546, 0.875);
+const easeBlurOut = cubicBezier(0.4, 0, 1, 1);
+const easeBlurIn = cubicBezier(0.33, 0, 0.2, 1);
+const easeSpin = cubicBezier(0.44, 0.02, 0.252, 0.992);
 
 /**
  * Parse an easing descriptor string and return an easing function.

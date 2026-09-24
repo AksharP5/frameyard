@@ -63,7 +63,7 @@ function fixture() {
     (name: string) => dependencies[name] ?? new Proxy({}, { get: (_target, key) => key }), module, module.exports, view, document,
   );
   const dispose = solid.createRoot((dispose) => {
-    module.exports.NodeLayer({ layer: { kind: 'geometry', entity: entity as unknown as Entity, children: [], expanded: false, expandable: false }, depth: 0, expanded: false, ancestorSelected: false });
+    module.exports.NodeLayer({ layer: { kind: 'geometry', entity: entity as unknown as Entity, children: [], expanded: false, expandable: false }, now: () => 0, selected: () => false, depth: 0, expanded: false, ancestorSelected: false });
     return dispose;
   });
   function pointer(type: string, clientY: number, button = 0) {
