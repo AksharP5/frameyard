@@ -9,5 +9,5 @@ export type DesktopAppDownloadSource = "canvas_banner" | "dashboard_footer" | "m
 
 export function downloadDesktopApp(source: DesktopAppDownloadSource) {
   track("desktop_app_download", { source });
-  window.open("https://github.com/AksharP5/frameyard#install-on-omarchy", "_blank", "noopener,noreferrer");
+  window.open("https://github.com/AksharP5/frameyard#install", "_blank", "noopener,noreferrer");
 }
