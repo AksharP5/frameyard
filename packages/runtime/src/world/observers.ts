@@ -6,7 +6,7 @@
 import { store } from './store';
 import {
 	ChildOf, Culled, Sequential, Group, Scene, Scene3D, SpatialParameters, SpatialGeometry, Audio, Paint, AssetId,
-	Delay, Trim, PlaybackRate, SourceFrameRate, Keyframe, KeyframeTrack, ItemIndex,
+	Delay, Trim, PlaybackRate, SourceFrameRate, Animation, Keyframe, KeyframeTrack, ItemIndex,
 	PathData, SceneCamera, LayerMaterial, SceneEffects, Position, Offset, Rotation, Scale, UniformScale, Skew, Anchor, Flip,
 	Opacity, Color, Blur, Volume, Effect, CornerRadius, MixedCornerRadius,
 	ColorStop, StrokeStyle, Size, Computed, Active, Stage, IsMask,
@@ -92,6 +92,12 @@ export function observeWorld(world: World): () => void {
 	// its owner's aggregate while the track and animated target are readable.
 	subs.push(world.onRemove(KeyframeTrack, (entity) => {
 		rebuildCaches(world, entity, getParentEntity(entity), entity);
+	}));
+	subs.push(world.onChange(KeyframeTrack, (track) => {
+		resetAnimatedValues(world, track.get(KeyframeTrack)?.target ?? null);
+	}));
+	subs.push(world.onChange(Animation, (animation) => {
+		resetAnimatedValues(world, getParentEntity(animation));
 	}));
 
 	// Keyframes re-sort by frame, siblings re-sort by index.
