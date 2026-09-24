@@ -57,6 +57,24 @@ type RenderSplit = {
 /** Global offscreen canvas used solely for text measurement. */
 let measureCanvas: OffscreenCanvas | null = null;
 let measureCtx: OffscreenCanvasRenderingContext2D | null = null;
+let nextFontSetId = 0;
+const fontSets = new WeakMap<FontFaceSet, { id: number; revision: number }>();
+
+function fontLayoutVersion(): string {
+	const scope = globalThis as { document?: { fonts?: FontFaceSet }; fonts?: FontFaceSet };
+	const fontSet = scope.document?.fonts ?? scope.fonts;
+	if (!fontSet) return '';
+
+	let state = fontSets.get(fontSet);
+	if (!state) {
+		state = { id: ++nextFontSetId, revision: 0 };
+		fontSets.set(fontSet, state);
+		const current = state;
+		fontSet.addEventListener('loadingdone', () => current.revision++);
+		fontSet.addEventListener('loadingerror', () => current.revision++);
+	}
+	return `${state.id}:${state.revision}:${fontSet.size}:${fontSet.status}`;
+}
 
 function getMeasureCtx(): OffscreenCanvasRenderingContext2D {
 	if (!measureCtx) {
@@ -428,8 +446,30 @@ function renderTokens(ctx: Ctx, world: World, entity: Entity): void {
 
 /** Set the text's measured bounds before transforms, culling and plane projection. */
 export function layoutText(world: World, entity: Entity): void {
+	const eid = entity.id();
+	const cached = entity.has(TextCache) ? store(world, TextCache) : null;
+	const ranges = store(world, Cache).textRanges[eid] ?? [];
+	let layoutKey = '';
+	if (ranges.length === 0) {
+		const computed = store(world, Computed);
+		const style = store(world, TextStyle);
+		const hasSize = entity.has(Size);
+		layoutKey = JSON.stringify([
+			computed.chars[eid] ?? store(world, Chars).value[eid] ?? '',
+			hasSize ? store(world, Size).width[eid] : null,
+			hasSize ? computed.width[eid] : null,
+			hasSize ? computed.height[eid] : null,
+			style.leading[eid], style.fontSize[eid], style.fontFamily[eid], style.fontWeight[eid],
+			style.fontStyle[eid], style.textAlign[eid], style.textBaseline[eid], style.textCase[eid],
+			style.letterSpacing[eid], fontLayoutVersion(),
+		]);
+		if (cached?.layoutKey[eid] === layoutKey) return;
+	} else if (cached) {
+		cached.layoutKey[eid] = '';
+	}
 	tokenizeText(world, entity);
 	shapeTokens(world, entity);
+	if (layoutKey) store(world, TextCache).layoutKey[eid] = layoutKey;
 }
 
 /** Captions prepare their text during drawing; native text is laid out by the transform system. */

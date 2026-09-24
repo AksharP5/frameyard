@@ -33,4 +33,4 @@ export const TextStyle = trait({
 export const TextRange = trait({ start: 0, end: null as number | null });
 
 // Runtime-only: cached text layout, one Token[] per line. Never serialized.
-export const TextCache = trait({ tokens: () => [] as Token[][] });
+export const TextCache = trait({ tokens: () => [] as Token[][], layoutKey: '' });
