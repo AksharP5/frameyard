@@ -142,9 +142,16 @@ test('native 3D pixels preserve depth, editable paints, focus and volume occlusi
         const rounded = sample();
         document.setProperty(paint.get(r.Host)!, 'cornerRadius', 0);
         const square = sample(), squareStable = sample();
+        const squarePixels = ctx.getImageData(90, 60, 140, 80).data.slice();
+        paint.add(r.SourceError({ value: '' }));
+        const fallback = sample();
+        const fallbackPixels = ctx.getImageData(90, 60, 140, 80).data;
+        const samePixels = squarePixels.every((value, index) => value === fallbackPixels[index]);
+        paint.remove(r.SourceError);
+        sample();
         paint.add(r.Generating);
         const generating = sample(), generatingAgain = sample();
-        return { first, stable, edited, rounded, square, squareStable, generating, generatingAgain };
+        return { first, stable, edited, rounded, square, squareStable, fallback, samePixels, generating, generatingAgain };
       } finally {
         document.dispose(); world.destroy();
         WebGL2RenderingContext.prototype.texImage2D = originalImage;
@@ -157,7 +164,9 @@ test('native 3D pixels preserve depth, editable paints, focus and volume occlusi
     assert.ok(result.rounded.uploads > result.edited.uploads);
     assert.ok(result.square.uploads > result.rounded.uploads);
     assert.equal(result.squareStable.uploads, result.square.uploads);
-    assert.ok(result.generating.uploads > result.squareStable.uploads);
+    assert.ok(result.fallback.uploads > result.squareStable.uploads);
+    assert.equal(result.samePixels, true, 'the fast paint matches the full drawing path');
+    assert.ok(result.generating.uploads > result.fallback.uploads);
     assert.ok(result.generatingAgain.uploads > result.generating.uploads, 'live fills keep repainting');
   });
   await t.test('mesh retains editable gradient paint', async () => {

@@ -23,7 +23,7 @@ import {
 	Host,
 	Mode, FrameRate, Background, RenderSurface,
 	HitRegions,
-	Root, Highlight, Preset, ColorGrade, VideoDecoderHandle, Scene3D,
+	Root, Highlight, Preset, ColorGrade, VideoDecoderHandle, Scene3D, Generating, SourceError,
 } from '../traits';
 import { getParentNode } from '../queries/hierarchy';
 import { geometryPath, geometryFillRule, projectedGeometryPath } from '../utils/path';
@@ -536,7 +536,7 @@ function renderShadows(world: World, entity: Entity): void {
 	const computed = store(world, Computed);
 
 	const shadows = store(world, Cache).shadows[entity.id()];
-	if (!shadows) return;
+	if (!shadows?.length) return;
 
 	ctx.save();
 	const savedAlpha = ctx.globalAlpha;
@@ -682,6 +682,16 @@ function renderWaveform(world: World, entity: Entity, fill: Entity): void {
 }
 
 function renderShapeNode(world: World, entity: Entity): void {
+	const cache = entity.get(Cache);
+	const computed = entity.get(Computed)!;
+	if (entity.get(Geometry)?.value === GeometryType.RECT && entity.has(Color) && !entity.has(Paint)
+		&& !entity.has(Generating) && !entity.has(SourceError) && !entity.has(MixedCornerRadius)
+		&& computed.cornerRadius === 0 && !cache?.fills.length && !cache?.shadows.length && !cache?.strokes.length) {
+		const ctx = getCtx(world);
+		ctx.fillStyle = colorToHex(computed.color ?? 0);
+		ctx.fillRect(0, 0, computed.width, computed.height);
+		return;
+	}
 	drawRectPath(world, entity);
 	renderShadows(world, entity);
 	renderIntrinsicFill(world, entity);
