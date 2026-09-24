@@ -2,8 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -66,7 +65,7 @@ async function presentImages(images: TimecodedImage[], output: string | undefine
   const refs: ToolOutput<"capture">["images"] = [];
   for (const { timecode, png } of images) {
     const path = join(dir, `${timecode}.png`);
-    await writeFile(path, png);
+    await writePrivateFile(path, png);
     written.push({ path, png });
     refs.push({ timecode, path });
   }
@@ -93,35 +92,43 @@ async function presentPreview(
 ): Promise<Presented> {
   const { png, ...rest } = result;
   const path = await singleFilePath(output, `dapi-${kind}-${randomUUID()}.png`);
-  await writeFile(path, png);
+  await writePrivateFile(path, png);
   return { output: { path, ...rest }, images: [{ path, png }] };
 }
 
 async function presentScreenshot(result: ToolResult<"screenshot">, output: string | undefined): Promise<Presented> {
   const dir = output ?? tmpdir();
   await mkdir(dir, { recursive: true });
-  const taken = new Date();
-  let attempt = 1;
-  let path = join(dir, screenshotFilename(taken, attempt));
-  while (existsSync(path)) path = join(dir, screenshotFilename(taken, ++attempt));
-  await writeFile(path, result.png);
+  const path = join(dir, screenshotFilename(new Date()));
+  await writePrivateFile(path, result.png);
   const presented: ToolOutput<"screenshot"> = { path, width: result.width, height: result.height };
   return { output: presented, images: [{ path, png: result.png }] };
 }
 
 async function presentTranscript(transcript: ToolResult<"media_transcribe">, output: string | undefined): Promise<Presented> {
   const path = await singleFilePath(output, `dapi-transcript-${randomUUID()}.json`);
-  await writeFile(path, JSON.stringify(transcript, null, 2));
+  await writePrivateFile(path, JSON.stringify(transcript, null, 2));
   const words = transcript.segments.reduce((sum, segment) => sum + segment.words.length, 0);
   const presented: ToolOutput<"media_transcribe"> = { path, segments: transcript.segments.length, words };
   return { output: presented, images: [] };
 }
 
-function screenshotFilename(taken: Date, attempt: number): string {
+async function writePrivateFile(path: string, data: Uint8Array | string): Promise<void> {
+  const temporary = join(dirname(path), `.dapi-${randomUUID()}.tmp`);
+  try {
+    await writeFile(temporary, data, { flag: "wx", mode: 0o600 });
+    await rename(temporary, path);
+  } catch (error) {
+    await unlink(temporary).catch(() => undefined);
+    throw error;
+  }
+}
+
+function screenshotFilename(taken: Date): string {
   const pad = (value: number) => String(value).padStart(2, "0");
   const date = [taken.getFullYear(), pad(taken.getMonth() + 1), pad(taken.getDate())].join("-");
   const time = [pad(taken.getHours()), pad(taken.getMinutes()), pad(taken.getSeconds())].join("-");
-  return `${APP_SLUG}_${date}_${time}${attempt > 1 ? `-${attempt}` : ""}.png`;
+  return `${APP_SLUG}_${date}_${time}-${randomUUID()}.png`;
 }
 
 /** Preserve structured output and present editor content directly; inline file previews when small. */

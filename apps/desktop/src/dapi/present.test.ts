@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -57,8 +57,9 @@ describe("present", () => {
     const second = await present("screenshot", { output: dir }, { png: png(6), width: 10, height: 10 });
     const a = (first.output as { path: string }).path;
     const b = (second.output as { path: string }).path;
-    expect(a).toMatch(/diffusion-studio_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.png$/);
+    expect(a).toMatch(/diffusion-studio_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-[\da-f-]{36}\.png$/);
     expect(b).not.toBe(a);
+    expect(statSync(a).mode & 0o777).toBe(0o600);
   });
 
   it("writes a transcript to a file, unchanged, and returns its path and size", async () => {
@@ -67,6 +68,20 @@ describe("present", () => {
     const presented = await present("media_transcribe", { path: "/c.mp4", output: file }, { segments });
     expect(presented).toEqual({ output: { path: file, segments: 1, words: 2 }, images: [] });
     expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ segments });
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+  });
+
+  it("replaces an output symlink without writing through it", async () => {
+    const target = join(dir, "unrelated.txt");
+    const output = join(dir, "linked-transcript.json");
+    writeFileSync(target, "keep this");
+    symlinkSync(target, output);
+
+    await present("media_transcribe", { path: "/c.mp4", output }, { segments: [] });
+
+    expect(readFileSync(target, "utf8")).toBe("keep this");
+    expect(lstatSync(output).isSymbolicLink()).toBe(false);
+    expect(statSync(output).mode & 0o777).toBe(0o600);
   });
 
   it("passes other results through untouched", async () => {
