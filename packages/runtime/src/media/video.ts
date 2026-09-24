@@ -87,6 +87,7 @@ export class VideoBuffer {
 	private currentFrame: number = -1;
 	private frameRate: number;
 	private isDirty: boolean = true;
+	private renderedTileRevision = -1;
 	private keyframes: KeyframeIndex | null = null;
 
 	/**
@@ -507,26 +508,30 @@ export class VideoBuffer {
 			const nearest = this.findDisplayFrame();
 			const tile = nearest === undefined ? undefined : this.cache.findTile(nearest);
 			const ctx = this.ctx;
+			const resized = !!tile && (this.canvas.width !== tile.width || this.canvas.height !== tile.height);
 
-			if (tile && (this.canvas.width !== tile.width || this.canvas.height !== tile.height)) {
+			if (resized) {
 				this.canvas.width = tile.width;
 				this.canvas.height = tile.height;
 				this.ctx.imageSmoothingEnabled = false;
 			}
 
 			if (tile) {
+				if (resized || this.renderedTileRevision !== tile.revision) {
+					ctx.drawImage(
+						this.cache.atlas,
+						tile.x,
+						tile.y,
+						tile.width,
+						tile.height,
+						0,
+						0,
+						tile.width,
+						tile.height,
+					);
+					this.renderedTileRevision = tile.revision;
+				}
 				this.renderedFrame = nearest!;
-				ctx.drawImage(
-					this.cache.atlas,
-					tile.x,
-					tile.y,
-					tile.width,
-					tile.height,
-					0,
-					0,
-					tile.width,
-					tile.height,
-				);
 				this.isDirty = false;
 			}
 		}

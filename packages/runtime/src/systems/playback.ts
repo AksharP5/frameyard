@@ -541,8 +541,8 @@ export function playbackSystem(world: World): void {
 
 	// Sync audio buses
 	let soloed: Set<Entity> | null = null;
-	for (const entity of world.query(AudioBusHandle)) {
-		entity.get(AudioBusHandle)?.sync();
+	const buses = world.query(AudioBusHandle);
+	for (const entity of buses) {
 		if (!entity.has(Soloed)) continue;
 
 		if (soloed === null) {
@@ -559,12 +559,8 @@ export function playbackSystem(world: World): void {
 		}
 	}
 
-	if (soloed) {
-		for (const entity of world.query(AudioBusHandle)) {
-			if (!soloed.has(entity)) {
-				entity.get(AudioBusHandle)?.mute();
-			}
-		}
+	for (const entity of buses) {
+		entity.get(AudioBusHandle)?.sync(soloed !== null && !soloed.has(entity));
 	}
 
 	for (const tick of world.get(Tickers) ?? []) tick();

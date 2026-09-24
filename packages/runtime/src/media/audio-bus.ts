@@ -67,8 +67,9 @@ export class AudioBus {
 		return this.outputNode;
 	}
 
-	public sync(): void {
-		this.gain.gain.value = this.getVolume();
+	public sync(mutedBySolo = false): void {
+		const volume = mutedBySolo ? 0 : this.getVolume();
+		if (this.gain.gain.value !== Math.fround(volume)) this.gain.gain.value = volume;
 		const settings = this.entity.get(AudioProcessing)?.value;
 		if (settings === this.settings) return;
 		this.settings = settings;
@@ -80,7 +81,7 @@ export class AudioBus {
 	}
 
 	public mute(): void {
-		this.gain.gain.value = 0;
+		if (this.gain.gain.value !== 0) this.gain.gain.value = 0;
 	}
 
 	public disconnect() {

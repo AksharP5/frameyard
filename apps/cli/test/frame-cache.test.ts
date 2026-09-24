@@ -37,7 +37,7 @@ test('unrotated 4K frames stay within the preview tile budget without a full-res
     for (let index = 0; index < 30; index++) cache.insert(frame, index);
     assert.ok(canvases.reduce((pixels, canvas) => pixels + canvas.width * canvas.height, 0) <= 1280 * 720 * 30, 'cached 4K preview frames must not retain an extra 3840×2160 backing store');
     assert.equal(canvases.reduce((draws, canvas) => draws + canvas.draws.length, 0), 30, 'each unrotated frame needs one downscale into its cache tile');
-    assert.deepEqual(JSON.parse(JSON.stringify(cache.findTile(29))), { x: 6400, y: 2880, width: 1280, height: 720 });
+    assert.deepEqual(JSON.parse(JSON.stringify(cache.findTile(29))), { x: 6400, y: 2880, width: 1280, height: 720, revision: 30 });
   } finally { cache.dispose(); }
   assert.ok(canvases.every(canvas => canvas.width === 0 && canvas.height === 0));
 });
@@ -50,7 +50,7 @@ test('rotated preview tiles keep their orientation, dimensions, and transparent 
       cache.insert(frame, 0);
       const width = rotation === 180 ? 1280 : 720;
       const height = rotation === 180 ? 720 : 1280;
-      assert.deepEqual(JSON.parse(JSON.stringify(cache.findTile(0))), { x: 0, y: 0, width, height });
+      assert.deepEqual(JSON.parse(JSON.stringify(cache.findTile(0))), { x: 0, y: 0, width, height, revision: 1 });
       assert.deepEqual(canvases[1].rotations, [rotation * Math.PI / 180]);
       assert.equal(canvases[0].draws[0][0], canvases[1], 'rotation still uses the correctly oriented intermediate');
       assert.deepEqual(canvases[0].clears, [[0, 0, width, height]], 'transparent frames replace the tile instead of accumulating pixels');
