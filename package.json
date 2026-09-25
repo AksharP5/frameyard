@@ -36,7 +36,8 @@
     "extract-zip": {
       "yauzl": "3.3.1"
     },
-    "tar": "7.5.22"
+    "tar": "7.5.22",
+    "tmp": "0.2.7"
   },
   "repository": {
     "type": "git",
