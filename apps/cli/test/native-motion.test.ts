@@ -187,6 +187,35 @@ test('transform and camera props animate from one property vocabulary and retain
   assert.deepEqual(copiedScene.get(api.SceneCamera), f.scene.entity.get(api.SceneCamera));
 });
 
+test('local transforms preserve combined skew, flip and an off-center anchor', () => {
+  const f = fixture();
+  const shape = f.add('Rect', {
+    x: 123, y: 47, width: 240, height: 90,
+    offsetX: 5, offsetY: -2, rotation: 33,
+    scaleX: 1.7, scaleY: 0.6, skewX: 12, skewY: -9,
+    anchorX: 0.2, anchorY: 0.8, flipX: true,
+  }, f.scene);
+
+  api.transformSystem(f.world);
+  const computed = shape.entity.get(api.Computed)!;
+  const pivotX = computed.anchorX * computed.width;
+  const pivotY = computed.anchorY * computed.height;
+  let expected = api.translate2D(computed.positionX + computed.offsetX, computed.positionY + computed.offsetY);
+  for (const matrix of [
+    api.translate2D(pivotX, pivotY),
+    api.rotate2D(computed.rotation),
+    api.skew2D(computed.skewX, computed.skewY),
+    api.scale2D(-computed.scaleX, computed.scaleY),
+    api.translate2D(-pivotX, -pivotY),
+  ]) expected = api.multiply2D(expected, matrix);
+
+  const actual = api.store(f.world, api.LocalTransform);
+  for (const key of ['a', 'b', 'c', 'd', 'e', 'f'] as const) {
+    const value = actual[key][shape.entity.id()];
+    assert.ok(Math.abs(value - expected[key]) < 1e-9, `${key}: ${value} differs from ${expected[key]}`);
+  }
+});
+
 
 test('native path tags compile while paths and ellipses inside SVG remain DOM content', () => {
   const compiled = transformSync('const scene = <scene><path d="M0 0L10 10"/><ellipse/><html><svg><path d="M0 0L20 20"/><ellipse rx="10"/></svg></html></scene>;', {
