@@ -45,13 +45,17 @@ class Rect {
 }
 class Element extends EventTarget {
   rect = new Rect();
-  style = { width: "", height: "", transform: "", setProperty() {} };
+  layerX = "";
+  style = { width: "", height: "", transform: "", setProperty: (_name: string, value: string) => { this.layerX = value; } };
   width = 0; height = 0; scrollHeight = 400; clientHeight = 300;
+  scrollWidth = 0; clientWidth = 0;
+  labels: Element[] = [];
+  labelScans = 0;
   capture: number | undefined;
   parentElement: Element | null = null;
   focus() {}
   getBoundingClientRect() { return Object.assign(new Rect(), this.rect); }
-  querySelectorAll() { return []; }
+  querySelectorAll() { this.labelScans++; return this.labels; }
   setPointerCapture(id: number) { this.capture = id; }
   hasPointerCapture(id: number) { return this.capture === id; }
   releasePointerCapture() { this.capture = undefined; }
@@ -66,12 +70,19 @@ function event(target: EventTarget, type: string, x: number, y: number, extra: R
 function fixture() {
   const canvas = new Element();
   const parent = new Element();
+  const layers = new Element();
+  const layersViewport = new Element();
   canvas.parentElement = parent;
   const body = new Element();
   const window = Object.assign(new EventTarget(), { devicePixelRatio: 1, innerWidth: 1200 });
   const resizeCallbacks: (() => void)[] = [];
+  const mutationCallbacks: (() => void)[] = [];
   class Observer {
     constructor(callback: () => void) { resizeCallbacks.push(callback); }
+    observe() {} disconnect() {}
+  }
+  class MutationObserver {
+    constructor(callback: () => void) { mutationCallbacks.push(callback); }
     observe() {} disconnect() {}
   }
   let transform = new Matrix();
@@ -105,15 +116,15 @@ function fixture() {
       reportEdit: (_scene: unknown, _name: string, value: unknown) => reports.push(value),
     }) },
   };
-  runInThisContext(`(function(require,module,exports,window,document,DOMMatrix,DOMRect,DOMPoint,ResizeObserver,WheelEvent){"use strict";${built.outputFiles[0].text}\n})`)((name: keyof typeof dependencies) => {
+  runInThisContext(`(function(require,module,exports,window,document,DOMMatrix,DOMRect,DOMPoint,ResizeObserver,MutationObserver,WheelEvent){"use strict";${built.outputFiles[0].text}\n})`)((name: keyof typeof dependencies) => {
     assert.ok(name in dependencies, `Unexpected dependency ${name}`);
     return dependencies[name];
   }, module, module.exports, window,
-  { body, getElementById: () => canvas, querySelector: () => new Element() }, Matrix, Rect,
+  { body, getElementById: () => canvas, querySelector: (selector: string) => selector === '[data-timeline-layers]' ? layers : layersViewport }, Matrix, Rect,
   class {
     x: number; y: number;
     constructor(x: number, y: number) { this.x = x; this.y = y; }
-  }, Observer, { DOM_DELTA_LINE: 1, DOM_DELTA_PAGE: 2 });
+  }, Observer, MutationObserver, { DOM_DELTA_LINE: 1, DOM_DELTA_PAGE: 2 });
   const api = module.exports;
   const world = api.createWorld(api.FrameRate({ value: 30 }), api.TimelineSurface);
   const scene = world.spawn(api.Scene, api.Active, api.Computed({ localTime: 150 }), api.Timeline({ resolution: 2, scrollX: 0 }));
@@ -136,8 +147,33 @@ function fixture() {
   function move(x: number, y: number, shiftKey = false) { event(body, "pointermove", x, y, { shiftKey }); draw(); }
   function up(x: number, y: number) { event(body, "pointerup", x, y, { buttons: 0 }); draw(); }
   function close() { controller.detachCanvas(); controller.unmount(); world.destroy(); }
-  return { ...api, world, scene, clip, surface, controller, canvas, parent, body, window, resizeCallbacks, edits, reports, down, move, up, close };
+  return { ...api, world, scene, clip, surface, controller, canvas, parent, layers, body, window, resizeCallbacks, mutationCallbacks, edits, reports, down, move, up, close };
 }
+
+test("vertical timeline scrolling avoids measuring labels; horizontal scrolling and label changes clamp them", () => {
+  const f = fixture();
+  const label = new Element();
+  label.scrollWidth = 220;
+  label.clientWidth = 100;
+  f.layers.labels.push(label);
+  f.layers.labelScans = 0;
+
+  f.controller.scrollBy(30);
+  event(f.canvas, "wheel", 100, 100, { deltaX: 0, deltaY: 20, deltaMode: 0 });
+  assert.equal(f.layers.labelScans, 0);
+
+  f.controller.scroll(Object.assign(new Event("wheel", { cancelable: true }), { deltaX: 200, deltaY: 0, deltaMode: 0 }) as WheelEvent);
+  assert.equal(f.layers.labelScans, 1);
+  assert.equal(f.layers.layerX, "120px");
+
+  label.scrollWidth = 130;
+  f.mutationCallbacks[0]();
+  assert.equal(f.layers.layerX, "30px");
+  label.scrollWidth = 120;
+  f.resizeCallbacks[1]();
+  assert.equal(f.layers.layerX, "20px");
+  f.close();
+});
 
 test("workarea creation snaps both directions to selected clip cuts and releases from the following playhead", () => {
   const f = fixture();
