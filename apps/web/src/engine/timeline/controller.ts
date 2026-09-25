@@ -216,11 +216,10 @@ export function createTimelineController(world: World) {
 	});
 
 	/**
-	 * Moves the row labels to match the scroll the canvas is drawn at. They
-	 * are DOM, so they cannot be drawn scrolled — they are translated instead,
-	 * and the scroll is clamped to what there is to scroll through.
+	 * Moves the DOM row labels to match the canvas's vertical scroll, clamped
+	 * to the height of the layer list.
 	 */
-	const applyScroll = (): void => {
+	const applyVerticalScroll = (): void => {
 		if (!layersEl || !layersViewportEl) return;
 
 		withScene((scene) => {
@@ -228,8 +227,11 @@ export function createTimelineController(world: World) {
 			setScrollY(world, scene, scrollY);
 			layersEl!.style.transform = `translateY(${-scrollY}px)`;
 		});
+	};
 
-		// The labels scroll sideways only as far as the widest one overflows.
+	const applyLayerScrollX = (): void => {
+		if (!layersEl) return;
+		// Measure label widths only when horizontal scrolling or layout changes.
 		let maxScrollX = 0;
 		for (const label of layersEl.querySelectorAll<HTMLElement>('[data-layer-label]')) {
 			maxScrollX = Math.max(maxScrollX, label.scrollWidth - label.clientWidth);
@@ -237,6 +239,13 @@ export function createTimelineController(world: World) {
 		layerScrollX = clamp(layerScrollX, 0, maxScrollX);
 		layersEl.style.setProperty('--layer-x', `${layerScrollX}px`);
 	};
+
+	const applyScroll = (): void => {
+		applyVerticalScroll();
+		applyLayerScrollX();
+	};
+
+	const labelObserver = new MutationObserver(applyLayerScrollX);
 
 	/**
 	 * One axis at a time, in the order the gesture is most likely to have
@@ -264,7 +273,7 @@ export function createTimelineController(world: World) {
 				setScrollX(world, scene, scrollX + (deltaX * SCROLL_X_SENSITIVITY) / resolution);
 			} else {
 				setScrollY(world, scene, getScrollY(world, scene) + deltaY);
-				applyScroll();
+				applyVerticalScroll();
 			}
 
 			updateTimelineTransform(world, scene);
@@ -281,11 +290,12 @@ export function createTimelineController(world: World) {
 
 			if (Math.abs(deltaX) > Math.abs(deltaY)) {
 				layerScrollX += deltaX;
+				applyLayerScrollX();
 			} else {
 				setScrollY(world, scene, getScrollY(world, scene) + deltaY);
+				applyVerticalScroll();
 			}
 
-			applyScroll();
 			updateTimelineTransform(world, scene);
 			reportView(scene);
 		});
@@ -295,7 +305,7 @@ export function createTimelineController(world: World) {
 	const scrollBy = (deltaY: number): void => {
 		withScene((scene) => {
 			setScrollY(world, scene, getScrollY(world, scene) + deltaY);
-			applyScroll();
+			applyVerticalScroll();
 			updateTimelineTransform(world, scene);
 			reportView(scene);
 		});
@@ -371,6 +381,7 @@ export function createTimelineController(world: World) {
 		surface.pointer = pointer;
 
 		layerObserver.observe(layers);
+		labelObserver.observe(layers, { childList: true, characterData: true, subtree: true });
 
 		// On the body, so a drag that leaves the canvas still finishes.
 		document.body.addEventListener('pointermove', handlePointerMove, { passive: true });
@@ -382,6 +393,7 @@ export function createTimelineController(world: World) {
 	const unmount = (): void => {
 		handleBlur();
 		layerObserver.disconnect();
+		labelObserver.disconnect();
 		surface.pointer = null;
 
 		document.body.removeEventListener('pointermove', handlePointerMove);
