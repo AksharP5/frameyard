@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
+import { version } from "../../../package.json";
 
 export function object(value: unknown): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("Invalid Codex response object");
@@ -106,7 +107,7 @@ export class CodexAppServer {
     });
     try {
       await this.sendRequest("initialize", {
-        clientInfo: { name: "frameyard", title: "Frameyard", version: "0.204.1-linux.1" },
+        clientInfo: { name: "frameyard", title: "Frameyard", version },
         capabilities: { experimentalApi: true, requestAttestation: false },
       });
       this.send({ method: "initialized", params: {} });
