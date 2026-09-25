@@ -25,6 +25,11 @@ dapi export main ~/Videos/my-project/final.mp4
 
 Use your scene's actual ID in place of `main`. Opening a project compiles its JSX and may load project-local Babel configuration or plugins. Open only projects you trust.
 
+To use OpenCode, open **MCP & CLI** in Frameyard and connect **OpenCode**. Frameyard
+adds its authenticated local MCP server to `~/.config/opencode/opencode.json`;
+your other OpenCode settings and MCP servers remain in place. OpenCode uses its
+own account and runs outside Frameyard's in-app Assistant.
+
 Media imported from outside a project stays at its original location. Before sharing a project, use **Collect project media** in the editor to copy those files into it. [Editing controls](editing-controls.md) covers the timeline, save recovery, export, and media tools.
 
 ## Where files go
