@@ -113,16 +113,19 @@ export function renderWaveform(
 	ctx.translate(originPx, options.offsetY + options.padding * anchor);
 
 	const samples = getClipSamples(eid);
+	if (samples) {
+		ctx.beginPath();
+		for (let x = firstSample; x < lastSample; x += SAMPLE_WIDTH) {
+			const time = pixelsToSeconds(x) * playbackRate;
+			if (time < samples.start || time > samples.end) continue;
 
-	for (let x = firstSample; samples && x < lastSample; x += SAMPLE_WIDTH) {
-		const time = pixelsToSeconds(x) * playbackRate;
-		if (time < samples.start || time > samples.end) continue;
+			const peak = samples.data[Math.floor((time - samples.start) * samples.peaksPerSecond)];
+			if (peak === undefined) continue;
 
-		const peak = samples.data[Math.floor((time - samples.start) * samples.peaksPerSecond)];
-		if (peak === undefined) continue;
-
-		const height = Math.max((peak / 255) * waveformHeight, minSampleHeight);
-		ctx.fillRect(x, (waveformHeight - height) * anchor, SAMPLE_WIDTH, height);
+			const height = Math.max((peak / 255) * waveformHeight, minSampleHeight);
+			ctx.rect(x, (waveformHeight - height) * anchor, SAMPLE_WIDTH, height);
+		}
+		ctx.fill();
 	}
 
 	ctx.restore();
