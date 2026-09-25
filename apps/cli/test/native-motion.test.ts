@@ -13,6 +13,7 @@ const bundle = await build({
       export { SOURCE_ATTR, ANIMATABLE_PROPERTIES } from '@diffusionstudio/jsx';
       export { getEditHistory } from './history';
       export { getDocumentEditor } from './editor';
+      export { handleGeometryInteraction, handleMaskInteraction } from './input/interactions';
       export { canonicalizeTagsPlugin } from '../../../desktop/src/source';
     `,
     resolveDir: fileURLToPath(new URL('../../web/src/engine/', import.meta.url)),
@@ -27,6 +28,7 @@ const module = { exports: {} as {
   & Pick<typeof import('@diffusionstudio/jsx'), 'SOURCE_ATTR' | 'ANIMATABLE_PROPERTIES'>
   & Pick<typeof import('../../web/src/engine/history'), 'getEditHistory'>
   & Pick<typeof import('../../web/src/engine/editor'), 'getDocumentEditor'>
+  & Pick<typeof import('../../web/src/engine/input/interactions'), 'handleGeometryInteraction' | 'handleMaskInteraction'>
   & Pick<typeof import('../../desktop/src/source'), 'canonicalizeTagsPlugin'> };
 class Element {}
 class Text {
@@ -86,6 +88,28 @@ test('converted trees insert without source-only ids while keeping nested text a
   assert.equal(copy.children[1].children[0].props.property, 'd');
   assert.equal(copy.children[1].children[0].children[1].props.value, shapeB);
   assert.equal(tree.props.id, 'converted-group');
+});
+
+test('double-clicking selected or newly picked text enters text editing', () => {
+  const f = fixture();
+  const text = f.add('Text', { x: 10, y: 10 }, f.scene);
+  reconciler.getDocumentEditor(f.world).select(text.entity);
+  reconciler.handleMaskInteraction(f.world, {
+    type: 'dblclick', clientX: 20, clientY: 20, button: 0,
+    target: { kind: 'hud', id: 'selection', entity: text.entity, quad: [
+      { x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 },
+    ] },
+  });
+  assert.equal(f.world.get(api.Tool)?.value, api.ToolType.TEXT_EDIT);
+  f.world.set(api.Tool, { value: api.ToolType.MOVE });
+  reconciler.getDocumentEditor(f.world).clearSelection();
+  reconciler.handleGeometryInteraction(f.world, {
+    type: 'dblclick', clientX: 20, clientY: 20, button: 0,
+    target: { kind: 'entity', id: text.entity },
+  });
+  assert.equal(f.world.get(api.Tool)?.value, api.ToolType.TEXT_EDIT);
+  assert.deepEqual(api.getSelection(f.world), [text.entity]);
+  f.world.destroy();
 });
 
 test('native path geometry and numeric keyframes stay editable through source edits, undo and snapshots', () => {

@@ -115,18 +115,18 @@ export function isPointerInEntity(world: World, entity: Entity, point: Point): b
 }
 
 /** Canvas picking excludes invisible content and respects inherited locks. */
-export function isEntitySelectable(world: World, entity: Entity): boolean {
+export function isEntitySelectable(world: World, entity: Entity, includeMask = false): boolean {
 	if (!entity.isAlive() || entity.has(Sequential) || entity.has(Audio) || entity.has(Culled)
 		|| store(world, Computed).visibility[entity.id()] === 0 || spatialNode(world, entity)?.visible === false) return false;
 	for (let node: Entity | null = entity; node; node = getParentEntity(node)) {
-		if (node.has(Hidden) || node.has(Locked) || node.has(IsMask)) return false;
+		if (node.has(Hidden) || node.has(Locked) || (node.has(IsMask) && (!includeMask || node !== entity))) return false;
 	}
 	return true;
 }
 
 /** Visible selection bounds exclude audio and non-spatial sequences. */
 export function getMaskSelection(world: World): Entity[] {
-	return [...world.query(Selected, Or(Geometry, Group), Not(Sequential), Not(Audio))].filter((entity) => isEntitySelectable(world, entity));
+	return [...world.query(Selected, Or(Geometry, Group), Not(Sequential), Not(Audio))].filter((entity) => isEntitySelectable(world, entity, true));
 }
 
 /** Nodes moved by a canvas transform, including sequences but excluding audio. */
