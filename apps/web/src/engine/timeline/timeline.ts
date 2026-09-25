@@ -14,6 +14,7 @@ import { RULER_HEIGHT } from './config';
 import { renderLayers, renderMarquee, renderPlayhead, renderRuler, renderSnapLine, renderWorkarea, updateMarquee } from './render';
 import { updateDragGestures } from './drag';
 import { renderMarkers } from './render/markers';
+import { pruneMedia } from './media';
 import { TimelineSurface } from './surface';
 import { getTimelineScene, updateTimelineTransform } from './view';
 
@@ -31,6 +32,7 @@ export function timelineSystem(world: World): void {
 	const scene = getTimelineScene(world);
 	if (scene === null) {
 		clearTimeline(surface, canvas, ctx, pointer);
+		pruneMedia();
 		return;
 	}
 
@@ -82,6 +84,7 @@ export function timelineSystem(world: World): void {
 	} finally {
 		// The regions drawn this frame are what the next frame tests against.
 		pointer.reset();
+		pruneMedia();
 	}
 }
 
