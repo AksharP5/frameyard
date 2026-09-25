@@ -16,12 +16,13 @@ import {
 	Geometry, Group, AdjustmentLayer, Paint, Audio, Caption, Muted, Soloed,
 	Sequential, Transition, Playback, Workarea,
 	AudioPlayback, AudioStream, Computed,
-	AudioDecoderHandle, VideoDecoderHandle, AudioBusHandle, Host,
+	AssetId, AudioDecoderHandle, ImageDecoderHandle, VideoDecoderHandle, AudioBusHandle, Host,
 	Mode, Silent, FrameRate, Time, AudioEngine, FramePromises, Tickers,
 	Root,
 } from '../traits';
 import { getNodeChildren, getNodePaints, getParentNode } from '../queries/hierarchy';
 import { getIntrinsicPaint, getSourceWindow } from '../utils/time';
+import { getAsset } from '../actions/assets';
 import { clamp } from '../math/common';
 import { getTransitionWindow } from '../utils/transition';
 import {
@@ -36,12 +37,19 @@ import type { Entity, World } from 'koota';
 
 const WARMUP_SECONDS = 1.5;
 const MAX_WARMUP_DECODERS = 2;
+const MAX_IMAGE_PREVIEW_BYTES = 256 * 1024 * 1024;
+const MAX_WARMUP_IMAGES = 32;
 const AUDIO_LOOKAHEAD_SECONDS = 0.5;
 const AUDIO_START_LEAD_SECONDS = 0.05;
 
 type VideoForwarding = {
 	active: Set<Entity>;
 	warmup: { entity: Entity; fill: Entity; distance: number }[];
+};
+
+type ImageForwarding = {
+	active: Set<Entity>;
+	warmup: { fill: Entity; distance: number }[];
 };
 
 function framePromises(world: World) {
@@ -57,18 +65,27 @@ function preparePlayback(world: World, scene: Entity, entity: Entity = scene, pa
 	if (entity !== scene && computed && (frame + AUDIO_LOOKAHEAD_SECONDS * fps < computed.start || frame >= computed.end)) return true;
 
 	const muted = parentMuted || entity.has(Muted);
-	const intrinsicVideo = getIntrinsicPaint(entity) === PaintType.VIDEO;
+	const intrinsic = getIntrinsicPaint(entity);
+	const intrinsicVideo = intrinsic === PaintType.VIDEO;
 	const videos = intrinsicVideo ? [entity] : [];
+	const images = intrinsic === PaintType.IMAGE ? [entity] : [];
 	let source: Entity | undefined = entity.has(Audio) || intrinsicVideo ? entity : undefined;
 	for (const fill of getNodePaints(world, entity)) {
 		if (fill.has(Hidden)) continue;
-		if (fill.get(Paint)?.value !== PaintType.VIDEO) continue;
-		videos.push(fill);
-		source = fill;
+		const paint = fill.get(Paint)?.value;
+		if (paint === PaintType.IMAGE) images.push(fill);
+		if (paint === PaintType.VIDEO) {
+			videos.push(fill);
+			source = fill;
+		}
 	}
 
 	let ready = true;
 	if (computed && frame >= computed.start && !entity.has(Culled)) {
+		for (const image of images) {
+			const decoder = resolveImageDecoder(world, image)?.decoder;
+			if (decoder && !decoder.ready && !decoder.failed) ready = false;
+		}
 		const window = getSourceWindow(entity);
 		const localFrame = Math.round((frame - computed.origin) * (computed.playbackRate || 1));
 		for (const video of videos) {
@@ -212,16 +229,22 @@ function forwardVideoDecoder(world: World, scene: Entity, entity: Entity, fill: 
 	}
 	if (world.get(Mode)?.value !== 'realtime') return;
 
+	const distance = warmupDistance(world, scene, entity);
+	if (distance !== null) videos.warmup.push({ entity, fill, distance });
+}
+
+function warmupDistance(world: World, scene: Entity, entity: Entity): number | null {
+	const computed = store(world, Computed);
+	const eid = entity.id();
 	const globalFrame = computed.localTime[scene.id()]!;
 	const start = computed.start[eid]!;
 	const end = computed.end[eid]!;
 	const warmupFrames = Math.ceil((world.get(FrameRate)?.value ?? 30) * WARMUP_SECONDS);
-	if (globalFrame < start - warmupFrames || globalFrame >= end + warmupFrames) return;
+	if (globalFrame < start - warmupFrames || globalFrame >= end + warmupFrames) return null;
 
 	// Prefer upcoming cuts, then recently passed clips. A time window alone
-	// can retain dozens of full-resolution atlases on a densely cut timeline.
-	const distance = globalFrame < start ? start - globalFrame : warmupFrames + globalFrame - end + 1;
-	videos.warmup.push({ entity, fill, distance });
+	// can retain too many decoded frames on a densely cut timeline.
+	return globalFrame < start ? start - globalFrame : warmupFrames + globalFrame - end + 1;
 }
 
 function forwardCaptionDecoder(world: World, _scene: Entity, entity: Entity): void {
@@ -313,9 +336,10 @@ function forwardHtmlHost(world: World, scene: Entity, entity: Entity, fill: Enti
 	framePromises(world)?.push(whenHtmlReady(root, computed.localTimeInSeconds[scene.id()] ?? 0));
 }
 
-function forwardImageDecoder(world: World, _scene: Entity, _entity: Entity, fill: Entity): void {
+function forwardImageDecoder(world: World, fill: Entity, images: ImageForwarding): void {
 	const resolvedDecoder = resolveImageDecoder(world, fill);
 	if (!resolvedDecoder) return;
+	images.active.add(fill);
 
 	const { decoder, initPromise } = resolvedDecoder;
 
@@ -324,10 +348,28 @@ function forwardImageDecoder(world: World, _scene: Entity, _entity: Entity, fill
 	}
 }
 
+function queueImageDecoder(world: World, scene: Entity, entity: Entity, fill: Entity, images: ImageForwarding): void {
+	if (store(world, Computed).visibility[entity.id()] === 1) {
+		forwardImageDecoder(world, fill, images);
+		return;
+	}
+	if (world.get(Mode)?.value !== 'realtime') return;
+
+	const distance = warmupDistance(world, scene, entity);
+	if (distance !== null) images.warmup.push({ fill, distance });
+}
+
+function imagePreviewBytes(world: World, fill: Entity): { id: string; bytes: number } | null {
+	const id = fill.get(AssetId)?.value;
+	if (!id) return null;
+	const asset = getAsset(world, id);
+	return asset?.type === 'IMAGE' ? { id, bytes: asset.width * asset.height * 4 } : null;
+}
+
 /**
  * Forward decoders for a child entity and its node descendants.
  */
-function forwardDecoders(world: World, scene: Entity, entity: Entity, videos: VideoForwarding): void {
+function forwardDecoders(world: World, scene: Entity, entity: Entity, videos: VideoForwarding, images: ImageForwarding): void {
 	if (entity.has(Hidden)) return;
 	const paintStore = store(world, Paint);
 
@@ -345,7 +387,7 @@ function forwardDecoders(world: World, scene: Entity, entity: Entity, videos: Vi
 			}
 			intrinsicVideo = true;
 		} else if (intrinsic === PaintType.IMAGE && visualsEnabled) {
-			forwardImageDecoder(world, scene, entity, entity);
+			queueImageDecoder(world, scene, entity, entity, images);
 		} else if (intrinsic === PaintType.HTML && visualsEnabled) {
 			forwardHtmlHost(world, scene, entity, entity);
 		}
@@ -362,7 +404,7 @@ function forwardDecoders(world: World, scene: Entity, entity: Entity, videos: Vi
 			}
 
 			if (paint === PaintType.IMAGE && visualsEnabled) {
-				forwardImageDecoder(world, scene, entity, fill);
+				queueImageDecoder(world, scene, entity, fill, images);
 			}
 
 			if (paint === PaintType.HTML && visualsEnabled) {
@@ -385,7 +427,7 @@ function forwardDecoders(world: World, scene: Entity, entity: Entity, videos: Vi
 	}
 
 	for (const child of getNodeChildren(world, entity)) {
-		forwardDecoders(world, scene, child, videos);
+		forwardDecoders(world, scene, child, videos, images);
 	}
 }
 
@@ -521,8 +563,39 @@ export function playbackSystem(world: World): void {
 	}
 
 	const videos: VideoForwarding = { active: new Set(), warmup: [] };
+	const images: ImageForwarding = { active: new Set(), warmup: [] };
 	for (const entity of world.query(Or(Geometry, Group, AdjustmentLayer), ChildOf(world.get(Root)!))) {
-		forwardDecoders(world, entity, entity, videos);
+		forwardDecoders(world, entity, entity, videos, images);
+	}
+	images.warmup.sort((a, b) => a.distance - b.distance);
+	const imageAssets = new Set<string>();
+	let imageBytes = 0;
+	for (const fill of images.active) {
+		const image = imagePreviewBytes(world, fill);
+		if (!image || imageAssets.has(image.id)) continue;
+		imageAssets.add(image.id);
+		imageBytes += image.bytes;
+	}
+	let warmedImages = 0;
+	for (const { fill } of images.warmup) {
+		if (warmedImages >= MAX_WARMUP_IMAGES) break;
+		const image = imagePreviewBytes(world, fill);
+		if (!image) continue;
+		const addedBytes = imageAssets.has(image.id) ? 0 : image.bytes;
+		if (warmedImages >= 2 && imageBytes + addedBytes > MAX_IMAGE_PREVIEW_BYTES) continue;
+		forwardImageDecoder(world, fill, images);
+		warmedImages++;
+		if (!imageAssets.has(image.id)) {
+			imageAssets.add(image.id);
+			imageBytes += image.bytes;
+		}
+	}
+	for (const fill of world.query(ImageDecoderHandle)) {
+		if (images.active.has(fill)) continue;
+		const decoder = fill.get(ImageDecoderHandle);
+		if (!decoder) continue;
+		decoder.dispose();
+		fill.set(ImageDecoderHandle, null);
 	}
 	videos.warmup.sort((a, b) => a.distance - b.distance);
 	for (const { entity, fill } of videos.warmup.slice(0, MAX_WARMUP_DECODERS)) {

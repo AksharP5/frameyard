@@ -3,14 +3,15 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { runInThisContext } from 'node:vm';
 import { build } from 'esbuild';
-import type { AssetLibrary, SequenceAsset, VideoAsset } from '../../../packages/assets/src/index.ts';
+import type { AssetLibrary, ImageAsset, SequenceAsset, VideoAsset } from '../../../packages/assets/src/index.ts';
 
 const built = await build({
   stdin: { contents: `
     export { createWorld } from 'koota';
-    export { FrameRate, Mode, Time, Library, Root, Group, Computed, Playback, ChildOf, Geometry, Paint, Muted, Hidden, AssetId, VideoDecoderHandle } from './traits';
+    export { FrameRate, Mode, Time, Library, Root, Group, Computed, Playback, ChildOf, Geometry, Paint, Muted, Hidden, AssetId, FramePromises, ImageDecoderHandle, VideoDecoderHandle } from './traits';
     export { PaintType } from './constants';
     export { playbackSystem } from './systems/playback';
+    export { resolveImageDecoder } from './media/image';
   `, resolveDir: fileURLToPath(new URL('../../../packages/runtime/src/', import.meta.url)) },
   bundle: true, write: false, format: 'cjs', platform: 'node',
   logOverride: { 'empty-import-meta': 'silent' },
@@ -20,6 +21,7 @@ const module = { exports: {} as
   & Pick<typeof import('koota'), 'createWorld'>
   & Pick<typeof import('../../../packages/runtime/src/constants.ts'), 'PaintType'>
   & Pick<typeof import('../../../packages/runtime/src/systems/playback.ts'), 'playbackSystem'>
+  & Pick<typeof import('../../../packages/runtime/src/media/image.ts'), 'resolveImageDecoder'>
 };
 class Canvas {
   width: number;
@@ -28,7 +30,7 @@ class Canvas {
   getContext() { return {}; }
 }
 runInThisContext(`(function(module,exports,OffscreenCanvas){"use strict";${built.outputFiles[0].text}\n})`)(module, module.exports, Canvas);
-const { createWorld, FrameRate, Mode, Time, Library, Root, Group, Computed, Playback, ChildOf, Geometry, Paint, PaintType, Muted, Hidden, AssetId, VideoDecoderHandle, playbackSystem } = module.exports;
+const { createWorld, FrameRate, Mode, Time, Library, Root, Group, Computed, Playback, ChildOf, Geometry, Paint, PaintType, Muted, Hidden, AssetId, FramePromises, ImageDecoderHandle, VideoDecoderHandle, playbackSystem, resolveImageDecoder } = module.exports;
 
 function fixture(fps = 60, clipDuration = fps) {
   const asset: VideoAsset = {
@@ -51,6 +53,110 @@ function fixture(fps = 60, clipDuration = fps) {
   const close = () => { for (const entity of world.query(VideoDecoderHandle)) entity.get(VideoDecoderHandle)?.dispose(); world.destroy(); };
   return { world, scene, group, clips, tick, active, close };
 }
+
+function imageFixture(mode: 'realtime' | 'offline-video' = 'realtime', width = 3840, height = 2160) {
+  const assets = new Map<string, ImageAsset>();
+  const world = createWorld(FrameRate({ value: 60 }), Mode({ value: mode }), Time({ delta: 0 }));
+  world.add(Library);
+  world.set(Library, { get: (id: string) => assets.get(id) } as unknown as AssetLibrary);
+  const root = world.spawn(); world.add(Root); world.set(Root, root);
+  const scene = world.spawn(Group, Computed({ duration: 221 }), Playback, ChildOf(root));
+  const clips = Array.from({ length: 221 }, (_, index) => {
+    const id = `still-${index}`;
+    assets.set(id, {
+      id, path: `${id}.png`, source: `${id}.png`, createdAt: '', mimeType: 'image/png', type: 'IMAGE',
+      width, height,
+      handle: { getFile: () => new Promise<File>(() => {}) },
+    });
+    return world.spawn(
+      Geometry, Paint({ value: PaintType.IMAGE }), AssetId({ value: id }),
+      Computed({ start: index, end: index + 1, origin: index, duration: 1 }), ChildOf(scene),
+    );
+  });
+  const tick = (frame: number) => { scene.set(Computed, { localTime: frame }); playbackSystem(world); };
+  const active = () => clips.flatMap((clip, index) => clip.get(ImageDecoderHandle) ? [index] : []);
+  const close = () => { for (const entity of world.query(ImageDecoderHandle)) entity.get(ImageDecoderHandle)?.dispose(); world.destroy(); };
+  return { world, scene, clips, assets, tick, active, close };
+}
+
+test('image previews keep only visible and nearest upcoming stills decoded', () => {
+  const f = imageFixture();
+  try {
+    for (const frame of [0, 100, 220, 0]) {
+      f.tick(frame);
+      const expected = frame === 220
+        ? Array.from({ length: 8 }, (_, index) => 213 + index)
+        : Array.from({ length: 8 }, (_, index) => frame + index);
+      assert.deepEqual(f.active(), expected);
+    }
+    f.clips[0].add(Hidden);
+    f.tick(0);
+    assert.deepEqual(f.active(), [1, 2, 3, 4, 5, 6, 7, 8], 'hiding a still releases its decoder');
+  } finally { f.close(); }
+});
+
+test('smaller stills receive more decode lookahead under the same memory budget', () => {
+  const f = imageFixture('realtime', 1920, 1080);
+  try {
+    f.tick(0);
+    assert.deepEqual(f.active(), Array.from({ length: 32 }, (_, index) => index));
+  } finally { f.close(); }
+});
+
+test('leaving a still closes its decoded bitmap', async () => {
+  const f = imageFixture();
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'createImageBitmap');
+  let closed = 0;
+  Object.defineProperty(globalThis, 'createImageBitmap', {
+    configurable: true,
+    value: async () => ({ width: 3840, height: 2160, close: () => { closed++; } }),
+  });
+  try {
+    for (const index of [0, 1]) {
+      f.assets.get(`still-${index}`)!.handle = { getFile: async () => new File([], `still-${index}.png`) };
+    }
+    f.tick(0);
+    await Promise.all([0, 1].map(index => f.clips[index].get(ImageDecoderHandle)!.init()));
+    f.tick(100);
+    assert.equal(closed, 2);
+  } finally {
+    f.close();
+    if (original) Object.defineProperty(globalThis, 'createImageBitmap', original);
+    else Reflect.deleteProperty(globalThis, 'createImageBitmap');
+  }
+});
+
+test('offline image export initializes the visible still without loading the rest of the timeline', () => {
+  const f = imageFixture('offline-video');
+  try {
+    f.tick(100);
+    assert.deepEqual(f.active(), [100]);
+    f.tick(101);
+    assert.deepEqual(f.active(), [101]);
+  } finally { f.close(); }
+});
+
+test('offline export waits for an image decode that was already in flight', () => {
+  const f = imageFixture('offline-video');
+  try {
+    f.world.add(FramePromises);
+    f.world.set(FramePromises, { list: [] });
+    const pending = resolveImageDecoder(f.world, f.clips[100])!.initPromise;
+    f.tick(100);
+    assert.ok(pending);
+    assert.ok(f.world.get(FramePromises)?.list?.includes(pending));
+  } finally { f.close(); }
+});
+
+test('playback buffers until the opening still is decoded', () => {
+  const f = imageFixture();
+  try {
+    f.scene.set(Playback, { playing: true });
+    f.tick(0);
+    assert.equal(f.scene.get(Playback)?.buffering, true);
+    assert.deepEqual(f.active(), [0, 1, 2, 3, 4, 5, 6, 7]);
+  } finally { f.close(); }
+});
 
 test('preview buffers warm one and a half seconds before cuts at each frame rate and release distant clips', () => {
   for (const fps of [30, 60]) {
