@@ -54,8 +54,12 @@ export function renderLayers(world: World, scene: Entity, surface: TimelineSurfa
 
 	ctx.save();
 
-	const walk = (nodes: TimelineNode[], parent: Entity | null): void => {
+	const walk = (nodes: TimelineNode[], parent: Entity | null): boolean => {
 		for (const node of nodes) {
+			// Rows follow document order and have nonnegative heights. Once the
+			// cursor passes the viewport, no later row can be drawn.
+			if (!interacting && row.top > maxY) return true;
+
 			row.height = getNodeHeight(node);
 			const visible = interacting || row.top + row.height >= minY && row.top <= maxY;
 			if (node.kind === 'keyframe-track') {
@@ -67,8 +71,8 @@ export function renderLayers(world: World, scene: Entity, surface: TimelineSurfa
 			// A sub-item is a label in the DOM column and nothing on the
 			// canvas; what hangs under it is what matters here.
 			if (node.kind === 'sub-item') {
-				row.top += getNodeHeight(node);
-				walk(node.children, parent);
+				row.top += row.height;
+				if (walk(node.children, parent)) return true;
 				continue;
 			}
 
@@ -88,9 +92,10 @@ export function renderLayers(world: World, scene: Entity, surface: TimelineSurfa
 				renderRow(world, scene, surface, node, row);
 			}
 
-			row.top += getNodeHeight(node);
-			walk(node.children, node.entity);
+			row.top += row.height;
+			if (walk(node.children, node.entity)) return true;
 		}
+		return false;
 	};
 
 	walk(buildTimelineLayers(world, scene), null);

@@ -11,7 +11,7 @@
 
 import { ClipHeight, Timeline, store } from '@diffusionstudio/runtime';
 
-import { DEFAULT_CLIP_HEIGHT, KEYFRAME_TRACK_HEIGHT } from './config';
+import { getClipRowHeight, KEYFRAME_TRACK_HEIGHT } from './config';
 
 import type { TimelineNode } from '@diffusionstudio/runtime';
 import type { Entity, World } from 'koota';
@@ -29,7 +29,7 @@ export type RowCursor = {
 /** A row is as tall as its clip was left, or as tall as a keyframe row is. */
 export function getNodeHeight(node: TimelineNode): number {
 	if (node.kind === 'geometry') {
-		return node.entity.get(ClipHeight)?.value ?? DEFAULT_CLIP_HEIGHT;
+		return getClipRowHeight(node.entity.get(ClipHeight)?.value);
 	}
 
 	return KEYFRAME_TRACK_HEIGHT;
