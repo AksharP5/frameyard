@@ -52,6 +52,10 @@ Agents and the visual editor share project files. Frameyard saves a checkpoint
 before each agent turn. [Agent workspace](docs/agent-workspace.md) explains
 context, approvals, and recovery.
 
+For OpenCode and other external agents, use **MCP & CLI** in Frameyard to
+connect the local editor tools. OpenCode runs in its own app or terminal;
+the in-app Assistant remains for Codex and Claude Code.
+
 The default local mode needs no Diffusion Studio account. Speech transcription
 runs offline after setup. Diffusion Studio's hosted image, video, voice, and
 audio-analysis services are unavailable in local mode. The in-app Assistant

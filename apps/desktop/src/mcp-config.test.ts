@@ -20,6 +20,7 @@ describe("per-agent entries", () => {
     expect(agentTarget("antigravity").entry(spec)).toEqual({ serverUrl: spec.url });
     expect(agentTarget("gemini-cli").entry(spec)).toEqual({ httpUrl: spec.url });
     expect(agentTarget("windsurf").entry(spec)).toEqual({ serverUrl: spec.url });
+    expect(agentTarget("opencode").entry(spec)).toEqual({ type: "remote", enabled: true, url: spec.url });
   });
 
   it("gives Claude Desktop the stdio proxy, and nobody else", () => {
@@ -45,6 +46,25 @@ describe("json configs", () => {
     expect(readServer(text, "servers")).toEqual({ url: spec.url });
     // The same file read under the other root key has nothing of ours.
     expect(readServer(text, "mcpServers")).toBeNull();
+  });
+
+  it("uses OpenCode's MCP map without changing other settings or servers", () => {
+    const before = JSON.stringify({
+      $schema: "https://opencode.ai/config.json",
+      model: "openai/gpt-5",
+      mcp: { other: { type: "local", command: ["other"] } },
+    });
+    const connected = upsertServer(before, "mcp", agentTarget("opencode").entry(spec));
+    expect(JSON.parse(connected)).toEqual({
+      $schema: "https://opencode.ai/config.json",
+      model: "openai/gpt-5",
+      mcp: {
+        other: { type: "local", command: ["other"] },
+        diffusion: { type: "remote", enabled: true, url: spec.url },
+      },
+    });
+    expect(readServer(connected, "mcp")).toEqual({ url: spec.url });
+    expect(JSON.parse(removeServer(connected, "mcp")!)).toEqual(JSON.parse(before));
   });
 
   it("keeps other servers and unrelated keys", () => {

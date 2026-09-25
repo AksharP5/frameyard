@@ -35,6 +35,23 @@ it("writes an authenticated agent URL to a user-private config", () => {
   expect(lstatSync(config).mode & 0o077).toBe(0);
 });
 
+it("connects and removes OpenCode without changing its other settings", () => {
+  const root = home();
+  const dir = join(root, ".config", "opencode");
+  mkdirSync(dir, { recursive: true });
+  const config = join(dir, "opencode.json");
+  writeFileSync(config, JSON.stringify({ model: "openai/gpt-5", mcp: { other: { type: "local", command: ["other"] } } }));
+
+  expect(applyMcp({ add: ["opencode"], remove: [] }).added).toEqual(["opencode"]);
+  const connected = JSON.parse(readFileSync(config, "utf8"));
+  expect(connected.mcp.diffusion).toEqual({ type: "remote", enabled: true, url: mcpStatus().url });
+  expect(mcpStatus().agents.find((agent) => agent.id === "opencode")).toMatchObject({ detected: true, connected: true });
+  expect(lstatSync(config).mode & 0o077).toBe(0);
+
+  expect(applyMcp({ add: [], remove: ["opencode"] }).removed).toEqual(["opencode"]);
+  expect(JSON.parse(readFileSync(config, "utf8"))).toEqual({ model: "openai/gpt-5", mcp: { other: { type: "local", command: ["other"] } } });
+});
+
 it("repairs the old bare URL before leaving a private config behind", () => {
   const root = home();
   const dir = join(root, ".cursor");
