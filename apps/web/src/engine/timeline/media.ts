@@ -93,11 +93,94 @@ const LONG_DURATION = 60 * 10;
 const TILE_MARGIN = 1;
 
 const stills = new Map<string, Still>();
-const stillsDecoding = new Set<string>();
+const stillsDecoding = new Map<string, object>();
 /** Assets whose file will not decode, so the draw pass stops asking. */
 const stillsFailed = new Set<string>();
 const assetFrames = new Map<string, AssetFrames>();
 const clipFrames = new Map<number, ClipFrames>();
+
+// Keep decoded timeline pictures bounded as the user visits more footage.
+// A visible strip is never evicted, even if it alone exceeds the budget.
+const MAX_THUMBNAIL_BYTES = 64 * 1024 * 1024;
+const activeClips = new Set<number>();
+const activeAssets = new Set<string>();
+let previousClips = new Set<number>();
+let previousAssets = new Set<string>();
+let mediaDirty = false;
+let mediaOverBudget = false;
+
+function sameSet<T>(left: Set<T>, right: Set<T>): boolean {
+	if (left.size !== right.size) return false;
+	for (const value of left) if (!right.has(value)) return false;
+	return true;
+}
+
+function frameBytes(frame: Frame): number {
+	return frame.canvas.width * frame.canvas.height * 4;
+}
+
+function framesBytes(frames: Frame[]): number {
+	return frames.reduce((bytes, frame) => bytes + frameBytes(frame), 0);
+}
+
+function markRecent<K, V>(cache: Map<K, V>, key: K): void {
+	const value = cache.get(key);
+	if (value === undefined) return;
+	cache.delete(key);
+	cache.set(key, value);
+}
+
+/** Drop pictures from older views after the current timeline pass has used its own. */
+export function pruneMedia(): void {
+	if (!mediaDirty && (!mediaOverBudget
+		|| (sameSet(activeClips, previousClips) && sameSet(activeAssets, previousAssets)))) {
+		activeClips.clear();
+		activeAssets.clear();
+		return;
+	}
+	previousClips = new Set(activeClips);
+	previousAssets = new Set(activeAssets);
+
+	let bytes = 0;
+	for (const still of stills.values()) bytes += still.canvas.width * still.canvas.height * 4;
+	for (const record of assetFrames.values()) bytes += framesBytes(record.frames);
+	for (const record of clipFrames.values()) bytes += framesBytes(record.frames);
+
+	if (bytes > MAX_THUMBNAIL_BYTES) {
+		for (const clip of activeClips) markRecent(clipFrames, clip);
+		for (const asset of activeAssets) {
+			markRecent(assetFrames, asset);
+			markRecent(stills, asset);
+		}
+		for (const [clip, record] of clipFrames) {
+			if (activeClips.has(clip)) continue;
+			clipFrames.delete(clip);
+			bytes -= framesBytes(record.frames);
+			if (bytes <= MAX_THUMBNAIL_BYTES) break;
+		}
+	}
+	if (bytes > MAX_THUMBNAIL_BYTES) {
+		for (const [asset, record] of assetFrames) {
+			if (activeAssets.has(asset)) continue;
+			assetFrames.delete(asset);
+			bytes -= framesBytes(record.frames);
+			if (bytes <= MAX_THUMBNAIL_BYTES) break;
+		}
+	}
+	if (bytes > MAX_THUMBNAIL_BYTES) {
+		for (const [asset, still] of stills) {
+			if (activeAssets.has(asset)) continue;
+			stills.delete(asset);
+			bytes -= still.canvas.width * still.canvas.height * 4;
+			if (bytes <= MAX_THUMBNAIL_BYTES) break;
+		}
+	}
+
+	mediaOverBudget = bytes > MAX_THUMBNAIL_BYTES;
+	mediaDirty = false;
+	activeClips.clear();
+	activeAssets.clear();
+}
 
 // Zooming out can expose hundreds of cuts at once. Decode one thumbnail at
 // a time across all clips and assets, not one full video decoder per cut.
@@ -120,6 +203,7 @@ function decodeFrame(sink: CanvasSink, timestamp: number, isCurrent: () => boole
  * costs at most two decodes.
  */
 export function resolveStill(asset: Asset, width: number): Still | null {
+	activeAssets.add(asset.id);
 	const hash = `${width}@${window.devicePixelRatio}`;
 	const existing = stills.get(asset.id);
 	if (existing?.hash === hash) return existing;
@@ -133,12 +217,16 @@ export function resolveStill(asset: Asset, width: number): Still | null {
 
 async function decodeStill(asset: Asset, width: number, hash: string): Promise<void> {
 	if (stillsDecoding.has(asset.id)) return;
-	stillsDecoding.add(asset.id);
+	const token = {};
+	stillsDecoding.set(asset.id, token);
 
 	try {
-		const bitmap = await createImageBitmap(await getAssetFile(asset));
+		const file = await getAssetFile(asset);
+		if (stillsDecoding.get(asset.id) !== token) return;
+		const bitmap = await createImageBitmap(file);
 
 		try {
+			if (stillsDecoding.get(asset.id) !== token) return;
 			// Big enough for the widest tile and the tallest row it could be
 			// drawn in, and never larger than the picture itself.
 			const dpr = window.devicePixelRatio;
@@ -150,14 +238,16 @@ async function decodeStill(asset: Asset, width: number, hash: string): Promise<v
 			canvas.getContext('2d')!.drawImage(bitmap, 0, 0, canvasWidth, canvasHeight);
 
 			stills.set(asset.id, { canvas, width: canvasWidth, height: canvasHeight, hash });
+			mediaDirty = true;
 		} finally {
 			bitmap.close();
 		}
 	} catch (error) {
+		if (stillsDecoding.get(asset.id) !== token) return;
 		console.error('[timeline] could not decode still', error);
 		stillsFailed.add(asset.id);
 	} finally {
-		stillsDecoding.delete(asset.id);
+		if (stillsDecoding.get(asset.id) === token) stillsDecoding.delete(asset.id);
 	}
 }
 
@@ -170,6 +260,8 @@ async function decodeStill(asset: Asset, width: number, hash: string): Promise<v
  * whenever the stretch on screen or the size of a tile has changed.
  */
 export function requestFrames(request: FrameRequest): void {
+	activeClips.add(request.clip);
+	activeAssets.add(request.asset.id);
 	if (request.canDecode?.() === false) return;
 	const record = assetFrames.get(request.asset.id);
 
@@ -214,12 +306,14 @@ export function cloneFramesForSplit(clip: number, copy: number): void {
 		pending: null,
 		decoding: false,
 	});
+	mediaDirty = true;
 }
 
 /** Forgets one clip's strip, or every clip's. */
 export function clearClipFrames(clip?: number): void {
 	if (clip === undefined) clipFrames.clear();
 	else clipFrames.delete(clip);
+	mediaDirty = true;
 }
 
 /** Forgets everything: the clips' strips, the spreads and the stills. */
@@ -227,7 +321,14 @@ export function clearMedia(): void {
 	clipFrames.clear();
 	assetFrames.clear();
 	stills.clear();
+	stillsDecoding.clear();
 	stillsFailed.clear();
+	activeClips.clear();
+	activeAssets.clear();
+	previousClips.clear();
+	previousAssets.clear();
+	mediaDirty = false;
+	mediaOverBudget = false;
 }
 
 /**
@@ -235,11 +336,13 @@ export function clearMedia(): void {
  */
 export function forgetAssetMedia(assetId: string): void {
 	stills.delete(assetId);
+	stillsDecoding.delete(assetId);
 	stillsFailed.delete(assetId);
 	assetFrames.delete(assetId);
 	for (const [clip, frames] of clipFrames) {
 		if (frames.assetId === assetId) clipFrames.delete(clip);
 	}
+	mediaDirty = true;
 }
 
 /**
@@ -274,10 +377,11 @@ async function decodeSpread(request: FrameRequest): Promise<void> {
 				if (!current()) { complete = false; return; }
 				if (!wrapped) continue;
 
-				record.frames.push({
+			record.frames.push({
 					timestamp: secondsToFrames(wrapped.timestamp, request.fps),
 					canvas: wrapped.canvas,
 				});
+				mediaDirty = true;
 			} catch {
 				// One frame that will not decode is not the file's whole spread.
 			}
@@ -351,7 +455,9 @@ async function updateClip(request: FrameRequest): Promise<void> {
 
 		// The strip already reaches across everything on screen.
 		if (count <= 0) {
-			cached.frames = keep(cached.frames);
+			const kept = keep(cached.frames);
+			if (kept.length !== cached.frames.length) mediaDirty = true;
+			cached.frames = kept;
 			cached.start = wanted.start;
 			cached.end = wanted.end;
 			cached.request = request;
@@ -380,12 +486,15 @@ async function updateClip(request: FrameRequest): Promise<void> {
 				// never blank while the new ones are on their way.
 				cached.frames = keep(cached.frames, timestamp);
 				cached.frames.push({ timestamp, canvas: wrapped.canvas, stale: false });
+				mediaDirty = true;
 			} catch {
 				// One tile that will not decode is not the whole strip.
 			}
 		}
 
-		cached.frames = keep(cached.frames);
+		const kept = keep(cached.frames);
+		if (kept.length !== cached.frames.length) mediaDirty = true;
+		cached.frames = kept;
 		cached.start = wanted.start;
 		cached.end = wanted.end;
 		cached.request = request;

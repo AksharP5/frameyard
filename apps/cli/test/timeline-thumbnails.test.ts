@@ -15,6 +15,7 @@ function fixture() {
   let active = 0, peak = 0;
   const calls: number[] = [];
   const releases: (() => void)[] = [];
+  const imageReleases: ((tag: string) => void)[] = [];
   const dependencies = {
     mediabunny: { CanvasSink: class {
       async getCanvas(timestamp: number) {
@@ -22,17 +23,26 @@ function fixture() {
         peak = Math.max(peak, ++active);
         await new Promise<void>((resolve) => releases.push(resolve));
         active--;
-        return { timestamp, canvas: { timestamp } };
+        return { timestamp, canvas: { timestamp, width: 512, height: 512 } };
       }
     } },
     '@diffusionstudio/runtime': {
       getVideoTrack: async () => ({ getFirstTimestamp: async () => 0, computeDuration: async () => 600 }),
+      getAssetFile: async () => new File([], 'image.png'),
       secondsToFrames: (seconds: number, fps: number) => seconds * fps,
     },
   };
   const module = { exports: {} as typeof import('../../web/src/engine/timeline/media.ts') };
-  runInThisContext(`(function(require,module,exports,window){${built.outputFiles[0].text}\n})`)(
-    (name: keyof typeof dependencies) => dependencies[name], module, module.exports, { devicePixelRatio: 1 },
+  class Canvas {
+    tag = '';
+    width: number;
+    height: number;
+    constructor(width: number, height: number) { this.width = width; this.height = height; }
+    getContext() { return { drawImage: (bitmap: { tag: string }) => { this.tag = bitmap.tag; } }; }
+  }
+  runInThisContext(`(function(require,module,exports,window,OffscreenCanvas,createImageBitmap){${built.outputFiles[0].text}\n})`)(
+    (name: keyof typeof dependencies) => dependencies[name], module, module.exports, { devicePixelRatio: 1 }, Canvas,
+    () => new Promise((resolve) => imageReleases.push((tag) => resolve({ width: 128, height: 128, tag, close() {} }))),
   );
   const request: FrameRequest = {
     clip: 1,
@@ -49,7 +59,7 @@ function fixture() {
     }
     assert.fail('thumbnail requests did not settle');
   }
-  return { ...module.exports, request, calls, tick, drain, peak: () => peak };
+  return { ...module.exports, request, calls, tick, drain, imageReleases, peak: () => peak };
 }
 
 test('zooming out over many cuts keeps thumbnail decoding bounded and fills every clip', async () => {
@@ -110,4 +120,50 @@ test('playback suspends queued thumbnail work and pausing lets it finish', async
   f.requestFrames(request);
   await f.drain();
   assert.ok(f.calls.length > 1, 'the interrupted clip strip retries after pause');
+});
+
+test('thumbnail cache releases scrolled-away clips but keeps the visible strip', async () => {
+  const f = fixture();
+  f.requestFrames(f.request);
+  await f.drain();
+  f.pruneMedia();
+
+  const clips = Array.from({ length: 30 }, (_, index) => ({
+    ...f.request, clip: index + 1, firstFrame: (index + 1) * 300, lastFrame: (index + 2) * 300,
+  }));
+  for (const clip of clips) f.requestFrames(clip);
+  await f.drain();
+  f.pruneMedia();
+
+  const visible = clips.slice(-3);
+  for (const clip of visible) f.requestFrames(clip);
+  f.pruneMedia();
+
+  f.calls.length = 0;
+  for (const clip of visible) f.requestFrames(clip);
+  await f.drain();
+  assert.equal(f.calls.length, 0, 'the visible strip remains decoded');
+
+  f.requestFrames(clips[0]!);
+  await f.drain();
+  assert.ok(f.calls.length > 0, 'returning to an evicted clip decodes its tiles again');
+});
+
+test('an obsolete still decode cannot replace a newer asset thumbnail', async () => {
+  const f = fixture();
+  const asset = { ...f.request.asset, type: 'IMAGE' as const, mimeType: 'image/png' };
+  f.resolveStill(asset, 100);
+  await f.tick();
+  assert.equal(f.imageReleases.length, 1);
+
+  f.forgetAssetMedia(asset.id);
+  f.resolveStill(asset, 100);
+  await f.tick();
+  assert.equal(f.imageReleases.length, 2);
+
+  f.imageReleases.shift()!('old');
+  await f.tick();
+  f.imageReleases.shift()!('new');
+  await f.tick();
+  assert.equal((f.resolveStill(asset, 100)?.canvas as unknown as { tag: string })?.tag, 'new');
 });
