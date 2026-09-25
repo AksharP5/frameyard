@@ -229,7 +229,7 @@ export function resolveImageDecoder(world: World, entity: Entity): ResolvedImage
 	if (existing && existing.assetId === assetId) {
 		return {
 			decoder: existing,
-			initPromise: null,
+			initPromise: existing.ready || existing.failed ? null : existing.init(),
 		};
 	}
 
