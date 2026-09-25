@@ -6,6 +6,7 @@ import { trait } from 'koota';
 
 import { FontStyle, TextAlign, TextBaseline, TextCase } from '../constants';
 
+import type { Entity } from 'koota';
 import type { Token } from '../utils/text';
 
 // Text characters: only on the parent text node, not shared with ranges.
@@ -33,4 +34,4 @@ export const TextStyle = trait({
 export const TextRange = trait({ start: 0, end: null as number | null });
 
 // Runtime-only: cached text layout, one Token[] per line. Never serialized.
-export const TextCache = trait({ tokens: () => [] as Token[][], layoutKey: '' });
+export const TextCache = trait({ tokens: () => [] as Token[][], layoutKey: '', rangeList: () => null as Entity[] | null });

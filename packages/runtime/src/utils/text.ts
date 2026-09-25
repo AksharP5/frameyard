@@ -449,27 +449,26 @@ export function layoutText(world: World, entity: Entity): void {
 	const eid = entity.id();
 	const cached = entity.has(TextCache) ? store(world, TextCache) : null;
 	const ranges = store(world, Cache).textRanges[eid] ?? [];
-	let layoutKey = '';
-	if (ranges.length === 0) {
-		const computed = store(world, Computed);
-		const style = store(world, TextStyle);
-		const hasSize = entity.has(Size);
-		layoutKey = JSON.stringify([
-			computed.chars[eid] ?? store(world, Chars).value[eid] ?? '',
-			hasSize ? store(world, Size).width[eid] : null,
-			hasSize ? computed.width[eid] : null,
-			hasSize ? computed.height[eid] : null,
-			style.leading[eid], style.fontSize[eid], style.fontFamily[eid], style.fontWeight[eid],
-			style.fontStyle[eid], style.textAlign[eid], style.textBaseline[eid], style.textCase[eid],
-			style.letterSpacing[eid], fontLayoutVersion(),
-		]);
-		if (cached?.layoutKey[eid] === layoutKey) return;
-	} else if (cached) {
-		cached.layoutKey[eid] = '';
-	}
+	const computed = store(world, Computed);
+	const style = store(world, TextStyle);
+	const hasSize = entity.has(Size);
+	const layoutKey = JSON.stringify([
+		computed.chars[eid] ?? store(world, Chars).value[eid] ?? '',
+		hasSize ? store(world, Size).width[eid] : null,
+		hasSize ? computed.width[eid] : null,
+		hasSize ? computed.height[eid] : null,
+		style.leading[eid], style.fontSize[eid], style.fontFamily[eid], style.fontWeight[eid],
+		style.fontStyle[eid], style.textAlign[eid], style.textBaseline[eid], style.textCase[eid],
+		style.letterSpacing[eid], fontLayoutVersion(),
+		ranges.length ? ranges.map(range => [range.get(TextRange), range.get(TextStyle)]) : null,
+	]);
+	const rangeList = ranges.length ? ranges : null;
+	if (cached?.layoutKey[eid] === layoutKey && cached.rangeList[eid] === rangeList) return;
 	tokenizeText(world, entity);
 	shapeTokens(world, entity);
-	if (layoutKey) store(world, TextCache).layoutKey[eid] = layoutKey;
+	const textCache = store(world, TextCache);
+	textCache.layoutKey[eid] = layoutKey;
+	textCache.rangeList[eid] = rangeList;
 }
 
 /** Captions prepare their text during drawing; native text is laid out by the transform system. */

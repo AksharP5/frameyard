@@ -50,7 +50,17 @@ test('text layout reuses stable measurements and refreshes after edits or font l
 			text.set(r.Cache, { textRanges: [range] });
 			const rangeFirst = sample();
 			const rangeAgain = sample();
-			return { first, stable, characters, style, sized, resized, fontLoaded, rangeFirst, rangeAgain };
+			range.set(r.TextStyle, { fontWeight: '400' });
+			const rangeStyle = sample();
+			range.set(r.TextRange, { end: 5 });
+			const rangeBoundary = sample();
+			const replacement = world.spawn(r.TextRange({ start: 0, end: 5 }), r.TextStyle({ fontWeight: '400' }));
+			text.set(r.Cache, { textRanges: [replacement] });
+			const replaced = sample();
+			const replacedAgain = sample();
+			document.fonts.dispatchEvent(new Event('loadingdone'));
+			const rangeFontLoaded = sample();
+			return { first, stable, characters, style, sized, resized, fontLoaded, rangeFirst, rangeAgain, rangeStyle, rangeBoundary, replaced, replacedAgain, rangeFontLoaded };
 		} finally {
 			world.destroy();
 			OffscreenCanvasRenderingContext2D.prototype.measureText = original;
@@ -65,5 +75,10 @@ test('text layout reuses stable measurements and refreshes after edits or font l
 	assert.equal(result.resized.measurements, result.sized.measurements + 1);
 	assert.equal(result.fontLoaded.measurements, result.resized.measurements + 1);
 	assert.ok(result.rangeFirst.measurements > result.fontLoaded.measurements);
-	assert.ok(result.rangeAgain.measurements > result.rangeFirst.measurements, 'styled ranges still measure on each call');
+	assert.equal(result.rangeAgain.measurements, result.rangeFirst.measurements, 'unchanged ranges reuse their layout');
+	assert.ok(result.rangeStyle.measurements > result.rangeAgain.measurements, 'range style edits remeasure');
+	assert.ok(result.rangeBoundary.measurements > result.rangeStyle.measurements, 'range boundaries remeasure');
+	assert.ok(result.replaced.measurements > result.rangeBoundary.measurements, 'replacing a range invalidates token references');
+	assert.equal(result.replacedAgain.measurements, result.replaced.measurements);
+	assert.ok(result.rangeFontLoaded.measurements > result.replacedAgain.measurements, 'loaded fonts remeasure styled text');
 });
