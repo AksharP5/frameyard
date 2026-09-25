@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { runInThisContext } from 'node:vm';
 import { build } from 'esbuild';
+import { getClipRowHeight } from '../../web/src/engine/timeline/config.ts';
 import type { Entity } from 'koota';
 
 const require = createRequire(import.meta.url);
@@ -43,7 +44,7 @@ function fixture() {
     '@/engine/clip-links': { isClipLocked: () => false, linkableSelection: () => [] },
     '@/engine/insert-asset': { canSeparateAudio: () => false },
     '@/engine/timeline-editing': { timelineEditing: () => ({ target: () => null, syncTracks: () => new Set() }) },
-    '@/engine/timeline': { DEFAULT_CLIP_HEIGHT: 40, MIN_CLIP_HEIGHT: 28, MAX_CLIP_HEIGHT: 120, getClipFallbackName: () => 'Clip' },
+    '@/engine/timeline': { DEFAULT_CLIP_HEIGHT: 40, MIN_CLIP_HEIGHT: 28, MAX_CLIP_HEIGHT: 120, getClipRowHeight, getClipFallbackName: () => 'Clip' },
     './context': { useLayerContext: () => ({ resized, drag: { dragging: () => null } }) },
     './config': { NESTED_INDENT_PX: 20 },
   };

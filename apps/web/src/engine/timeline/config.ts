@@ -11,6 +11,10 @@ export const TIMELINE_RESOLUTION_RANGE = [0.03, 120] as const;
 export const DEFAULT_TIMELINE_RESOLUTION = 1 / 0.7;
 export const DEFAULT_CLIP_HEIGHT = 40;
 
+export function getClipRowHeight(value: number | undefined): number {
+	return value !== undefined && Number.isFinite(value) && value >= 0 ? value : DEFAULT_CLIP_HEIGHT;
+}
+
 export const TIMELINE_PADDING_LEFT = 8;
 /** Keep clips just beyond the viewport ready to enter it. */
 export const VIEWPORT_PADDING = 10;

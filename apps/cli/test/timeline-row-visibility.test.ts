@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { runInThisContext } from 'node:vm';
 import { build } from 'esbuild';
-import { DEFAULT_CLIP_HEIGHT, KEYFRAME_TRACK_HEIGHT, RULER_HEIGHT, VIEWPORT_PADDING } from '../../web/src/engine/timeline/config.ts';
+import { DEFAULT_CLIP_HEIGHT, getClipRowHeight, KEYFRAME_TRACK_HEIGHT, RULER_HEIGHT, VIEWPORT_PADDING } from '../../web/src/engine/timeline/config.ts';
 import type { Entity, World } from 'koota';
 import type { TimelineNode } from '@diffusionstudio/runtime';
 import type { TimelineSurfaceState } from '../../web/src/engine/timeline/surface';
@@ -20,9 +20,12 @@ function node(id: number, kind: TimelineNode['kind'] = 'geometry', children: Tim
   return { entity: { id: () => id, has: () => false } as unknown as Entity, kind, children, expanded: children.length > 0, expandable: children.length > 0 };
 }
 
-function fixture(layers: TimelineNode[]) {
+function fixture(layers: TimelineNode[], onVisit?: (node: TimelineNode) => void) {
   const painted: { id: number; top: number; kind: string }[] = [];
-  const height = (node: TimelineNode) => node.kind === 'geometry' ? DEFAULT_CLIP_HEIGHT : KEYFRAME_TRACK_HEIGHT;
+  const height = (node: TimelineNode) => {
+    onVisit?.(node);
+    return node.kind === 'geometry' ? DEFAULT_CLIP_HEIGHT : KEYFRAME_TRACK_HEIGHT;
+  };
   const subtreeHeight = (node: TimelineNode): number => height(node) + node.children.reduce((total, child) => total + subtreeHeight(child), 0);
   let scrollY = 0;
   const dependencies: Record<string, unknown> = {
@@ -73,4 +76,22 @@ test('an offscreen parent does not hide visible nested keyframes or shift follow
     { id: 2, top: 72, kind: 'keyframe' },
     { id: 3, top: 104, kind: 'clip' },
   ]);
+});
+
+test('idle drawing stops at the last visible row while gestures keep all rows active', () => {
+  let visits = 0;
+  const draw = fixture(Array.from({ length: 1000 }, (_, id) => node(id)), () => { visits++; });
+
+  draw(0);
+  assert.ok(visits < 20, `idle drawing inspected ${visits} rows`);
+
+  visits = 0;
+  draw(0, 'pressed');
+  assert.ok(visits >= 1000, 'active gestures inspect offscreen rows');
+});
+
+test('invalid authored row heights cannot reverse the visible row order', () => {
+  assert.equal(getClipRowHeight(-40), DEFAULT_CLIP_HEIGHT);
+  assert.equal(getClipRowHeight(Number.NaN), DEFAULT_CLIP_HEIGHT);
+  assert.equal(getClipRowHeight(0), 0);
 });

@@ -42,7 +42,7 @@ import { useEditor } from '@/engine/hooks';
 import { isClipLocked, linkableSelection, linkSelection, selectedClips, unlinkSelection } from '@/engine/clip-links';
 import { canSeparateAudio, separateAudio } from '@/engine/insert-asset';
 import { timelineEditing, toggleSyncTrack } from '@/engine/timeline-editing';
-import { DEFAULT_CLIP_HEIGHT, MAX_CLIP_HEIGHT, MIN_CLIP_HEIGHT, getClipFallbackName } from '@/engine/timeline';
+import { DEFAULT_CLIP_HEIGHT, MAX_CLIP_HEIGHT, MIN_CLIP_HEIGHT, getClipFallbackName, getClipRowHeight } from '@/engine/timeline';
 import { NESTED_INDENT_PX } from './config';
 import { useLayerContext } from './context';
 import { setRowHover } from './hover';
@@ -59,7 +59,7 @@ export function NodeLayer(props: LayerRowProps) {
   const entity = () => props.layer.entity;
 
   const clipHeight = useTrait(entity, ClipHeight);
-  const height = () => clipHeight()?.value ?? DEFAULT_CLIP_HEIGHT;
+  const height = () => getClipRowHeight(clipHeight()?.value);
 
   const muted = useTag(entity, Muted);
   const soloed = useTag(entity, Soloed);
