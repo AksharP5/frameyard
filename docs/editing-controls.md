@@ -45,8 +45,14 @@ keeps the current selection, including an empty selection.
 ## Text
 
 Select a text layer to open Properties. Its words, font, size, and color appear
-first. Double-click text to focus its content field. Text with paint layers uses
+first. Double-click text on the canvas to focus its content field. Text with paint layers uses
 the Fills controls directly below Text; plain text has a Color control in Text.
+
+## Masks
+
+Select a mask from its parent's Masks list or the timeline to move, resize, rotate,
+or edit its path on the canvas. A mask itself does not intercept ordinary canvas
+clicks over the visible layer.
 
 ## Timeline and marked range
 
@@ -88,6 +94,9 @@ Small tiled windows scroll the workspace instead of blocking editing. Widen the
 window to see the full workspace at once.
 
 ## Effects
+
+Select a group to add effects to its children together. Individual layers and
+scenes have their own Effects controls.
 
 TV Power Off's Start frame and Collapse duration use project frames, so changing
 export fps keeps the same timing. Existing effects authored in seconds keep

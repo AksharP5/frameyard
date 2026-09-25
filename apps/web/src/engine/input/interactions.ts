@@ -19,11 +19,11 @@
 import {
 	ChildOf, Computed, Culled, Geometry, Group, Hovering,
 	Interactive, KeepAspectRatio, RenderSurface, Root, Scene,
-	Selected, Time,
+	Selected, Time, Tool, ToolType,
 	computeGroupBounds, computeLocalMatrix, decompose2D, entityAnchor,
 	entityOffset, entityQuad, entityWorldMat, enterEntity,
 	findKeyframeTrackEntity, getParentEntity, getParentNode, getSceneAncestor,
-	getSelection, getSelectionMask, identity2D, invert2D, isPointerInEntity,
+	getSelection, getSelectionMask, identity2D, invert2D, isCaption, isPointerInEntity, isText,
 	multiply2D, quadCenter, quadContainsQuad, quadsIntersect, rectToQuad,
 	rotate2D, scale2D,
 	store, syncInteractiveState, togglePlayback, transformPoint, translate2D,
@@ -178,6 +178,11 @@ export function handleGeometryInteraction(world: World, event: DispatchedPointer
 	// Double-click drills into a container: its children become the things the
 	// canvas can hit, and the one under the pointer takes the selection.
 	if (event.type === 'dblclick' && event.target.kind === 'entity') {
+		if (isText(event.target.id) && !isCaption(event.target.id)) {
+			editor.select(event.target.id);
+			world.set(Tool, { value: ToolType.TEXT_EDIT });
+			return;
+		}
 		const child = enterEntity(world, event.target.id, { x: event.clientX, y: event.clientY });
 		if (child !== null) editor.select(child);
 	}
@@ -654,6 +659,10 @@ export function handleMaskInteraction(world: World, event: DispatchedPointerEven
 	if (event.type === 'dblclick') {
 		const selection = getSelection(world);
 		if (selection.length !== 1) return;
+		if (isText(selection[0]!) && !isCaption(selection[0]!)) {
+			world.set(Tool, { value: ToolType.TEXT_EDIT });
+			return;
+		}
 		const child = enterEntity(world, selection[0]!, { x: event.clientX, y: event.clientY });
 		if (child !== null) editor.select(child);
 		return;

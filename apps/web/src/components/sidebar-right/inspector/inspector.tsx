@@ -237,7 +237,13 @@ export function Inspector(props: { embedded?: boolean } = {}) {
 
           <Show when={includesTarget("shape", "text", "scene", "caption")}>
             <MaterialSettings node={nodes()[0]!} />
+          </Show>
+
+          <Show when={includesTarget("shape", "text", "scene", "caption", "group")}>
             <EffectsSettings selection={nodes()} />
+          </Show>
+
+          <Show when={includesTarget("shape", "text", "scene", "caption")}>
             <ColorGradingSettings selection={nodes()} />
           </Show>
 

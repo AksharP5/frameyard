@@ -7,7 +7,7 @@ import type { HitRegion } from '@diffusionstudio/runtime';
 
 const code = buildSync({
   stdin: { contents: `export {createWorld} from 'koota';
-    export {Geometry, Group, Sequential, ChildOf, Computed, WorldBounds, WorldTransform, Selected, Hidden, Locked, Interactive, getMaskSelection, enterEntity} from '@diffusionstudio/runtime';
+    export {Geometry, Group, Sequential, ChildOf, Computed, WorldBounds, WorldTransform, Selected, Hidden, Locked, IsMask, Interactive, getMaskSelection, enterEntity} from '@diffusionstudio/runtime';
     export {pickCanvasRegion} from './picking';`,
     resolveDir: fileURLToPath(new URL('../../web/src/engine/input/', import.meta.url)) },
   bundle: true, write: false, format: 'cjs', platform: 'node', logOverride: {'empty-import-meta': 'silent'},
@@ -65,6 +65,21 @@ test('hidden, locked, out-of-time and inherited hidden or locked items never int
   parent.remove(api.Locked); parent.add(api.Hidden);
   assert.deepEqual(f.pick(regions), {kind: 'entity', id: visible});
   hidden.add(api.Selected); locked.add(api.Selected);
+  assert.deepEqual(api.getMaskSelection(f.world), []);
+  f.world.destroy();
+});
+
+test('a selected mask gets canvas handles without intercepting clicks or exposing masked children', () => {
+  const f = fixture();
+  const owner = f.item(undefined, true);
+  const mask = f.item(owner); mask.add(api.IsMask, api.Selected);
+  const child = f.item(mask);
+  assert.deepEqual(api.getMaskSelection(f.world), [mask]);
+  assert.equal(f.pick([f.region(mask)]), undefined);
+  assert.equal(f.pick([f.region(child)]), undefined);
+  child.add(api.Selected);
+  assert.deepEqual(api.getMaskSelection(f.world), [mask]);
+  mask.add(api.Locked);
   assert.deepEqual(api.getMaskSelection(f.world), []);
   f.world.destroy();
 });
