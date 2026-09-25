@@ -35,7 +35,8 @@
   "overrides": {
     "extract-zip": {
       "yauzl": "3.3.1"
-    }
+    },
+    "tar": "7.5.22"
   },
   "repository": {
     "type": "git",
