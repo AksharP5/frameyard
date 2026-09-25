@@ -26,8 +26,8 @@ jobs:
           echo "TMPDIR=$RUNNER_TEMP/frameyard/tmp" >> "$GITHUB_ENV"
           echo "DIFFUSION_TEST_GSAP=$RUNNER_TEMP/frameyard/test-assets/node_modules/gsap/dist/gsap.min.js" >> "$GITHUB_ENV"
           mkdir -p "$RUNNER_TEMP/frameyard/tmp"
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
@@ -37,7 +37,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg libcairo2-dev libpango1.0-dev pkg-config xvfb dbus-x11 libasound2t64 libatk-bridge2.0-0 libgtk-3-0 libgbm1 libnss3
           test -x "$DIFFUSION_CHROMIUM_BIN"
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
       - run: npm ci
       - run: npm run check
       - run: npm run lint
@@ -58,7 +58,7 @@ jobs:
           tar -C apps/desktop/out -czf "dist/frameyard-${version}-linux-x64.tar.gz" Frameyard-linux-x64
           cd dist
           sha256sum *.tar.gz > SHA256SUMS
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: linux-x64
           path: dist/*
@@ -66,7 +66,7 @@ jobs:
           retention-days: 14
       - name: Preserve verification evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: linux-verification
           path: |
