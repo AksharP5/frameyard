@@ -33,8 +33,8 @@
     "semver": "7.8.5"
   },
   "overrides": {
-    "extract-zip": {
-      "yauzl": "3.3.1"
+    "@electron/packager": {
+      "extract-zip": "npm:@electron-internal/extract-zip@1.0.4"
     },
     "tar": "7.5.22",
     "tmp": "0.2.7"
