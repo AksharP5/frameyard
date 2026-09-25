@@ -19,13 +19,11 @@ import { GeometryType } from '../constants';
 import { layoutText } from '../utils/text';
 
 import {
+	DEG_TO_RAD,
 	multiply2D,
 	aabbFromTransformedRect,
 	aabbsIntersect,
 	translate2D,
-	rotate2D,
-	skew2D,
-	scale2D,
 	type Mat2D,
 } from '../math';
 
@@ -52,23 +50,24 @@ export function computeLocalMatrix(world: World, entity: Entity): void {
 	const pivotY = (computed.anchorY[eid] ?? anchor.y[eid] ?? 0.5) * computed.height[eid];
 	const scaleX = (flip.x[eid] ?? 1) * computed.scaleX[eid];
 	const scaleY = (flip.y[eid] ?? 1) * computed.scaleY[eid];
-	const rotation = computed.rotation[eid];
-	const skewX = computed.skewX[eid];
-	const skewY = computed.skewY[eid];
+	const angle = computed.rotation[eid] * DEG_TO_RAD;
+	const cos = Math.cos(angle);
+	const sin = Math.sin(angle);
+	const skewX = Math.tan(computed.skewX[eid] * DEG_TO_RAD);
+	const skewY = Math.tan(computed.skewY[eid] * DEG_TO_RAD);
 
-	let mat = translate2D(positionX, positionY);
-	mat = multiply2D(mat, translate2D(pivotX, pivotY));
-	mat = multiply2D(mat, rotate2D(rotation));
-	mat = multiply2D(mat, skew2D(skewX, skewY));
-	mat = multiply2D(mat, scale2D(scaleX, scaleY));
-	mat = multiply2D(mat, translate2D(-pivotX, -pivotY));
+	// R · Skew · Scale, with both skew axes in the same matrix.
+	const a = (cos - sin * skewY) * scaleX;
+	const b = (sin + cos * skewY) * scaleX;
+	const c = (cos * skewX - sin) * scaleY;
+	const d = (sin * skewX + cos) * scaleY;
 
-	local.a[eid] = mat.a;
-	local.b[eid] = mat.b;
-	local.c[eid] = mat.c;
-	local.d[eid] = mat.d;
-	local.e[eid] = mat.e;
-	local.f[eid] = mat.f;
+	local.a[eid] = a;
+	local.b[eid] = b;
+	local.c[eid] = c;
+	local.d[eid] = d;
+	local.e[eid] = positionX + pivotX - a * pivotX - c * pivotY;
+	local.f[eid] = positionY + pivotY - b * pivotX - d * pivotY;
 }
 
 /**
