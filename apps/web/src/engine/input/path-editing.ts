@@ -20,7 +20,11 @@ export function pathCoordinateMatrix(entityMatrix: Mat2D, viewBox: readonly [num
 		a: width / viewBox[2], b: 0, c: 0, d: height / viewBox[3],
 		e: -viewBox[0] * width / viewBox[2], f: -viewBox[1] * height / viewBox[3],
 	}) : entityMatrix;
-	return Math.abs(matrix.a * matrix.d - matrix.b * matrix.c) < 1e-12 ? null : matrix;
+	const determinant = matrix.i === undefined ? matrix.a * matrix.d - matrix.b * matrix.c
+		: matrix.a * (matrix.d * matrix.i - matrix.f * (matrix.h ?? 0))
+			- matrix.c * (matrix.b * matrix.i - matrix.f * (matrix.g ?? 0))
+			+ matrix.e * (matrix.b * (matrix.h ?? 0) - matrix.d * (matrix.g ?? 0));
+	return !Number.isFinite(determinant) || Math.abs(determinant) < 1e-12 ? null : matrix;
 }
 
 const TOKEN = /[a-zA-Z]|[-+]?(?:\d*\.\d+|\d+\.?\d*)(?:[eE][-+]?\d+)?/g;

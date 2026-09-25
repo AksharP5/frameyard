@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { transformPoint } from '@diffusionstudio/runtime';
+import { invert2D, transformPoint } from '@diffusionstudio/runtime';
 import { editablePath, movePathHandle, pathCoordinateMatrix, serializeEditablePath } from './path-editing';
 
 describe('canvas path editing', () => {
@@ -27,5 +27,14 @@ describe('canvas path editing', () => {
 		expect(matrix).not.toBeNull();
 		expect(transformPoint(matrix!, 10, 20)).toEqual({ x: 30, y: 40 });
 		expect(transformPoint(matrix!, 110, 70)).toEqual({ x: 230, y: 140 });
+	});
+
+	it('keeps controls editable on a perspective-projected path', () => {
+		const matrix = pathCoordinateMatrix({ a: 1, b: 0, c: 0, d: 1, e: 20, f: 30, g: 0.001, h: 0, i: 1 }, undefined, 100, 100);
+		expect(matrix).not.toBeNull();
+		const projected = transformPoint(matrix!, 80, 50);
+		const local = transformPoint(invert2D(matrix!), projected.x, projected.y);
+		expect(local.x).toBeCloseTo(80);
+		expect(local.y).toBeCloseTo(50);
 	});
 });
