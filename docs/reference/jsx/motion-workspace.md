@@ -18,7 +18,7 @@ Canvas handles resize or rotate a spatial layer within its plane. Group resize c
 
 Click the diamond beside a property to add a keyframe at the playhead. Move the playhead and change the value to create the next keyframe. Changes to a property that already has a track update or add a keyframe at the current time. The **Keyframes** section lists the layer's tracks; **Show tracks** expands them in the timeline. Select a timeline diamond to edit its time, value and easing. Path keys expose SVG or XYZ data; point and vertex keys expose numeric arrays.
 
-Native paths use SVG `d` data and an optional `viewBox`. The path inspector validates edits before saving and supports nonzero or even-odd fill rules. Keyframes interpolate coordinates when command structure matches; incompatible structures hold until the next keyframe. There is currently no path point or tangent tool on the canvas.
+Native paths use SVG `d` data and an optional `viewBox`. Select a 2D path with the Move tool to drag its anchors and curve handles directly on the canvas. Moving an anchor carries its adjoining cubic handles. The path inspector also accepts SVG data as text, validates edits before saving, and supports nonzero or even-odd fill rules. Canvas edits can be undone and update the path's keyframe at the playhead when it has a track. Keyframes interpolate coordinates when command structure matches; incompatible structures hold until the next keyframe.
 
 ```tsx
 <scene width={960} height={540} active>
