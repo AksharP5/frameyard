@@ -84,6 +84,9 @@ function startLoad(id: Sam2ModelId): Loading {
 async function load(model: Sam2Model, onProgress: (progress: Sam2Progress) => void, signal: AbortSignal): Promise<Sam2Video> {
 	signal.throwIfAborted();
 	if (!navigator.gpu) throw new Error('WebGPU is not available in this browser');
+	const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+	if (!adapter) throw new Error('No WebGPU adapter is available');
+	if (!adapter.features.has('shader-f16')) throw new Error('Object Mask needs WebGPU shader-f16 support on this GPU');
 	configureRuntime();
 
 	const files = await fetchModelFiles(model, (progress) => onProgress({ phase: 'download', ...progress }), signal);
