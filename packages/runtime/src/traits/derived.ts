@@ -84,6 +84,7 @@ export const Cache = trait({
 	strokes: () => [] as Entity[],
 	effects: () => [] as Entity[],
 	textRanges: () => [] as Entity[],
+	clipPaths: () => [] as Entity[],
 	masks: () => [] as Entity[],
 	keyframeTracks: () => [] as Entity[],
 	keyframes: () => [] as Entity[],

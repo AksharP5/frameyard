@@ -8,6 +8,7 @@ import { getParentNode } from '../queries/hierarchy';
 import { store } from '../world/store';
 import { gradeFrame } from '../media/color-grade';
 import { motionEffectsFrame } from '../media/motion-effects';
+import { drawOnto, getSurfaceContext } from '../utils/surface';
 import { colorScopesTarget, sampleColorScopes } from '../media/color-scopes';
 import { isScene } from '../queries/predicates';
 
@@ -81,7 +82,7 @@ export function renderWithSceneEffects(world: World, scene: Entity, render: () =
   const buffers = state?.scenes.get(scene);
   if (!state || !buffers) return render();
   const surface = world.get(RenderSurface)!;
-  const output = surface.ctx!;
+  const output = getSurfaceContext(world)!;
   const bounds = scene.get(Computed)!;
   const local = store(world, LocalTransform);
   const id = scene.id();
@@ -106,7 +107,7 @@ export function renderWithSceneEffects(world: World, scene: Entity, render: () =
   state.active = buffers;
   world.set(RenderSurface, { canvas: buffers.scene.canvas, ctx, resolution });
   try {
-    render();
+    drawOnto(ctx, render);
   } finally {
     world.set(RenderSurface, surface);
     state.active = previous;

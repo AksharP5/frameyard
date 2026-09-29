@@ -68,10 +68,11 @@ export function insertAsset(world: World, asset: Asset, options: InsertAssetOpti
 	};
 
 	const [entity] = editor.insertElement(parent, () => {
-			switch (asset.type) {
-				case 'VIDEO':
-					return <Video name={name} src={src} keepAspectRatio {...position} {...size} {...timing} />;
-				case 'SEQUENCE':
+		switch (asset.type) {
+			case 'VIDEO':
+				return <Video name={name} src={src} keepAspectRatio {...position} {...size} {...timing} />;
+			case 'SEQUENCE':
+			case 'MASK':
 				return (
 					<Rect name={name} keepAspectRatio {...position} {...size} {...timing}>
 						<VideoPaint src={src} />
@@ -90,7 +91,7 @@ export function insertAsset(world: World, asset: Asset, options: InsertAssetOpti
 			default:
 				return null;
 		}
-		});
+	});
 
 	if (entity && asset.type === 'VIDEO' && asset.channels) addLinkedAudio(world, entity, asset);
 
@@ -163,6 +164,7 @@ function sizeOf(asset: Asset): { width: number; height: number } | undefined {
 		case 'VIDEO':
 		case 'IMAGE':
 		case 'SEQUENCE':
+		case 'MASK':
 			return { width: Math.round(asset.width), height: Math.round(asset.height) };
 		case 'AUDIO':
 			return { ...AUDIO_SIZE };

@@ -5,12 +5,12 @@ import { Scene3D, SpatialParameters, SpatialGeometry, SpatialMaterial, LightSour
 
 import {
 	ChildOf,
-	Geometry, Paint, Group, Scene, Audio, AdjustmentLayer, Highlight, Preset, IsMask, Shadow, Stroke,
+	Geometry, Paint, Group, Scene, Audio, AdjustmentLayer, Highlight, Preset, IsClipPath, Shadow, Stroke,
 	Hidden, ClipsContent, Name, Key, AssetId, ItemIndex, MountScript, MountPath,
 	Caption,
 	Position, Offset, Rotation, Scale, UniformScale, Anchor, Skew, Size, Flip,
 	Constraint, KeepAspectRatio, DepthSort, PathData, SceneCamera, LayerMaterial, SceneEffects,
-	Opacity, BlendMode, Color, CornerRadius, MixedCornerRadius, Blur, ScaleMode, Effect,
+	Opacity, BlendMode, Color, CornerRadius, MixedCornerRadius, Blur, ScaleMode, Effect, Mask,
 	ColorStop, StrokeStyle, Shader, ColorGrade,
 	Chars, TextStyle,
 	Delay, Trim, PlaybackRate, SourceFrameRate, ClipLink, Locked, Markers,
@@ -60,12 +60,17 @@ export interface EntityRecord {
 		type?: number;
 		value?: number;
 	};
+	Mask?: {
+		offset?: number;
+		inverted?: boolean;
+		smoothing?: number;
+	};
 	Caption?: {
 		type?: number;
 		colors?: number[];
 		verticalAlign?: number;
 	};
-	IsMask?: {};
+	IsClipPath?: {};
 	Shadow?: {};
 	Stroke?: {};
 	Name?: string;
@@ -225,6 +230,10 @@ export function serializeEntity(entity: Entity): EntityRecord {
 		const effect = entity.get(Effect)!;
 		record.Effect = { type: effect.type, value: effect.value };
 	}
+	if (entity.has(Mask)) {
+		const mask = entity.get(Mask)!;
+		record.Mask = { offset: mask.offset, inverted: mask.inverted, smoothing: mask.smoothing };
+	}
 	if (entity.has(Shadow)) {
 		record.Shadow = {};
 	}
@@ -258,8 +267,8 @@ export function serializeEntity(entity: Entity): EntityRecord {
 	if (parent !== undefined && !parent.has(Stage)) {
 		record.ChildOf = parent;
 	}
-	if (entity.has(IsMask)) {
-		record.IsMask = {};
+	if (entity.has(IsClipPath)) {
+		record.IsClipPath = {};
 	}
 	if (entity.has(Position)) {
 		const position = entity.get(Position)!;
@@ -515,6 +524,10 @@ export function deserializeEntity(entity: Entity, e: Partial<EntityRecord>): voi
 		entity.add(Effect);
 		entity.set(Effect, defined(e.Effect));
 	}
+	if (e.Mask !== undefined) {
+		entity.add(Mask);
+		entity.set(Mask, defined(e.Mask));
+	}
 	if (e.Shadow !== undefined) {
 		entity.add(Shadow);
 	}
@@ -548,8 +561,8 @@ export function deserializeEntity(entity: Entity, e: Partial<EntityRecord>): voi
 	if (e.Expanded !== undefined) {
 		entity.add(Expanded);
 	}
-	if (e.IsMask !== undefined) {
-		entity.add(IsMask);
+	if (e.IsClipPath !== undefined) {
+		entity.add(IsClipPath);
 	}
 	if (e.Position !== undefined) {
 		entity.add(Position);
@@ -741,7 +754,7 @@ export function deserializeEntity(entity: Entity, e: Partial<EntityRecord>): voi
 		entity.set(TextStyle, defined(e.TextStyle));
 	}
 	// Attach to parent last so add/change observers see every trait this entity
-	// has (KeyframeTrack, Keyframe, Animation, IsMask, ...). Otherwise derived
+	// has (KeyframeTrack, Keyframe, Animation, IsClipPath, ...). Otherwise derived
 	// caches stay empty and the UI/motion system can't find them after reload.
 	if (e.ChildOf !== undefined) {
 		entity.add(ChildOf(e.ChildOf as Entity));

@@ -16,7 +16,7 @@ camelCase composition elements map 1:1 onto entities. Lowercase DOM vocabulary i
 
 | Element | What it is |
 | ------- | ---------- |
-| [`<rect>`](./rect.md) | A rectangle. Takes paints, strokes, shadows and effects. With `mask` it clips its parent instead of drawing. |
+| [`<rect>`](./rect.md) | A rectangle. Takes paints, strokes, shadows and effects. With `clipPath` it clips its parent instead of drawing. The older `mask` prop still works. |
 | [`<path>` / `<ellipse>`](./path.md) | Native SVG vector geometry or a boxed ellipse, with editable paints, strokes, masks and path keyframes. |
 | [`<mesh>` / `<path3d>` / `<pointCloud>`](./spatial.md#geometry-and-appearance) | Solid geometry, XYZ curves and point arrays in a native 3D viewport. |
 | [`<light>` / `<volume>`](./spatial.md#lights-and-volumes) | Editable 3D lighting and procedural density volumes. |
@@ -55,6 +55,7 @@ Sub-entity children of the node (or paint) that holds them. See [styles.md](./st
 | `<stroke>` | An outline of the parent's box or glyphs. Several stack. |
 | `<shadow>` | A drop shadow beneath the parent's silhouette. Several stack. |
 | `<effect>` | A CSS-style filter over the parent's rendered pixels. Several stack. |
+| `<mask>` | A matte limiting the `<effect>` holding it: the alpha of a tracked frame sequence. Under an `opacity` effect, the cut-out. See [styles.md](./styles.md#mask). |
 | `<animation>` | One preset in/out animation of the node holding it. |
 | `<keyframeTrack>` | The keyframes of one prop of the element holding it. |
 | `<keyframe>` | One keyframe of the track holding it. |
@@ -72,7 +73,7 @@ User-defined components are ordinary Solid components; they compose the elements
 | `<scene>` | required — the frame's own size |
 | `<rect>`, `<path>`, `<ellipse>`, `<html>`, `<surface>` | 100 × 100 |
 | `<audio>` | 500 × 150 (the waveform box on the canvas) |
-| `<rect mask>` | 500 × 500 |
+| `<rect clipPath>` | 500 × 500 |
 | `<text>` | fits its glyphs |
 | `<captions>` | the preset's — it lays out the caption block against the scene's frame |
 | `<highlight>`, `<preset>` | follows the parent's frame |

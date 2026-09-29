@@ -52,13 +52,13 @@ export function computeSpatialTransforms(world: World): void {
   const scenes = new Set<Entity>();
   const computed = store(world, Computed);
   const children = store(world, Cache).children;
-  const masks = store(world, Cache).masks;
+  const clipPaths = store(world, Cache).clipPaths;
   const local = store(world, LocalTransform);
   const usesDepth = (node: Entity): boolean => {
     const id = node.id();
     return Boolean(computed.positionZ[id] || computed.rotationX[id] || computed.rotationY[id])
       || (children[id] ?? []).some(child => !child.has(Scene) && !child.has(Scene3D) && usesDepth(child))
-      || (masks[id] ?? []).some(usesDepth);
+      || (clipPaths[id] ?? []).some(usesDepth);
   };
 
   for (const scene of [...world.query(Scene), ...world.query(Scene3D)]) {
@@ -125,10 +125,10 @@ export function computeSpatialTransforms(world: World): void {
       }
       if (entity.has(Scene3D)) return;
       for (const child of children[id] ?? []) walk(child, model, visible);
-      for (const mask of masks[id] ?? []) walk(mask, model, visible);
+      for (const mask of clipPaths[id] ?? []) walk(mask, model, visible);
     };
     for (const child of children[sid] ?? []) walk(child, identity4());
-    for (const mask of masks[sid] ?? []) walk(mask, identity4());
+    for (const mask of clipPaths[sid] ?? []) walk(mask, identity4());
   }
   if (!scenes.size) { states.delete(world); return; }
   states.set(world, { nodes, scenes });

@@ -3,9 +3,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 import { highlightProgress } from '@diffusionstudio/jsx';
-import { Computed, FrameRate, Highlight, RenderSurface } from '../traits';
+import { Computed, FrameRate, Highlight } from '../traits';
 import { getLocalWindow } from '../utils/time';
 import { snapshotScene } from './scene-effects';
+import { getSurfaceContext } from '../utils/surface';
 import type { Entity, World } from 'koota';
 
 export function renderHighlight(world: World, entity: Entity): void {
@@ -16,7 +17,7 @@ export function renderHighlight(world: World, entity: Entity): void {
   const progress = highlightProgress((computed.localTime - window.in) / fps, (window.out - window.in) / fps, options.enter, options.exit);
   if (progress === 0) return;
 
-  const ctx = world.get(RenderSurface)!.ctx!;
+  const ctx = getSurfaceContext(world)!;
   const source = snapshotScene(world);
   if (!source) return;
 

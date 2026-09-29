@@ -1,6 +1,6 @@
 # context
 
-Report the current app context: the folder new projects are created in (always reported), the folder of the project the app has open (null when none is), where its playhead sits in seconds, the registered font families, and where its `generate.*` declarations stand. Poll it to wait for generations without blocking.
+Report the current app context: the folder new projects are created in (always reported), the folder of the project the app has open (null when none is), where its playhead sits in seconds, the registered font families, where its `generate.*` declarations stand, and the progress of `media_segment` tracks running in the background. Poll it to wait for generations and tracks without blocking.
 
 | | |
 | --- | --- |
@@ -33,10 +33,21 @@ One JSON object:
     error?:  string;             // what it failed with, on `failed` rows
     asset?:  string;             // the library path it landed as, on `done` rows
   }[];
+  masks: {                       // media_segment tracks started while this project is open, oldest first
+    id:       string;            // the track's id, the same across polls
+    src:      string;            // the mask's library path, for <mask src>; the file is there once done
+    video:    string;            // the footage tracked, as media_segment was given it
+    state:    "loading" | "tracking" | "done" | "failed";
+    progress: number | null;     // 0..1: the model's download while loading, the frames masked while tracking; 1 once done
+    error?:   string;            // what it failed with, on `failed` rows
+    image?:   string;            // absolute path of a contact sheet of tracked frames, on `done` rows
+    model, frameRate, start, end, frames;           // the span, as media_segment returned it
+    bbox?, area?, score?, iou?, lost?, weak?;       // what was found, on `done` rows — see media_segment
+  }[];
 }
 ```
 
-With no project open (the app sits at the dashboard) the report is just `{ rootDir, projectDir: null }`: there is no playhead, no world, and no fonts to speak of. Open one with [`open`](./open.md).
+With no project open (the app sits at the dashboard) the report is just `{ rootDir, projectDir: null }` with empty lists: there is no playhead, no world, and no fonts to speak of. Open one with [`open`](./open.md).
 
 `rootDir` is reported whether or not a project is open — it is where a caller with nothing open goes to create or find one.
 
@@ -51,3 +62,5 @@ declarations. Poll until nothing is `generating`. A `done` row's `asset` is a
 library path; a `failed` row's `error` explains why generation stopped (see
 [failed sources](../jsx/errors.md#failed-sources)). Default local mode has no
 hosted generation service.
+
+`masks` is how a caller waits for a [`media_segment`](./media/segment.md) track that went into the library: the call returns as soon as it starts, so poll this until the row whose `src` it returned is `done` or `failed`. `loading` covers the model loading (its download, the first time, is `progress`) and waiting behind the editor's object mask tool or another track. A `done` row carries the same findings `media_segment` returns for a finished track, and its contact sheet as `image` — over MCP it also arrives inline, once, with the first poll that reports the row done. Rows last as long as the project stays open; closing it stops its tracks.

@@ -27,6 +27,13 @@ const editorBuild = await build({
   alias: { '@/utils': fileURLToPath(new URL('../../web/src/utils/common.ts', import.meta.url)) },
   jsx: 'transform', jsxFactory: 'clipJsx', logOverride: { 'empty-import-meta': 'silent' },
   plugins: [{ name: 'unused-ui-actions', setup(builder) {
+    builder.onResolve({ filter: /^\.\.\/object-mask$/ }, ({ path, importer }) =>
+      importer.endsWith('/input/shortcuts.ts') ? { path, namespace: 'ui-mask-boundary' } : undefined);
+    builder.onLoad({ filter: /.*/, namespace: 'ui-mask-boundary' }, () => ({ contents: `
+      export const cancelObjectMask=unused, trackObjectMask=unused, undoMaskStroke=unused;
+      export const getObjectTrack=() => null;
+      function unused() { throw new Error('Unexpected object mask action'); }
+    ` }));
     builder.onResolve({ filter: /^(\.\.\/group|\.\/interactions|\.\/timeline)$/ }, ({ path, importer }) => {
       if (importer.endsWith('/input/shortcuts.ts') || importer.endsWith('/split.tsx')) return { path, namespace: 'unused-ui' };
     });
@@ -86,6 +93,7 @@ function fixture() {
     './hud': { hudSystem: noop },
     './input/input-system': { inputSystem: noop },
     './input/shortcuts': api,
+    './object-mask': { clearObjectTrackOf: noop, clearObjectTracks: noop },
     './source-errors': { sourceErrorSystem: noop },
     './timeline': { TimelineSurface: api.TimelineSurface, timelineSystem: () => timelineInput(),
       clearClipFrames: noop, clearClipPeaks: noop, clearMedia: noop, clearPeaks: noop },

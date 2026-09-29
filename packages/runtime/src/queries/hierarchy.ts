@@ -28,14 +28,14 @@ export function getEntityChildren(world: World, parent: Entity): Entity[] {
 	return [...world.query(ChildOf(parent))].sort(sortByItemIndex);
 }
 
-/** Node traversal includes masks; they live outside Cache.children. */
+/** Node traversal includes clip paths; they live outside Cache.children. */
 export function getNodeChildren(world: World, parent: Entity): readonly Entity[] {
 	if (!parent.has(Cache) || isStage(parent)) return world.query(ChildOf(parent), Or(Geometry, Group, AdjustmentLayer));
 	const cache = store(world, Cache);
 	const id = parent.id();
 	const children = cache.children[id]!;
-	const masks = cache.masks[id]!;
-	return masks.length === 0 ? children : children.concat(masks);
+	const clipPaths = cache.clipPaths[id]!;
+	return clipPaths.length === 0 ? children : children.concat(clipPaths);
 }
 
 /** Paint-bearing strokes participate in decoder forwarding alongside fills. */

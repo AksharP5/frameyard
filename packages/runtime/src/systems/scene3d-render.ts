@@ -13,6 +13,7 @@ import { invert2D, transformPoint, type Point } from '../math';
 import { entityWorldMat } from '../queries/interaction';
 import { meshGeometry, sampleSpatialPath, spatialPathGeometry } from './scene3d-geometry';
 import { motionEffectsFrame } from '../media/motion-effects';
+import { drawOnto, getSurfaceContext } from '../utils/surface';
 import { gradeFrame } from '../media/color-grade';
 import { SceneFocus } from './scene3d-focus';
 import { volumeMaterial } from './scene3d-volume';
@@ -228,7 +229,7 @@ function paintTexture(world: World, entity: Entity, entry: Entry, requestedResol
     && !(entity.get(Cache)?.effects.length)) {
     let simple = true;
     for (let owner: Entity | null = entity; owner && !owner.has(Scene3D); owner = getParentEntity(owner)) {
-      if (owner.has(ClipsContent) || owner.get(Cache)?.masks.length) { simple = false; break; }
+      if (owner.has(ClipsContent) || owner.get(Cache)?.clipPaths.length) { simple = false; break; }
     }
     if (simple) paintKey = JSON.stringify([width, height, padding, resolution, textureWidth, textureHeight, c.color]);
   }
@@ -238,7 +239,7 @@ function paintTexture(world: World, entity: Entity, entry: Entry, requestedResol
   const ctx = source.getContext('2d')!;
   ctx.reset(); ctx.scale(resolution, resolution); ctx.clearRect(0, 0, source.width / resolution, source.height / resolution); ctx.translate(padding, padding);
   world.set(RenderSurface, { canvas: source, ctx, resolution });
-  try { draw(entity, projected); } finally { world.set(RenderSurface, surface); }
+  try { drawOnto(ctx, () => draw(entity, projected)); } finally { world.set(RenderSurface, surface); }
   entry.texture!.needsUpdate = true;
   entry.paintKey = paintKey;
   if (!meshPaint && (entry.width !== width || entry.height !== height || entry.padding !== padding)) {
@@ -269,7 +270,7 @@ function projectedPath(world: World, entity: Entity, root: Entity): { visual: Pr
 
 /** Native layers share one depth buffer and one scene render, including their individually editable paints. */
 export function drawScene3D(world: World, root: Entity, draw: DrawVisual, preparing = false): void {
-  const surface = world.get(RenderSurface)!, output = surface.ctx!, frame = root.get(Computed)!;
+  const surface = world.get(RenderSurface)!, output = getSurfaceContext(world)!, frame = root.get(Computed)!;
   if (frame.width <= 0 || frame.height <= 0) return;
   const state = getRenderer(world, root), { renderer, scene, camera } = state;
   const view = output.getTransform(), displayScale = Math.max(Math.hypot(view.a, view.b), Math.hypot(view.c, view.d));

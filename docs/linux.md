@@ -1,6 +1,6 @@
 # Frameyard on Linux
 
-Frameyard is a local desktop editor. The visual editor, project files, media inspection, transcription, and export run on your machine. Codex and Claude Code use your own accounts when you choose to use Assistant. Frameyard does not include Diffusion Studio's hosted generation or audio-analysis services.
+Frameyard is a local desktop editor. The visual editor, project files, media inspection, transcription, object masking, and export run on your machine. Object masking needs WebGPU and downloads a SAM 2.1 model on first use; larger models need more GPU memory. Codex and Claude Code use your own accounts when you choose to use Assistant. Frameyard does not include Diffusion Studio's hosted generation or audio-analysis services.
 
 The automated release build targets Linux x64. The [portable archive](releases.md) runs without a separate Node installation. Building from source needs Node 22.18 or newer, npm, [uv](https://docs.astral.sh/uv/getting-started/installation/), FFmpeg, Cairo, Pango, and pkg-config. The [README](../README.md) has the source installation steps. On Ubuntu 24.04, the CI workflow installs the system libraries with:
 

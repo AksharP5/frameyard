@@ -17,7 +17,7 @@ import {
   isAudio,
   isCaption,
   isGroup,
-  isMask,
+  isClipPath,
   isScene,
   isSequence,
   isText,
@@ -40,13 +40,13 @@ import { TransformSettings } from "./transform";
 import { CaptionSettings } from "./caption-settings";
 import { TextPanel } from "./text";
 import { FillsSettings } from "./fills";
-import { SourceSettings } from "./source";
 import { StrokesSettings } from "./strokes";
 import { ShadowsSettings } from "./shadows";
 import { EffectsSettings } from "./effects";
 import { AnimationsSettings } from "./animations";
 import { TransitionSettings } from "./transition";
-import { MasksSettings } from "./masks";
+import { ClipPathsSettings } from "./clip-paths";
+import { TrackingSettings } from "./tracking";
 import { AudioSettings } from "./audio";
 import { InterpolationSettings } from "./interpolation";
 import { HighlightInspector } from "@/components/agent/highlight-inspector";
@@ -68,7 +68,7 @@ export type SelectionTarget =
   | "scene3d"
   | "light"
   | "volume"
-  | "mask"
+  | "clip-path"
   | "sequence"
   | "caption"
   | "audio"
@@ -85,7 +85,7 @@ function classifyNode(entity: Entity): SelectionTarget {
   if (entity.has(Preset)) return "preset";
   if (isScene(entity)) return "scene";
   if (entity.has(Scene3D)) return "scene3d";
-  if (isMask(entity)) return "mask";
+  if (isClipPath(entity)) return "clip-path";
   if (isSequence(entity)) return "sequence";
   if (isCaption(entity)) return "caption";
   if (isAudio(entity)) return "audio";
@@ -178,11 +178,11 @@ export function Inspector(props: { embedded?: boolean } = {}) {
             <PresetInspector entity={nodes()[0]!} />
           </Show>
 
-          <Show when={includesTarget("shape", "text", "audio", "scene", "scene3d", "light", "volume", "caption", "group", "mask", "adjustment")}>
+          <Show when={includesTarget("shape", "text", "audio", "scene", "scene3d", "light", "volume", "caption", "group", "clip-path", "adjustment")}>
             <TimeSettings selection={nodes()} />
           </Show>
 
-          <Show when={includesTarget("shape", "text", "audio", "scene", "scene3d", "light", "volume", "caption", "group", "mask", "adjustment")}>
+          <Show when={includesTarget("shape", "text", "audio", "scene", "scene3d", "light", "volume", "caption", "group", "clip-path", "adjustment")}>
             <TransformSettings selection={nodes()} />
           </Show>
 
@@ -203,15 +203,15 @@ export function Inspector(props: { embedded?: boolean } = {}) {
             <PhysicsSettings node={nodes()[0]!} />
           </Show>
 
-          <Show when={includesTarget("shape", "mask") && first()?.has(PathData)}>
+          <Show when={includesTarget("shape", "clip-path") && first()?.has(PathData)}>
             <PathSettings node={nodes()[0]!} />
           </Show>
 
-          <Show when={includesTarget("shape", "text", "audio", "scene", "scene3d", "volume", "mask")}>
+          <Show when={includesTarget("shape", "text", "audio", "scene", "scene3d", "volume", "clip-path")}>
             <LayoutPanel selection={nodes()} />
           </Show>
 
-          <Show when={includesTarget("shape", "text", "scene", "scene3d", "light", "volume", "caption", "group", "audio", "mask")}>
+          <Show when={includesTarget("shape", "text", "scene", "scene3d", "light", "volume", "caption", "group", "audio", "clip-path")}>
             <AppearanceSettings selection={nodes()} />
           </Show>
 
@@ -223,8 +223,8 @@ export function Inspector(props: { embedded?: boolean } = {}) {
             <FillsSettings selection={nodes()} />
           </Show>
 
-          <Show when={includesTarget("shape", "caption")}>
-            <SourceSettings selection={nodes()} />
+          <Show when={includesTarget("shape")}>
+            <TrackingSettings selection={nodes()} />
           </Show>
 
           <Show when={includesTarget("shape", "scene", "caption")}>
@@ -247,11 +247,11 @@ export function Inspector(props: { embedded?: boolean } = {}) {
             <ColorGradingSettings selection={nodes()} />
           </Show>
 
-          <Show when={includesTarget("shape", "text", "caption", "group", "mask")}>
+          <Show when={includesTarget("shape", "text", "caption", "group", "clip-path")}>
             <AnimationsSettings selection={nodes()} />
           </Show>
 
-          <Show when={includesTarget("shape", "text", "scene", "scene3d", "light", "volume", "caption", "group", "mask", "audio", "adjustment")}>
+          <Show when={includesTarget("shape", "text", "scene", "scene3d", "light", "volume", "caption", "group", "clip-path", "audio", "adjustment")}>
             <LayerKeyframes node={nodes()[0]!} />
           </Show>
 
@@ -260,7 +260,7 @@ export function Inspector(props: { embedded?: boolean } = {}) {
           </Show>
 
           <Show when={includesTarget("shape", "text", "caption", "group")}>
-            <MasksSettings selection={nodes()} />
+            <ClipPathsSettings selection={nodes()} />
           </Show>
 
           <Show when={includesTarget("shape", "audio", "group", "scene")}>

@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -25,6 +26,15 @@ const INLINE_MAX_IMAGES = 4;
 const INLINE_MAX_BYTES = 1 << 20;
 
 const APP_SLUG = "diffusion-studio";
+
+function tempDir(): string {
+  const dir = tmpdir();
+  try {
+    return realpathSync.native(dir);
+  } catch {
+    return dir;
+  }
+}
 
 export async function present(name: ToolName, args: unknown, result: unknown): Promise<Presented> {
   switch (name) {
@@ -50,6 +60,10 @@ export async function present(name: ToolName, args: unknown, result: unknown): P
       return presentScreenshot(result as ToolResult<"screenshot">, (args as ToolArgs<"screenshot">).output);
     case "media_transcribe":
       return presentTranscript(result as ToolResult<"media_transcribe">, (args as ToolArgs<"media_transcribe">).output);
+    case "media_segment":
+      return presentSegment(result as ToolResult<"media_segment">, (args as ToolArgs<"media_segment">).output);
+    case "context":
+      return presentContext(result as ToolResult<"context">);
     default:
       return { output: result, images: [] };
   }
@@ -59,7 +73,7 @@ export async function present(name: ToolName, args: unknown, result: unknown): P
 // with its timecode (`08s10f`, or `0f-08s10f` for a sheet), which is the
 // filename too.
 async function presentImages(images: TimecodedImage[], output: string | undefined, kind: string): Promise<Presented> {
-  const dir = output ?? (await mkdtemp(join(tmpdir(), `dapi-${kind}-`)));
+  const dir = output ?? (await mkdtemp(join(tempDir(), `dapi-${kind}-`)));
   await mkdir(dir, { recursive: true });
   const written: WrittenImage[] = [];
   const refs: ToolOutput<"capture">["images"] = [];
@@ -78,7 +92,7 @@ async function presentImages(images: TimecodedImage[], output: string | undefine
  * the fresh name inside it rather than an EISDIR from writeFile.
  */
 async function singleFilePath(output: string | undefined, name: string): Promise<string> {
-  if (output === undefined) return join(tmpdir(), name);
+  if (output === undefined) return join(tempDir(), name);
   const existing = await stat(output).catch(() => null);
   if (existing?.isDirectory()) return join(output, name);
   await mkdir(dirname(output), { recursive: true });
@@ -97,7 +111,7 @@ async function presentPreview(
 }
 
 async function presentScreenshot(result: ToolResult<"screenshot">, output: string | undefined): Promise<Presented> {
-  const dir = output ?? tmpdir();
+  const dir = output ?? tempDir();
   await mkdir(dir, { recursive: true });
   const path = join(dir, screenshotFilename(new Date()));
   await writePrivateFile(path, result.png);
@@ -122,6 +136,50 @@ async function writePrivateFile(path: string, data: Uint8Array | string): Promis
     await unlink(temporary).catch(() => undefined);
     throw error;
   }
+}
+
+/**
+ * The picture always goes to the temp dir; `output` is where the mask goes.
+ * A mask the renderer put into the project's library comes with its path; one
+ * that comes as bytes is written here, to `output` or the temp dir. A track
+ * still running in the background has no picture yet (see `presentContext`).
+ */
+async function presentSegment(result: ToolResult<"media_segment">, output: string | undefined): Promise<Presented> {
+  const { png, mask, ...found } = result;
+  let path = found.path;
+  if (mask) {
+    path = await singleFilePath(output, `dapi-mask-${randomUUID()}.mask`);
+    await writePrivateFile(path, mask);
+  }
+  const images: WrittenImage[] = [];
+  let image: string | undefined;
+  if (png) {
+    image = join(tempDir(), `dapi-segment-${randomUUID()}.png`);
+    await writePrivateFile(image, png);
+    images.push({ path: image, png });
+  }
+  const presented: ToolOutput<"media_segment"> = { ...found, ...(image === undefined ? {} : { image }), ...(path === undefined ? {} : { path }) };
+  return { output: presented, images };
+}
+
+/** Contact sheets of background tracks already written, by track id: each is written, and shown inline, once. */
+const trackSheets = new Map<string, string>();
+
+/** A done track's contact sheet goes to the temp dir the first poll it shows up in, and arrives inline with that poll. */
+async function presentContext(result: ToolResult<"context">): Promise<Presented> {
+  const images: WrittenImage[] = [];
+  const masks: ToolOutput<"context">["masks"] = [];
+  for (const { png, ...row } of result.masks) {
+    let image = trackSheets.get(row.id);
+    if (png && image === undefined) {
+      image = join(tempDir(), `dapi-segment-${randomUUID()}.png`);
+      await writePrivateFile(image, png);
+      trackSheets.set(row.id, image);
+      images.push({ path: image, png });
+    }
+    masks.push(image === undefined ? row : { ...row, image });
+  }
+  return { output: { ...result, masks }, images };
 }
 
 function screenshotFilename(taken: Date): string {

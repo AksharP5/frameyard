@@ -9,6 +9,7 @@ import { assert } from '../utils/assert';
 import { getAsset, getAssetFile, getSequenceFrameRate } from '../actions/assets';
 import { FrameCache } from './frame-cache';
 import { getKeyframeIndex } from './keyframe-index';
+import { MaskDecoder } from './mask';
 import { SequenceDecoder } from './sequence';
 
 import type { Entity, World } from 'koota';
@@ -883,14 +884,14 @@ export class VideoExporter {
 }
 
 /**
- * What a video paint decodes through. Three implementations of one interface
- * — `seekTo`, `toBitmap`, `idle`, `dispose` — picked by what the source turns
- * out to be and what the world is doing with it: a demuxed buffer for playing
- * a file, an exact-seeking reader for encoding one, and a frames directory
- * read off disk. Realtime buffers also prepare their opening frames before
- * playback starts its clock.
+ * What a video paint decodes through. Four implementations of one interface
+ * — `seekTo`, `toBitmap`, `idle`, `dispose` — picked by what the source turns out to
+ * be and what the world is doing with it: a demuxed buffer for playing a
+ * file, an exact-seeking reader for encoding one, a frames directory read off
+ * disk, and a mask file. Realtime buffers also prepare their opening frames
+ * before playback starts its clock.
  */
-export type VideoDecoderInstance = VideoBuffer | VideoExporter | SequenceDecoder;
+export type VideoDecoderInstance = VideoBuffer | VideoExporter | SequenceDecoder | MaskDecoder;
 
 // A project may use a different preview copy of the same original asset.
 // Weak handles also let closed projects release their tracks and source files.
@@ -929,9 +930,9 @@ export function getVideoTrack(source: VideoAsset) {
  * The decoder `entity`'s video paint draws from, built on first use and kept
  * until the asset it was built for is no longer the one asked for.
  *
- * A sequence's rate is the element's to set, so it is pushed on every call
- * rather than fixed at construction — re-reading a folder to play it slower
- * would be a rebuild for nothing.
+ * A sequence's or mask's rate is the element's to set, so it is pushed on
+ * every call rather than fixed at construction — re-reading a folder to play
+ * it slower would be a rebuild for nothing.
  */
 export function resolveVideoDecoder(world: World, entity: Entity): VideoDecoderInstance | null {
 	const assetId = entity.get(AssetId)?.value;
@@ -941,12 +942,17 @@ export function resolveVideoDecoder(world: World, entity: Entity): VideoDecoderI
 	// once, in order, and a cache would be a window it never looks back into.
 	const hasCache = world.get(Mode)?.value === 'realtime';
 
-	// The id is the only thing that can go stale: a library edit assigns onto
-	// the asset in place, so the object a live decoder holds is the library's.
+	// A restored mask file can replace bytes under the same id after a failed
+	// read, so its decoder must be rebuilt when the library stat changes.
 	const existing = entity.get(VideoDecoderHandle);
-	if (existing && existing.asset.id === assetId) {
+	const maskAsset = existing instanceof MaskDecoder ? getAsset(world, assetId) : null;
+	const staleMask = existing instanceof MaskDecoder
+		&& (maskAsset?.type !== 'MASK' || existing.isStale(maskAsset));
+	if (existing && existing.asset.id === assetId && !staleMask) {
 		if (existing instanceof SequenceDecoder) {
 			existing.hasCache = hasCache;
+			existing.frameRate = getSequenceFrameRate(entity, existing.asset);
+		} else if (existing instanceof MaskDecoder) {
 			existing.frameRate = getSequenceFrameRate(entity, existing.asset);
 		}
 		return existing;
@@ -955,12 +961,15 @@ export function resolveVideoDecoder(world: World, entity: Entity): VideoDecoderI
 	// Asset changed — dispose old decoder and create a new one.
 	existing?.dispose();
 
-	const asset = getAsset(world, assetId);
+	const asset = maskAsset ?? getAsset(world, assetId);
 	if (!asset) return null;
 
 	let decoder: VideoDecoderInstance;
 	if (asset.type === 'SEQUENCE') {
 		decoder = new SequenceDecoder(asset, hasCache);
+		decoder.frameRate = getSequenceFrameRate(entity, asset);
+	} else if (asset.type === 'MASK') {
+		decoder = new MaskDecoder(asset);
 		decoder.frameRate = getSequenceFrameRate(entity, asset);
 	} else if (asset.type === 'VIDEO') {
 		decoder = hasCache ? new VideoBuffer(asset) : new VideoExporter(asset, world.get(OriginalMedia) ?? null);

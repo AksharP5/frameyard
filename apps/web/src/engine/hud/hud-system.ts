@@ -22,6 +22,7 @@ import {
 import { getMarqueeQuad } from '../input/snapping';
 import { getMountedNameInput } from './name-input';
 import { drawPathControls } from './path-controls';
+import { drawObjectMasks } from '../object-mask';
 
 import type { Entity, World } from 'koota';
 import type { Mat2D } from '@diffusionstudio/runtime';
@@ -59,6 +60,7 @@ export function hudSystem(world: World): void {
 	drawPathControls(world, ctx, resolution);
 
 	drawMarquee(world, ctx, resolution);
+	drawObjectMasks(world, ctx, resolution);
 }
 
 function drawSnapLines(world: World, ctx: Ctx2D, resolution: number): void {

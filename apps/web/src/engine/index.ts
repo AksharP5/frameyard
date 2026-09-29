@@ -24,3 +24,5 @@ export * from './library';
 export * from './asset-actions';
 export * from './keyframes';
 export * from './align';
+export * from './object-mask';
+export * from './clip-path';
