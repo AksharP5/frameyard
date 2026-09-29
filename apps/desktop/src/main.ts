@@ -81,6 +81,10 @@ app.commandLine.appendSwitch("disable-background-timer-throttling");
 app.commandLine.appendSwitch("disable-renderer-backgrounding");
 app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
 app.commandLine.appendSwitch("disable-features", "CalculateNativeWinOcclusion");
+// Dawn hides shader-f16 on NVIDIA by default, but the local SAM 2.1 models need it.
+if (process.platform === "linux") {
+  app.commandLine.appendSwitch("enable-dawn-features", "vulkan_enable_f16_on_nvidia");
+}
 
 let setNativeCornerRadius: ((handle: Buffer, radius: number) => void) | null = null;
 let setNativeBackdrop:
