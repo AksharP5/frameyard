@@ -23,6 +23,13 @@ const built = await build({
   bundle: true, write: false, format: 'cjs', platform: 'node', conditions: ['browser'],
   jsx: 'transform', jsxFactory: 'clipJsx', logOverride: { 'empty-import-meta': 'silent' },
   plugins: [{ name: 'unused-ui-boundaries', setup(builder) {
+    builder.onResolve({ filter: /^\.\.\/object-mask$/ }, ({ path, importer }) =>
+      importer.endsWith('/input/shortcuts.ts') ? { path, namespace: 'ui-mask-boundary' } : undefined);
+    builder.onLoad({ filter: /.*/, namespace: 'ui-mask-boundary' }, () => ({ contents: `
+      export const cancelObjectMask=unused, trackObjectMask=unused, undoMaskStroke=unused;
+      export const getObjectTrack=() => null;
+      function unused() { throw new Error('Unexpected object mask action'); }
+    ` }));
     builder.onResolve({ filter: /^(\.\.\/group|\.\/interactions|\.\/timeline)$/ }, ({ path, importer }) => {
       if (importer.endsWith('/input/shortcuts.ts') || importer.endsWith('/split.tsx')) return { path, namespace: 'ui-boundary' };
     });

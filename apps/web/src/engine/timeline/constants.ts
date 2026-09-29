@@ -117,7 +117,7 @@ export const COLORS = {
       primary: '#8ca49e',
       foreground: '#dce7e2',
     },
-    mask: {
+    clipPath: {
       background: '#484353',
       foreground: '#e8e1f0',
     },

@@ -96,6 +96,7 @@ export enum EffectType {
   INVERT,
   SATURATE,
   SEPIA,
+  OPACITY,
 }
 
 export enum MotionType {
@@ -182,4 +183,6 @@ export enum ToolType {
   RECT,
   TEXT,
   TEXT_EDIT,
+  OBJECT_MASK,
+  CLIP_PATH,
 }

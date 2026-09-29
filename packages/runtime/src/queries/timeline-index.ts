@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 import {
-	ChildOf, Keyframe, KeyframeTrack, IsMask, Geometry, Group,
+	ChildOf, Keyframe, KeyframeTrack, IsClipPath, Geometry, Group,
 	AdjustmentLayer, Expanded, ItemIndex, Sequential,
 } from '../traits';
 import { isSequence } from './predicates';
@@ -35,7 +35,7 @@ export function buildTimelineLayers(world: World, parent: Entity): TimelineNode[
 		cache = new Map();
 		cachedLayers.set(world, cache);
 		const invalidate = cache.clear.bind(cache);
-		for (const trait of [ChildOf('*'), Keyframe, KeyframeTrack, IsMask, Geometry, Group, AdjustmentLayer, Expanded, Sequential, ItemIndex]) {
+		for (const trait of [ChildOf('*'), Keyframe, KeyframeTrack, IsClipPath, Geometry, Group, AdjustmentLayer, Expanded, Sequential, ItemIndex]) {
 			world.onAdd(trait, invalidate);
 			world.onRemove(trait, invalidate);
 		}
@@ -54,7 +54,7 @@ function buildLayers(world: World, parent: Entity): TimelineNode[] {
 
 	const tracks: Entity[] = [];
 	const geoms: Entity[] = [];
-	const masks: Entity[] = [];
+	const clipPaths: Entity[] = [];
 	const subitems: Entity[] = [];
 
 	for (const child of world.query(ChildOf(parent))) {
@@ -63,8 +63,8 @@ function buildLayers(world: World, parent: Entity): TimelineNode[] {
 
 		if (child.has(KeyframeTrack)) {
 			tracks.push(child);
-		} else if (child.has(IsMask)) {
-			masks.push(child);
+		} else if (child.has(IsClipPath)) {
+			clipPaths.push(child);
 		} else if (child.has(Geometry) || child.has(Group) || child.has(AdjustmentLayer)) {
 			geoms.push(child);
 		} else {
@@ -74,7 +74,7 @@ function buildLayers(world: World, parent: Entity): TimelineNode[] {
 
 	tracks.sort(sortByItemIndex).reverse();
 	geoms.sort(sortByItemIndex).reverse();
-	masks.sort(sortByItemIndex).reverse();
+	clipPaths.sort(sortByItemIndex).reverse();
 	subitems.sort(sortByItemIndex).reverse();
 
 	const nodes: TimelineNode[] = [];
@@ -100,8 +100,8 @@ function buildLayers(world: World, parent: Entity): TimelineNode[] {
 		nodes.push(buildNode(world, geom, 'geometry'));
 	}
 
-	for (const mask of masks) {
-		nodes.push(buildNode(world, mask, 'geometry'));
+	for (const clipPath of clipPaths) {
+		nodes.push(buildNode(world, clipPath, 'geometry'));
 	}
 
 	return nodes;
@@ -142,7 +142,7 @@ function isExpandable(world: World, parent: Entity): boolean {
 		if (child.has(Keyframe)) continue;
 		if (sequence && !hasKeyframes(world, child)) continue;
 		if (
-			child.has(IsMask) ||
+			child.has(IsClipPath) ||
 			child.has(Geometry) ||
 			child.has(Group) ||
 			child.has(AdjustmentLayer) ||

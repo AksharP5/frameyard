@@ -42,7 +42,7 @@ export function handlePathInteraction(world: World, event: DispatchedPointerEven
 	const entity = event.target.entity;
 	if (!entity?.isAlive()) return;
 
-	if (event.type === 'pointerenter') updateCursor(world, 'cross');
+	if (event.type === 'pointerenter') updateCursor(world, 'crosshair');
 	if (event.type === 'pointerleave') updateCursor(world, getToolCursor(world));
 
 	if (event.type === 'dragstart') {

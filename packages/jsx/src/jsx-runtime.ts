@@ -12,7 +12,7 @@
  * the compile step canonicalizes them to the PascalCase components in
  * "./elements", so at runtime a tag's case still decides its environment.
  * Lowercase DOM tags are the vocabulary for `<htmlPaint>` content. The
- * names both vocabularies share (`rect`, `text`, `image`, `path`, `ellipse`) are SVG-only on the
+ * names both vocabularies share (`rect`, `text`, `image`, `path`, `ellipse`, `mask`) are SVG-only on the
  * DOM side and resolve lexically at compile time: inside an SVG container
  * they are SVG content, everywhere else composition elements. Their prop
  * types are the union of both readings.
@@ -27,6 +27,7 @@ import type {
   CaptionsProps,
   ColorStopProps,
   EffectProps,
+  MaskProps,
   GradientPaintProps,
   MediaPaintProps,
   GroupProps,
@@ -68,7 +69,7 @@ type HtmlElementTags = Omit<SolidJSX.HTMLElementTags, "canvas" | "audio" | "vide
 type ImgTag = Omit<SolidJSX.HTMLElementTags["img"], "src"> & { src?: AssetInput };
 
 // The shared names are re-declared below as unions with the composition props.
-type SvgElementTags = Omit<SolidJSX.SVGElementTags, "rect" | "text" | "image" | "path" | "ellipse">;
+type SvgElementTags = Omit<SolidJSX.SVGElementTags, "rect" | "text" | "image" | "path" | "ellipse" | "mask">;
 
 export declare namespace JSX {
   // Solid's Element type keeps Solid's control flow (<For>, <Show>, …) and
@@ -112,6 +113,7 @@ export declare namespace JSX {
     stroke: StrokeProps & SourceProps;
     shadow: ShadowProps & SourceProps;
     effect: EffectProps & SourceProps;
+    mask: (MaskProps & SourceProps) | SolidJSX.SVGElementTags["mask"];
     animation: AnimationProps & SourceProps;
     keyframeTrack: KeyframeTrackProps & SourceProps;
     keyframe: KeyframeProps & SourceProps;

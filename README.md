@@ -8,6 +8,12 @@ Frameyard includes offline speech transcription and captions, source-based cuts,
 native 2D and 3D layers, and local Manim and HyperFrames rendering. It is an
 independent fork of [Diffusion Studio](https://github.com/diffusionstudio/editor).
 
+The Object Mask tool can isolate a subject in imported footage and track it
+through a clip. Use the tracked mask to put text behind the subject or limit an
+effect to it. SAM 2.1 runs locally on WebGPU; the first use downloads a model
+(about 83 MB for Tiny). Larger models use more GPU memory. Agents can create
+the same masks with [`media_segment`](docs/reference/tools/media/segment.md).
+
 ## Install
 
 Frameyard currently targets Linux x64. Build and install from source; [portable

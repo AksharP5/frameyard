@@ -39,9 +39,12 @@ export const AdjustmentLayer = trait();
 export const Highlight = trait(() => parseHighlightOptions({}));
 export const Preset = trait(() => parsePresetOptions({}));
 
-// Tag marking an entity as a mask. Masks are ChildOf their target;
-// Cache.masks on the target is derived from IsMask + ChildOf queries.
-export const IsMask = trait();
+// Tag marking an entity as a clip path (`<rect clipPath>`). Clip paths are
+// ChildOf their target; Cache.clipPaths on the target is derived from IsClipPath + ChildOf queries.
+export const IsClipPath = trait();
+
+// Existing Frameyard projects and editor tools call clip paths masks.
+export const IsMask = IsClipPath;
 
 // Tag for shadow sub-entities (distinguishes them from other Effect
 // sub-entities in ChildOf queries).

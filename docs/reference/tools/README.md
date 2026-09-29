@@ -20,7 +20,7 @@ A tool is named as MCP lists it, and the CLI spelling follows from the name:
 
 ## Results
 
-Every tool returns one JSON object, its *structured content*. Over MCP that is the result's `structuredContent`, repeated as a text block for clients that ignore structured content; the CLI prints it to stdout, unchanged. Tools that render images (`capture`, `media_grab`, `media_filmstrip`, `media_waveform`, `screenshot`) write PNGs to disk and return their paths; over MCP a result of at most four images, none over a megabyte, also carries them inline as image content, so a contact sheet arrives in context without opening anything.
+Every tool returns one JSON object, its *structured content*. Over MCP that is the result's `structuredContent`, repeated as a text block for clients that ignore structured content; the CLI prints it to stdout, unchanged. Tools that render images (`capture`, `media_grab`, `media_filmstrip`, `media_waveform`, `media_segment`, `screenshot`) write PNGs to disk and return their paths; over MCP a result of at most four images, none over a megabyte, also carries them inline as image content, so a contact sheet arrives in context without opening anything.
 
 ## Errors
 
@@ -48,6 +48,7 @@ editing, and export still work. See [local setup](../../linux.md).
 | [`media_filmstrip`](./media/filmstrip.md) | `dapi media filmstrip` | Filmstrip preview |
 | [`media_waveform`](./media/waveform.md) | `dapi media waveform` | Waveform preview |
 | [`media_listen`](./media/listen.md) | `dapi media listen` | Hosted audio analysis; unavailable in local mode |
+| [`media_segment`](./media/segment.md) | `dapi media segment` | Segment and track an object locally |
 | [`models`](./models.md) | `dapi models` | Hosted generation models; empty in local mode |
 | [`voices`](./voices.md) | `dapi voices` | Hosted speech voices; empty in local mode |
 | [`whoami`](./whoami.md) | `dapi whoami` | Hosted account; null in local mode |
@@ -60,6 +61,7 @@ How the surface is divided:
 
 - **The project loop.** [`open`](./open.md) a folder, edit its JSX, [`context`](./context.md) for what the source cannot say, [`capture`](./capture.md) and [`check`](./check.md) to verify, [`export`](./export.md) when asked.
 - **Media inspection** (`media_*`): a file by path, without adding it to the project. Absolute paths and URLs work with or without an open project; library paths (`b-roll/clip.mp4`) need one.
+- **Masks.** [`media_segment`](./media/segment.md) segments and tracks an object in footage and writes the mask file a `<mask src>` names.
 - **What a declaration may name.** [`fonts`](./fonts.md) lists installed fonts. In a hosted build, [`models`](./models.md) and [`voices`](./voices.md) list choices for [`generate.*`](../jsx/generate.md).
 - **The app and the machine.** [`whoami`](./whoami.md), [`logs`](./logs.md), [`screenshot`](./screenshot.md), [`report`](./report.md).
 

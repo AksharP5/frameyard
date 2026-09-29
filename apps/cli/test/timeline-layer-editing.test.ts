@@ -26,7 +26,7 @@ function fixture() {
   const entity = { get: (trait: string) => traits.get(trait), has: () => false, isAlive: () => true };
   const runtime: Record<string, unknown> = {
     ...Object.fromEntries(['Audio', 'ClipHeight', 'ClipLink', 'Expanded', 'Hidden', 'Hovering', 'Locked', 'Muted', 'Name', 'Selected', 'Soloed'].map(name => [name, name])),
-    ...Object.fromEntries(['isAdjustmentLayer', 'isCaption', 'isGroup', 'isMask', 'isScene', 'isSequence', 'isText'].map(name => [name, () => false])),
+    ...Object.fromEntries(['isAdjustmentLayer', 'isCaption', 'isClipPath', 'isGroup', 'isMask', 'isScene', 'isSequence', 'isText'].map(name => [name, () => false])),
     findGeometryAsset: () => undefined,
   };
   const dependencies: Record<string, unknown> = {

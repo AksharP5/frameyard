@@ -12,10 +12,12 @@ import {
 } from "@/components/ui/tooltip";
 import { PromptInput } from "../genai/prompt-input";
 import { ActionBar } from "../genai/action-bar";
-import { For, Show } from "solid-js";
+import { ObjectMaskBar } from "./object-mask-bar";
+import { ClipPathBar } from "./clip-path-bar";
+import { For, Match, Show, Switch, createEffect } from "solid-js";
 import { Tool, ToolType } from "@diffusionstudio/runtime";
 import { useWorld } from "@diffusionstudio/koota-solid";
-import { useTool } from "@/engine";
+import { clearClipPathTarget, useTool } from "@/engine";
 import { usePromptInput } from "@/context/prompt-input";
 import { localMode } from "@/lib/local-mode";
 
@@ -33,6 +35,13 @@ const canvasTools = [
     label: "Hand",
     shortcut: "H",
     description: "Pan the canvas",
+  },
+  {
+    type: ToolType.OBJECT_MASK,
+    icon: "object-mask",
+    label: "Object Mask",
+    shortcut: "M",
+    description: "Select and track an object in footage",
   },
   {
     type: ToolType.SCENE,
@@ -64,6 +73,11 @@ export function Toolbar() {
     openPromptInput,
     setPromptInputOpen,
   } = usePromptInput();
+  const selectedTool = useTool();
+
+  createEffect(() => {
+    if (selectedTool() !== ToolType.CLIP_PATH) clearClipPathTarget();
+  });
 
   return (
     <>
@@ -71,7 +85,14 @@ export function Toolbar() {
         <PromptInput initialConfig={promptInputConfig()} />
       </Show>
       <Show when={!promptInputOpen()}>
-        <ActionBar openPromptInput={openPromptInput} />
+        <Switch fallback={<ActionBar openPromptInput={openPromptInput} />}>
+          <Match when={selectedTool() === ToolType.OBJECT_MASK}>
+            <ObjectMaskBar />
+          </Match>
+          <Match when={selectedTool() === ToolType.CLIP_PATH}>
+            <ClipPathBar />
+          </Match>
+        </Switch>
       </Show>
       <Show when={!localMode}>
         <div class="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-xl p-1.5 bg-background border border-border-strong flex gap-1 items-center z-10">
