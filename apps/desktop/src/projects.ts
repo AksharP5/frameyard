@@ -637,7 +637,7 @@ All of them talk to the running app, except \`fonts\`.
 | \`grab\` | \`dapi media grab <id\\|path>\` | Decode frames of a video to labelled PNG contact sheets. |
 | \`filmstrip\` | \`dapi media filmstrip <id\\|path>\` | Thumbnail grid across a window of a video. |
 | \`waveform\` | \`dapi media waveform <id\\|path>\` | Loudness over time, with the silences marked. |
-| \`fonts\` | \`dapi fonts\` | Local font families, valid as \`fontFamily\`. |
+| \`fonts\` | \`dapi fonts\` | Google Fonts and local font families, valid as \`fontFamily\`. |
 | \`logs\` | \`dapi logs\` | Recent console output from the app. |
 | \`screenshot\` | \`dapi screenshot\` | The whole app window as a PNG. |
 | \`report\` | \`dapi report <title>\` | Open a Frameyard issue. Logs are included only if requested. |

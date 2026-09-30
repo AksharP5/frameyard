@@ -30,6 +30,7 @@ test("maps Fontconfig weights to CSS weights and oblique faces to italic", () =>
   const rows = weights.map((weight) => `Example\tExample ${weight}\tExample-${weight}\t${weight}\t110`);
   const [family] = parseFontconfigFonts(rows.join("\n"));
   assert.equal(family.family, "Example");
+  assert.equal(family.provider, "local");
   assert.deepEqual(family.variants.map((v) => v.weight), ["100", "200", "300", "350", "380", "400", "500", "600", "700", "800", "900", "1000"]);
   assert.ok(family.variants.every((v) => v.style === "italic"));
   assert.equal(family.variants[8].source, "local('Example 200'), local('Example-200')");
@@ -38,5 +39,5 @@ test("maps Fontconfig weights to CSS weights and oblique faces to italic", () =>
 test("deduplicates named faces, escapes CSS names, and skips abstract variable ranges", () => {
   const row = "Artist's Font\tArtist's Font\t\t80\t0";
   const families = parseFontconfigFonts(`${row}\n${row}\ninvalid row\nBroken\t\t\tunknown\t0\nVariable\t\t\t[0 210]\t0`);
-  assert.deepEqual(families, [{ family: "Artist's Font", variants: [{ weight: "400", source: "local('Artist\\'s Font')", style: "normal" }] }]);
+  assert.deepEqual(families, [{ family: "Artist's Font", provider: "local", variants: [{ weight: "400", source: "local('Artist\\'s Font')", style: "normal" }] }]);
 });

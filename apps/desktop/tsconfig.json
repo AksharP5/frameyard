@@ -3,7 +3,7 @@
   "compilerOptions": {
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.tsbuildinfo",
     "allowImportingTsExtensions": true,
-    "lib": ["es2024"],
+    "lib": ["es2024", "dom", "dom.iterable"],
     "types": ["node"]
   },
   "include": ["src"]

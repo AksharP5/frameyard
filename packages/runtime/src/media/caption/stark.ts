@@ -5,7 +5,6 @@
 import { BlendModeType, CaptionAlign, CaptionType, PaintType, FontStyle, TextAlign, TextBaseline, TextCase } from '../../constants';
 import { Paint, Color, BlendMode } from '../../traits';
 import { renderText } from '../../utils/text';
-import { loadWebFont } from '../../fonts/utils';
 import { groupBy, findActiveCaptionGroup, resolveTranscript, setChars } from './utils';
 import { placeCaption } from './position';
 import { createEntity } from '../../actions/entities';
@@ -70,7 +69,6 @@ export class StarkCaptionDecoder implements CaptionDecoder {
 		fill.set(BlendMode, { value: BlendModeType.DIFFERENCE });
 		appendChild(world, fill, entity);
 
-		loadWebFont(world, STARK_TEXT_STYLE.fontFamily);
 		return true;
 	}
 

@@ -84,8 +84,6 @@ export function resetAnimatedValues(world: World, entity: Entity | null, ignore?
 	computed.cornerRadiusBottomRight[eid] = read(MixedCornerRadius, 'bottomRight', 0);
 	computed.cornerRadiusBottomLeft[eid] = read(MixedCornerRadius, 'bottomLeft', 0);
 	computed.stopOffset[eid] = read(ColorStop, 'offset', 0);
-	// Unset text overrides so static edits and playhead-driven captions read Chars.
-	computed.chars[eid] = undefined;
 
 	if (entity.has(UniformScale) && ignore !== UniformScale) {
 		computed.scaleX[eid] = read(UniformScale, 'value', 1);
@@ -94,6 +92,11 @@ export function resetAnimatedValues(world: World, entity: Entity | null, ignore?
 		computed.scaleX[eid] = read(Scale, 'x', 1);
 		computed.scaleY[eid] = read(Scale, 'y', 1);
 	}
+
+	// Not a copy of Chars: text has no Computed mirror, and captions write
+	// Chars straight to the store, so a copy would pin the text a static
+	// node shows. Unset, the renderer reads Chars; text motion overrides it.
+	computed.chars[eid] = undefined;
 }
 
 /** Restore only the authored fields a preset animation can change. */
@@ -141,6 +144,9 @@ function resetPresetValues(world: World, entity: Entity, animations: Entity[]): 
 
 /**
  * Apply a preset animation to a node at the given normalized progress.
+ * Presets scale or shift the Computed values in place, which start each
+ * frame at the authored values, so a fade-in on a clip at 80% opacity lands
+ * on 80%, and overlapping presets on a shared property compound.
  */
 function applyAnimation(world: World, entity: Entity, anim: Entity, progress: number) {
 	const computed = store(world, Computed);
@@ -153,7 +159,7 @@ function applyAnimation(world: World, entity: Entity, anim: Entity, progress: nu
 		case AnimationType.FADE: {
 			const phase = animation.phase[aid];
 			const eased = clamp01(easeEnter(progress));
-			computed.opacity[eid] = phase === AnimationPhase.OUT ? 1 - eased : eased;
+			computed.opacity[eid]! *= phase === AnimationPhase.OUT ? 1 - eased : eased;
 			break;
 		}
 		case AnimationType.GAIN: {
@@ -168,8 +174,8 @@ function applyAnimation(world: World, entity: Entity, anim: Entity, progress: nu
 			const eased = clamp01(easeEnter(progress));
 			const t = phase === AnimationPhase.OUT ? eased : 1 - eased;
 			const scale = 1 - 0.5 * t;
-			computed.scaleX[eid] = scale;
-			computed.scaleY[eid] = scale;
+			computed.scaleX[eid]! *= scale;
+			computed.scaleY[eid]! *= scale;
 			break;
 		}
 		case AnimationType.SHRINK: {
@@ -177,14 +183,14 @@ function applyAnimation(world: World, entity: Entity, anim: Entity, progress: nu
 			const eased = clamp01(easeEnter(progress));
 			const t = phase === AnimationPhase.OUT ? eased : 1 - eased;
 			const scale = 1 + 0.5 * t;
-			computed.scaleX[eid] = scale;
-			computed.scaleY[eid] = scale;
+			computed.scaleX[eid]! *= scale;
+			computed.scaleY[eid]! *= scale;
 			break;
 		}
 		case AnimationType.BLUR: {
 			const phase = animation.phase[aid];
 			const eased = clamp01((phase === AnimationPhase.OUT ? easeBlurOut : easeBlurIn)(progress));
-			computed.blur[eid] = phase === AnimationPhase.OUT ? lerp(0, 24, eased) : lerp(24, 0, eased);
+			computed.blur[eid]! += phase === AnimationPhase.OUT ? lerp(0, 24, eased) : lerp(24, 0, eased);
 			break;
 		}
 		case AnimationType.SLIDE_LEFT:
@@ -198,15 +204,15 @@ function applyAnimation(world: World, entity: Entity, anim: Entity, progress: nu
 
 			const sign = phase === AnimationPhase.OUT ? -1 : 1;
 			if (type === AnimationType.SLIDE_LEFT) {
-				computed.offsetX[eid] = sign * 100 * t;
+				computed.offsetX[eid]! += sign * 100 * t;
 			} else if (type === AnimationType.SLIDE_RIGHT) {
-				computed.offsetX[eid] = sign * -100 * t;
+				computed.offsetX[eid]! += sign * -100 * t;
 			} else if (type === AnimationType.SLIDE_UP) {
-				computed.offsetY[eid] = sign * 100 * t;
+				computed.offsetY[eid]! += sign * 100 * t;
 			} else if (type === AnimationType.SLIDE_DOWN) {
-				computed.offsetY[eid] = sign * -100 * t;
+				computed.offsetY[eid]! += sign * -100 * t;
 			}
-			computed.opacity[eid] = 1 - t;
+			computed.opacity[eid]! *= 1 - t;
 			break;
 		}
 		case AnimationType.SPIN: {
@@ -214,9 +220,9 @@ function applyAnimation(world: World, entity: Entity, anim: Entity, progress: nu
 			const eased = clamp01(easeSpin(progress));
 			const t = phase === AnimationPhase.OUT ? eased : 1 - eased;
 			const scale = 1 - t;
-			computed.scaleX[eid] = scale;
-			computed.scaleY[eid] = scale;
-			computed.rotation[eid] = -45 * t;
+			computed.scaleX[eid]! *= scale;
+			computed.scaleY[eid]! *= scale;
+			computed.rotation[eid]! -= 45 * t;
 			break;
 		}
 		case AnimationType.TWIST: {
@@ -224,11 +230,11 @@ function applyAnimation(world: World, entity: Entity, anim: Entity, progress: nu
 			const eased = clamp01(easeEnter(progress));
 			const t = phase === AnimationPhase.OUT ? eased : 1 - eased;
 			const scale = 1 + t;
-			computed.scaleX[eid] = scale;
-			computed.scaleY[eid] = scale;
-			computed.rotation[eid] = -10 * t;
-			computed.offsetX[eid] = -30 * t;
-			computed.offsetY[eid] = -30 * t;
+			computed.scaleX[eid]! *= scale;
+			computed.scaleY[eid]! *= scale;
+			computed.rotation[eid]! -= 10 * t;
+			computed.offsetX[eid]! -= 30 * t;
+			computed.offsetY[eid]! -= 30 * t;
 			break;
 		}
 		case AnimationType.APPEAR_WORD: {
