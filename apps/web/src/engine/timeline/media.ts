@@ -277,6 +277,11 @@ async function decodeStill(asset: Asset, width: number, hash: string): Promise<v
 export function requestFrames(request: FrameRequest): void {
 	activeClips.add(request.clip);
 	activeAssets.add(request.asset.id);
+	const clip = clipFrames.get(request.clip);
+	if (clip && clip.assetId !== request.asset.id) {
+		clipFrames.delete(request.clip);
+		mediaDirty = true;
+	}
 	if (request.canDecode?.() === false) return;
 	const record = assetFrames.get(request.asset.id);
 
@@ -297,6 +302,7 @@ export function requestFrames(request: FrameRequest): void {
 export function pickFrame(clip: number, assetId: string, timestamp: number, interval: number): Frame | null {
 	const cached = clipFrames.get(clip);
 	const covered = cached !== undefined
+		&& cached.assetId === assetId
 		&& timestamp >= cached.start - interval
 		&& timestamp <= cached.end + interval;
 
