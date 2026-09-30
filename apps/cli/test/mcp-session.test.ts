@@ -11,6 +11,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { z } from "zod";
 
 async function serve(t: TestContext) {
   const sessions = new Map<string, StreamableHTTPServerTransport>();
@@ -47,6 +48,9 @@ async function serve(t: TestContext) {
       });
       const server = new McpServer({ name: "cleanup-test", version: "1" });
       server.registerTool("whoami", {}, async () => ({ content: [], structuredContent: { version: "test" } }));
+      server.registerTool("scope", {
+        inputSchema: { project: z.string().optional(), payload: z.string().optional() },
+      }, async (args) => ({ content: [], structuredContent: { ...args, session: transport!.sessionId } }));
       await server.connect(transport);
     }
     await transport.handleRequest(req, res, body);
@@ -146,4 +150,33 @@ test("stdio proxy deletes sessions on agent EOF, SIGINT, and SIGTERM", { timeout
     }
     assert.equal(server.sessions.size, 0, stderr || `upstream session leaked after ${signal ?? "stdin EOF"}`);
   }
+});
+
+test("parallel stdio agents forward independent project targets and preserve per-call overrides", { timeout: 10_000 }, async (t) => {
+  const server = await serve(t);
+  const directory = await mkdtemp(join(tmpdir(), "frameyard-scoped-proxy-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const path = join(directory, "proxy.cjs");
+  await writeFile(path, await bundle(server.url, `import {runProxy} from './mcp-proxy'; runProxy(process.argv[2]).catch(error => { console.error(error); process.exitCode = 1; });`));
+  const clients = await Promise.all(["/videos/intro", "/videos/tutorial"].map(async (project) => {
+    const client = new Client({ name: "project-agent", version: "1" });
+    const transport = new StdioClientTransport({ command: process.execPath, args: [path, project], stderr: "pipe" });
+    t.after(() => client.close());
+    await client.connect(transport);
+    return client;
+  }));
+  const results = await Promise.all(clients.map((client, index) =>
+    client.callTool({ name: "scope", arguments: { payload: `agent-${index}` } }),
+  ));
+  assert.deepEqual(results.map(result => result.structuredContent?.project), ["/videos/intro", "/videos/tutorial"]);
+  assert.deepEqual(results.map(result => result.structuredContent?.payload), ["agent-0", "agent-1"]);
+  assert.notEqual(results[0].structuredContent?.session, results[1].structuredContent?.session);
+  assert.equal(server.sessions.size, 2);
+  assert.equal((await clients[0].callTool({ name: "scope", arguments: { project: "/videos/override" } })).structuredContent?.project, "/videos/override");
+  assert.equal((await clients[1].callTool({ name: "scope" })).structuredContent?.project, "/videos/tutorial");
+  await clients[0].close();
+  assert.equal(server.sessions.size, 1);
+  assert.equal((await clients[1].callTool({ name: "scope" })).structuredContent?.project, "/videos/tutorial");
+  await clients[1].close();
+  assert.equal(server.sessions.size, 0);
 });

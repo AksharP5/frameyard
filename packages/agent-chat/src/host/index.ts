@@ -42,6 +42,7 @@ export type RunningAgentHost = {
   url: string;
   port: number;
   deleteChats(projectId: string): Promise<void>;
+  interruptProject(cwd: string): Promise<void>;
   stop(): Promise<void>;
 };
 
@@ -74,6 +75,9 @@ export async function createAgentHost(config: AgentHostConfig): Promise<RunningA
     port: server.port,
     deleteChats(projectId) {
       return agentHost.deleteChats(projectId);
+    },
+    interruptProject(cwd) {
+      return agentHost.interruptProject(cwd);
     },
     async stop() {
       await agentHost.stop();

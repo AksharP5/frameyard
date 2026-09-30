@@ -6,7 +6,8 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { authenticatedMcpUrl, readOrCreateMcpToken } from "@diffusionstudio/dapi/mcp-auth-node";
 
 export function createMcpTransport() {
-  return new StreamableHTTPClientTransport(new URL(authenticatedMcpUrl(readOrCreateMcpToken())), {
+  const endpoint = authenticatedMcpUrl(readOrCreateMcpToken(), process.env.FRAMEYARD_MCP_URL);
+  return new StreamableHTTPClientTransport(new URL(endpoint), {
     fetch: (url, init) => fetch(url, init?.method === "DELETE"
       // Initialization failures can already have closed the SDK transport.
       // Session deletion still needs a live signal, with a short cleanup limit.

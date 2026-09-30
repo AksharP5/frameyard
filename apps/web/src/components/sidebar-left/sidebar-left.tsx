@@ -13,6 +13,7 @@ import { Icon } from "../ui/icon";
 import { ProjectMenu } from "./project-menu";
 import { useProject } from "@/context/project";
 import { cx } from "@/lib/cva";
+import { WorkspaceActivityButton } from '@/components/workspaces/activity';
 
 export function SidebarLeft() {
   return (
@@ -113,6 +114,7 @@ export function ProjectHeader(props: ProjectHeaderProps) {
           class="w-full min-w-0 bg-transparent focus-ring px-1 h-5 ml-1 rounded text-xs text-muted-foreground font-450 outline-none"
         />
       </div>
+      <WorkspaceActivityButton />
     </div>
   )
 }
@@ -125,6 +127,7 @@ export function FloatingProjectHeader() {
     <div data-desktop={isDesktop} class="h-10 rounded-lg border border-border shrink-0 flex items-center px-2 gap-1 fixed top-4 data-[desktop=true]:top-10 left-4 z-30 bg-background shadow-lg">
       <ProjectMenu />
       <span class="text-xs text-muted-foreground font-450">Frameyard</span>
+      <WorkspaceActivityButton />
       <Button variant="ghost" size="icon" class="text-muted-foreground ml-2" onClick={toggleUI}>
         <Icon name="sidebar" />
       </Button>

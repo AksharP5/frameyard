@@ -37,10 +37,10 @@ test("canceled bootstrap tools never execute after handlers register", async () 
   listeners.get("dapi:call")!({ id: "live", tool: "context", args: {} });
   let runs = 0;
   const handlers = { context: async () => { runs++; return "ready"; } };
-  const unregister = toolBridge.register(handlers as Parameters<typeof toolBridge.register>[0], () => ({} as ReturnType<Parameters<typeof toolBridge.register>[1]>));
+  const unregister = toolBridge.register(handlers as Parameters<typeof toolBridge.register>[0], () => ({ session: () => null } as ReturnType<Parameters<typeof toolBridge.register>[1]>));
   await setImmediate();
   assert.equal(runs, 1);
-  assert.equal(JSON.stringify(replies), JSON.stringify([{ id: "live", ok: true, data: "ready" }]));
+  assert.equal(JSON.stringify(replies), JSON.stringify([{ id: "canceled", ok: false, error: { code: "canceled", message: "The call was canceled." } }, { id: "live", ok: true, data: "ready" }]));
   unregister();
 });
 

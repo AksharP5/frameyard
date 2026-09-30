@@ -67,7 +67,7 @@ function fixture(frameRate = 30, onRender?: () => void) {
   }
   const world = new World();
   const captures: World[] = [];
-  const session = { world, project: { dir: () => "/project" } } as unknown as EditorSession;
+  const session = { world, engine: { requestFrame() {} }, project: { dir: () => "/project" } } as unknown as EditorSession;
   const traits = ["Source", "Workarea", "Hidden", "Muted", "Silent", "Playback", "Computed", "Time", "FrameRate", "RenderSurface", "AudioEngine", "Library"];
   const dependencies: Record<string, unknown> = {
     "@diffusionstudio/runtime": {
@@ -98,7 +98,7 @@ function fixture(frameRate = 30, onRender?: () => void) {
   };
   const module = { exports: {} as typeof import("../../web/src/dapi/handlers/capture") & typeof import("../../web/src/dapi/agent") };
   runInNewContext(`(function(require,module,exports){${built.outputFiles[0].text}\n})`, {
-    HTMLCanvasElement: Canvas, OffscreenCanvas: class {}, OfflineAudioContext: class {}, FileReader: Reader, btoa,
+    AbortController, HTMLCanvasElement: Canvas, OffscreenCanvas: class {}, OfflineAudioContext: class {}, FileReader: Reader, btoa,
   })((name: string) => {
     if (!(name in dependencies)) throw new Error(`Unexpected dependency ${name}`);
     return dependencies[name];

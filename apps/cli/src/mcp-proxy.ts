@@ -5,7 +5,7 @@
 // `dapi mcp`: the entry point for agents that only run stdio servers (Claude
 // Desktop). A message pipe between stdio and the app's HTTP endpoint: each
 // side is an SDK transport, so session handling and SSE framing are theirs,
-// and nothing here looks inside a message. Stdout belongs to the protocol;
+// and tool calls can carry a fixed project target. Stdout belongs to the protocol;
 // anything for a human goes to stderr.
 
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -14,7 +14,7 @@ import { createMcpTransport, closeMcpSession } from "./mcp-session";
 
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 
-export async function runProxy(): Promise<void> {
+export async function runProxy(project?: string): Promise<void> {
   try {
     await ping();
   } catch (e) {
@@ -51,7 +51,24 @@ export async function runProxy(): Promise<void> {
   };
 
   upstream.onmessage = (message: JSONRPCMessage) => void stdio.send(message).catch(fail);
-  stdio.onmessage = (message: JSONRPCMessage) => void upstream.send(message).catch(fail);
+  stdio.onmessage = (message: JSONRPCMessage) => {
+    if (project && "method" in message && message.method === "tools/call") {
+      const args = message.params?.arguments;
+      if (args === undefined || (args !== null && typeof args === "object" && !Array.isArray(args))) {
+        message = {
+          ...message,
+          params: {
+            ...message.params,
+            arguments: {
+              ...args,
+              project: args && "project" in args && args.project !== undefined ? args.project : project,
+            },
+          },
+        };
+      }
+    }
+    void upstream.send(message).catch(fail);
+  };
   upstream.onerror = (error) => console.error(`[dapi mcp] ${error.message}`);
   stdio.onerror = (error) => console.error(`[dapi mcp] ${error.message}`);
   // The app went away (quit, or the session was closed): the agent sees EOF.

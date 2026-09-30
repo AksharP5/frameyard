@@ -84,7 +84,10 @@ export const mediaSegment: ToolHandler<"media_segment"> = async (args, ctx) => {
     preview: args.preview ?? false,
   };
 
-  if (target?.kind === "library") return startTrack(session!, ctx.session, args, request, span, target.path);
+  if (target?.kind === "library") {
+    const background = ctx.awaitTracking || new URLSearchParams(window.location.search).get("workspace") === "background";
+    return startTrack(session!, ctx.session, args, request, span, target.path, background ? ctx.signal : undefined);
+  }
 
   let segments: FootageSegments;
   try {
@@ -158,18 +161,19 @@ export function maskTrackRows(world: World): TrackRow[] {
 }
 
 /**
- * Starts tracking into the library and answers at once with where the mask
- * will be. The path is promised to the track while it runs, so the tool and
+ * Starts tracking into the library. Background workspaces await completion
+ * so the shared GPU queue keeps ownership until tracking releases resources. The path is promised to the track while it runs, so the tool and
  * other tracks name their masks around it.
  */
-function startTrack(
+async function startTrack(
   session: EditorSession,
   current: Accessor<EditorSession | null>,
   args: MediaSegmentRequest,
   request: SegmentRequest,
   span: Span,
   path: string | null,
-): MediaSegmentResult {
+  signal?: AbortSignal,
+): Promise<MediaSegmentResult> {
   const library = getLibrary(session.world);
   const folder = objectMaskFolder(request.asset);
   const src = path ?? `${folder}/${nextTrackingName(library, folder)}`;
@@ -182,7 +186,15 @@ function startTrack(
   tracks.set(session.world, rows);
 
   pendingMaskPaths.add(src);
-  void runTrack(row, session, current, request, path !== null).finally(() => pendingMaskPaths.delete(src));
+  const tracking = runTrack(row, session, current, request, path !== null, signal).finally(() => pendingMaskPaths.delete(src));
+  if (signal) {
+    await tracking;
+    signal.throwIfAborted();
+    if (row.state === "failed") throw new Error(row.error);
+    if (row.state !== "done") throw new DapiError("canceled", "Tracking project closed.");
+    return { path: `${session.project.dir()}/${source}`, src: row.src, state: "done", png: row.png, ...span };
+  }
+  void tracking;
   return { path: `${session.project.dir()}/${source}`, src, state: "tracking", ...span };
 }
 
@@ -198,8 +210,12 @@ async function runTrack(
   current: Accessor<EditorSession | null>,
   request: SegmentRequest,
   replace: boolean,
+  signal?: AbortSignal,
 ): Promise<void> {
   const controller = new AbortController();
+  const cancel = () => controller.abort();
+  signal?.addEventListener("abort", cancel, { once: true });
+  if (signal?.aborted) controller.abort();
   const stillOpen = () => {
     if (current()?.world !== session.world) controller.abort();
     return !controller.signal.aborted;
@@ -233,6 +249,8 @@ async function runTrack(
   } catch (error) {
     if (isAbort(error)) return;
     Object.assign(row, { state: "failed", progress: null, error: error instanceof Error ? error.message : String(error) });
+  } finally {
+    signal?.removeEventListener("abort", cancel);
   }
 }
 

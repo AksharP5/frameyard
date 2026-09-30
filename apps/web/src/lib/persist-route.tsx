@@ -32,7 +32,7 @@ function sanitizeRoute(route: string): string | null {
  * mounts.
  */
 export function restoreLastRoute() {
-  if (window.location.hash) return;
+  if (window.location.hash || new URLSearchParams(window.location.search).get("workspace") === "background") return;
   const saved = store.get<string>(ROUTE_KEY);
   if (saved) window.location.hash = saved;
 }
@@ -46,7 +46,7 @@ export function PersistRoute() {
   const location = useLocation();
 
   createEffect(() => {
-    if (!window.desktop) return;
+    if (!window.desktop || new URLSearchParams(window.location.search).get("workspace") === "background") return;
     const route = sanitizeRoute(location.pathname + location.search);
     if (route) {
       store.set(ROUTE_KEY, route);

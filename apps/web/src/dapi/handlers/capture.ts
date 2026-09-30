@@ -35,7 +35,7 @@ export const capture: ToolHandler<"capture"> = async ({ id, sceneTime, times, se
     const encoder = await createImageEncoder(target.world, { frames: shots, resolution: 720 });
     cancel = encoder.cancel;
     ctx.signal.addEventListener("abort", cancel, { once: true });
-    ctx.signal.throwIfAborted();
+    if (ctx.signal.aborted) encoder.cancel();
 
     // Sheets render at their cell size instead of the flat 720p: with a few
     // frames that is sharper than a standalone capture, never coarser. A
@@ -72,19 +72,27 @@ export async function captureSceneFrames(
   session: EditorSession,
   id: string,
   frames: number[],
-  options: { sceneTime?: boolean; exclude?: string[] } = {},
+  options: { sceneTime?: boolean; exclude?: string[]; signal?: AbortSignal } = {},
 ): Promise<Array<{ timecode: string; base64: string }>> {
+  options.signal?.throwIfAborted();
   const scene = requireScene(session.world, id, "capture");
   const target = await createCapture(session.world, scene, { dir: session.project.dir() });
+  let cancel: (() => void) | undefined;
   try {
+    options.signal?.throwIfAborted();
     for (const source of options.exclude ?? []) resolveNode(target.world, source).add(Hidden);
     if (options.sceneTime) target.node.remove(Workarea);
     const encoder = await createImageEncoder(target.world, { frames, resolution: 720 });
+    cancel = encoder.cancel;
+    options.signal?.addEventListener("abort", cancel, { once: true });
+    if (options.signal?.aborted) encoder.cancel();
     const result = await encoder.render();
     if (result.type === "canceled") throw new DapiError("canceled", "Capture canceled");
     if (result.type === "error") throw result.error;
+    options.signal?.throwIfAborted();
     return result.data.map(({ timecode, png }) => ({ timecode, base64: bytesToBase64(png) }));
   } finally {
+    if (cancel) options.signal?.removeEventListener("abort", cancel);
     target.dispose();
   }
 }

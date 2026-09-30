@@ -40,6 +40,56 @@ agent turn at a time. Stop that turn before restoring a checkpoint.
 Claude checkpoints are available in **Checkpoints**; **Undo last turn** belongs
 to the native Codex conversation. Sign in through each installed agent's CLI.
 
+## Parallel videos
+
+Give each video its own project folder. Agents can work in independent background
+workspaces, each with its own editor, timeline, preview, and native Codex conversation.
+Showing another video does not redirect their tools or stop their turns.
+One Assistant turn runs per project; different projects can run together.
+
+Open **Activity** to see all project agents and jobs. Add a project folder, give
+Codex a task, and choose **Review** to inspect that video. Each row has its own
+cancel and close controls.
+
+Open existing project folders in the background, then send each agent its task:
+
+```sh
+dapi workspace open /absolute/projects/video-a
+dapi workspace open /absolute/projects/video-b
+dapi --project /absolute/projects/video-a workspace send "Make a five-second intro"
+dapi --project /absolute/projects/video-b workspace send "Make a product demonstration"
+dapi workspace list
+```
+
+Every CLI tool accepts the global `--project <dir>` option. `FRAMEYARD_PROJECT`
+sets the default for an external agent's CLI process; an explicit option wins.
+Relative project options resolve against the CLI's working directory.
+Use the same target for captures, scene checks, editor tools, and exports:
+
+```sh
+dapi --project /absolute/projects/video-a tool editor_context
+dapi --project /absolute/projects/video-a capture intro
+dapi --project /absolute/projects/video-a export intro /absolute/exports/video-a.mp4
+dapi workspace show /absolute/projects/video-a
+dapi workspace cancel /absolute/projects/video-b
+dapi workspace close /absolute/projects/video-b
+```
+
+`workspace send` returns after starting the turn. `workspace list` reports agent
+activity, queued and running jobs, and errors. `show` opens a workspace for review;
+`cancel` stops its agent and cancellable jobs; `close` releases an idle project's editor resources.
+Heavy rendering jobs queue across workspaces to limit RAM and GPU use without
+reducing output quality. Idle background workspaces do not continuously play.
+
+For stdio MCP agents, start `dapi --project /absolute/projects/video-a mcp` or set
+`FRAMEYARD_PROJECT` for that server process. HTTP MCP clients can call `workspace`
+with `action: "open"` and an absolute `dir` to bind their session to that workspace.
+`send` also binds the session. Any tool's optional `project` argument overrides
+the session binding for that call. Session bindings are independent between agents.
+Unscoped CLI commands use the app's default project; CLI commands create
+short-lived MCP sessions, so use `--project` on subsequent commands rather than
+relying on a previous `workspace open` call to bind them.
+
 ## Codex and context
 
 Install and sign into the Codex CLI with `codex login` before using Assistant. If Assistant
@@ -130,7 +180,7 @@ project frame rate and stop remaining frames when canceled. CLI commands release
 their MCP sessions when they finish.
 Scene exports accept cancellation while saving edits or preparing the renderer.
 Canceled or failed exports preserve the existing destination file and remove
-temporary output. Only one scene export runs at a time.
+temporary output. Heavy scene exports queue across project workspaces.
 
 Each project remembers its current native Codex thread. Closing and reopening the
 app restores its messages and model context. **Sessions** lists existing local
@@ -161,8 +211,8 @@ At send time the agent receives the project folder, active scene, playhead,
 selected elements with their source IDs and properties, selected library asset,
 and up to 100 library entries. Selection is the referent for requests such as
 “move this right.” The agent can request fresh context or a rendered frame while
-working. Changing projects makes live editor tools reject requests from the old
-project. Select the intended item and send another message to update the context.
+working. Project-scoped tools keep targeting that workspace when you show another
+video. Select the intended item and send another message to update the context.
 
 Use **Assistant → Mark area** to pause and capture the active scene. Drag a rectangle
 on the frame, add a note such as “blur this out” or “zoom into this,” then choose

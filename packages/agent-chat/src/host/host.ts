@@ -9,6 +9,7 @@
 // and they can come and go at any time without disturbing a turn.
 
 import { randomUUID } from "node:crypto";
+import { realpath } from "node:fs/promises";
 
 import { isPersistedEvent, reduce } from "../reduce";
 import { HARNESS_IDS, HARNESS_LABELS, isHarnessId, titleFor } from "../protocol";
@@ -73,7 +74,7 @@ type Chat = {
   seq: number;
   session: HarnessSession | null;
   idleTimer: ReturnType<typeof setTimeout> | null;
-  turn: { id: string; done: Promise<void>; interrupted: boolean } | null;
+  turn: { id: string; cwd: string; done: Promise<void>; interrupted: boolean } | null;
   /** Items started in this turn and not yet completed, with their latest text. */
   open: Map<string, Item>;
   subscribers: Set<Connection>;
@@ -137,6 +138,19 @@ export class AgentHost {
         chat.session = null;
       }),
     );
+  }
+
+  /** Stop this project's turns, including turns still preparing their checkpoint. */
+  async interruptProject(cwd: string): Promise<void> {
+    const dir = await realpath(cwd);
+    const active = [...this.chats.values()].flatMap(chat => chat.turn ? [{ chat, turn: chat.turn }] : []);
+    await Promise.all(active.map(async ({ chat, turn }) => {
+      const path = await realpath(turn.cwd).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      });
+      if (path === dir && chat.turn === turn) await this.interrupt(chat.meta.id);
+    }));
   }
 
   // ---------------------------------------------------------------------
@@ -364,7 +378,7 @@ export class AgentHost {
     const turnId = randomUUID();
     let resolveDone!: () => void;
     const done = new Promise<void>((resolve) => (resolveDone = resolve));
-    chat.turn = { id: turnId, done, interrupted: false };
+    chat.turn = { id: turnId, cwd, done, interrupted: false };
     const previous = chat.meta;
     try {
       await this.ensureLoaded(chat);
@@ -491,13 +505,19 @@ export class AgentHost {
     const harness = this.harnessById.get(chat.meta.harness);
     if (!harness) throw new HostError("harness-unavailable", `${HARNESS_LABELS[chat.meta.harness]} is not available`);
     const env = await this.options.env;
+    const mcp = this.options.mcp ? { ...this.options.mcp } : null;
+    if (mcp) {
+      const url = new URL(mcp.url);
+      url.searchParams.set("project", chat.meta.cwd);
+      mcp.url = url.href;
+    }
     const session = await harness.open({
       cwd: chat.meta.cwd,
       model,
       resume: chat.meta.resume ?? undefined,
-      mcp: this.options.mcp,
+      mcp,
       instructions: chatInstructions(chat.meta.cwd, this.options.instructions),
-      env,
+      env: { ...env, env: { ...env.env, FRAMEYARD_PROJECT: chat.meta.cwd } },
       emit,
     });
     chat.session = session;

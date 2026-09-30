@@ -19,6 +19,8 @@ export type ToolContext = {
   requireSession(): EditorSession;
   /** Fires when the caller cancels or goes away before the reply. */
   signal: AbortSignal;
+  /** Keep project jobs owned until background GPU tracking finishes. */
+  awaitTracking?: boolean;
   /** What only the app shell can do: navigate, and know who is signed in. */
   app: {
     openProject(dir: string): Promise<ToolResult<"open">>;
@@ -31,6 +33,6 @@ export type ToolContext = {
 export type ToolHandler<N extends ToolName> = (args: ToolArgs<N>, ctx: ToolContext) => Promise<ToolResult<N>>;
 
 /** The tools the renderer answers; the rest run in the main process. */
-export type ServedToolName = Exclude<ToolName, "logs" | "fonts" | "report" | "agent_tool">;
+export type ServedToolName = Exclude<ToolName, "logs" | "fonts" | "report" | "agent_tool" | "workspace">;
 
 export type Handlers = { readonly [N in ServedToolName]: ToolHandler<N> };

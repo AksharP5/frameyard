@@ -79,7 +79,7 @@ function fixture() {
     parentElement = new Element();
     getContext() { return null; }
   }
-  const window = new EventTarget();
+  const window = Object.assign(new EventTarget(), { location: { search: '' } });
   let frame: (() => void) | undefined;
   let timelineInput = () => {};
   const noop = () => {};
@@ -90,6 +90,8 @@ function fixture() {
       value = typeof next === 'function' ? (next as (current: T) => T)(value) : next;
     }]; } },
     './traits': api,
+    '@/lib/ipc': { mainBridge: { handle: () => noop } },
+    '@desktop/main-channels': { MAIN_CHANNELS: { WORKSPACE_VISIBILITY: 'workspace:visibility' } },
     './hud': { hudSystem: noop },
     './input/input-system': { inputSystem: noop },
     './input/shortcuts': api,

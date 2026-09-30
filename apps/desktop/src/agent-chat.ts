@@ -9,7 +9,7 @@
 // host over its own WebSocket from there.
 
 import { app, utilityProcess } from "electron";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { join } from "node:path";
 
 import type { UtilityProcess } from "electron";
@@ -21,7 +21,7 @@ type AgentChatOptions = {
   prepareTurn: (input: { cwd: string; text: string }) => Promise<() => void>;
 };
 
-const DEV_ORIGIN = "http://localhost:5173";
+const DEV_ORIGIN = process.env.FRAMEYARD_DEV_URL ?? "http://localhost:5173";
 const RESTART_DELAYS_MS = [1000, 2000, 5000, 10_000];
 const STOP_GRACE_MS = 3000;
 
@@ -32,6 +32,7 @@ let token = "";
 let restarts = 0;
 let restartTimer: ReturnType<typeof setTimeout> | null = null;
 let stopped = false;
+const interruptions = new Map<string, { proc: UtilityProcess; resolve(): void; reject(error: Error): void }>();
 
 function spawn(): void {
   if (!options || stopped) return;
@@ -54,7 +55,15 @@ function spawn(): void {
     });
   });
 
-  proc.on("message", (message: { type?: string; url?: string; message?: string; id?: string; cwd?: string; text?: string }) => {
+  proc.on("message", (message: { type?: string; url?: string; message?: string; id?: string; cwd?: string; text?: string; error?: string }) => {
+    if (message?.type === "project-interrupted" && typeof message.id === "string") {
+      const request = interruptions.get(message.id);
+      if (request?.proc !== proc) return;
+      interruptions.delete(message.id);
+      if (message.error) request.reject(new Error(message.error));
+      else request.resolve();
+      return;
+    }
     if (message?.type === "prepare-turn" && typeof message.id === "string" && typeof message.cwd === "string" && typeof message.text === "string") {
       if (child !== proc || stopped) return;
       const { id, cwd, text } = message;
@@ -85,6 +94,11 @@ function spawn(): void {
   });
 
   proc.on("exit", (code) => {
+    for (const [id, request] of interruptions) {
+      if (request.proc !== proc) continue;
+      interruptions.delete(id);
+      request.reject(new Error("Agent host exited before project cancellation completed"));
+    }
     for (const release of releases.values()) release();
     releases.clear();
     if (child !== proc) return;
@@ -120,6 +134,21 @@ export function deleteProjectChats(projectId: string): void {
   if (projectId && endpoint) child?.postMessage({ type: "deleteProject", projectId });
 }
 
+/** Resolves after this project's harness turns and their cleanup have finished. */
+export function cancelProjectAgents(dir: string): Promise<void> {
+  const proc = child;
+  if (!proc || !endpoint) return Promise.resolve();
+  const id = randomUUID();
+  return new Promise((resolve, reject) => {
+    interruptions.set(id, { proc, resolve, reject });
+    try { proc.postMessage({ type: "interrupt-project", id, cwd: dir }); }
+    catch (error) {
+      interruptions.delete(id);
+      reject(error instanceof Error ? error : new Error(String(error)));
+    }
+  });
+}
+
 /** Asks the host to stop (it kills its harness trees), then kills it after a grace period. */
 export function stopAgentChat(): void {
   stopped = true;
@@ -128,6 +157,8 @@ export function stopAgentChat(): void {
   const proc = child;
   child = null;
   endpoint = null;
+  for (const request of interruptions.values()) request.reject(new Error("Agent host stopped before project cancellation completed"));
+  interruptions.clear();
   if (!proc) return;
   try {
     proc.postMessage({ type: "stop" });

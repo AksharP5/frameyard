@@ -7,7 +7,7 @@ vi.mock("electron", () => ({
 }));
 
 import { utilityProcess } from "electron";
-import { startAgentChat, stopAgentChat } from "./agent-chat";
+import { cancelProjectAgents, startAgentChat, stopAgentChat } from "./agent-chat";
 
 class Process extends EventEmitter {
   postMessage = vi.fn();
@@ -55,4 +55,33 @@ it("returns checkpoint failures to the host without acknowledging a ready turn",
     type: "turn-prepared", id: "turn", error: "Checkpoint failed",
   }));
   expect(proc.postMessage).toHaveBeenCalledTimes(1);
+});
+
+it("waits for the matching project's cancellation acknowledgement", async () => {
+  const proc = start(async () => vi.fn(() => {}));
+  proc.emit('message', { type: 'listening', url: 'http://localhost:1234/?token=test' });
+  const finished = vi.fn();
+  const cancellation = cancelProjectAgents('/one').then(finished);
+  const message = proc.postMessage.mock.calls.at(-1)?.[0] as { type: string; id: string; cwd: string };
+  expect(message).toMatchObject({ type: 'interrupt-project', cwd: '/one' });
+  proc.emit('message', { type: 'project-interrupted', id: 'unrelated' });
+  await Promise.resolve();
+  expect(finished).not.toHaveBeenCalled();
+  proc.emit('message', { type: 'project-interrupted', id: message.id });
+  await cancellation;
+  expect(finished).toHaveBeenCalledOnce();
+  expect(proc.kill).not.toHaveBeenCalled();
+});
+
+it.each(['failure', 'exit', 'stop'])("rejects cancellation on host %s without leaving a pending acknowledgement", async ending => {
+  const proc = start(async () => vi.fn(() => {}));
+  proc.emit('message', { type: 'listening', url: 'http://localhost:1234/?token=test' });
+  const cancellation = cancelProjectAgents('/one');
+  const rejected = expect(cancellation).rejects.toThrow(ending === 'failure' ? 'Could not interrupt' : /Agent host (exited|stopped)/);
+  const message = proc.postMessage.mock.calls.at(-1)?.[0] as { id: string };
+  if (ending === 'failure') proc.emit('message', { type: 'project-interrupted', id: message.id, error: 'Could not interrupt' });
+  if (ending === 'exit') proc.emit('exit', 1);
+  if (ending === 'stop') stopAgentChat();
+  await rejected;
+  proc.emit('message', { type: 'project-interrupted', id: message.id });
 });

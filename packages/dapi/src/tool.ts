@@ -2,7 +2,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import type { z } from "zod";
+import { z } from "zod";
+
+export const ProjectPath = z.string().min(1)
+  .regex(/^(?:\/|[A-Za-z]:[\\/]|\\\\)/, "project must be an absolute directory path")
+  .refine(value => !value.includes("\0"), "project path must not contain a null byte");
+
+const projectField = ProjectPath.optional().describe(
+  "absolute project directory; targets its independent workspace instead of the session's bound project or the app's default project",
+);
 
 /**
  * Which process answers the tool. Renderer tools need the open project's
@@ -40,12 +48,15 @@ export interface Tool<
 /** A tool with its specifics erased, for code that iterates the catalog. */
 export type GenericTool = Tool<string, z.ZodObject, z.ZodObject, z.ZodType>;
 
-/** Identity with inference: keeps the literal name and the exact schema types. */
+/** Add project targeting once, preserving each tool's fields and refinements. */
 export function defineTool<
   const Name extends string,
   Input extends z.ZodObject,
   Output extends z.ZodObject,
   Result extends z.ZodType = Output,
->(tool: Tool<Name, Input, Output, Result>): Tool<Name, Input, Output, Result> {
-  return tool;
+>(tool: Tool<Name, Input, Output, Result>): Tool<Name, z.ZodObject<Input["shape"] & { project: typeof projectField }>, Output, Result> {
+  return {
+    ...tool,
+    input: tool.input.safeExtend({ project: projectField }) as z.ZodObject<Input["shape"] & { project: typeof projectField }>,
+  };
 }

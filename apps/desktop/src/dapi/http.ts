@@ -23,7 +23,7 @@ export type HttpServerDeps = {
   /** Hex-encoded 32-byte credential stored in the current user's private directory. */
   token: string;
   /** A fresh MCP server with the tools and resources registered, one per session. */
-  createSession(): McpServer;
+  createSession(project?: string): McpServer;
   /**
    * Called once, when the first session initializes — unless that session
    * says `?client=chat` in its URL: the in-app chat is watched by the user,
@@ -110,15 +110,15 @@ export class DapiHttpServer {
       }
       // No session: either an `initialize`, which the transport answers with
       // a new id, or a stray request it rejects with 400.
-      await this.open(url.searchParams.get("client")).transport.handleRequest(req, res);
+      await this.open(url.searchParams.get("client"), url.searchParams.get("project") ?? undefined).transport.handleRequest(req, res);
     } catch (error) {
       console.error("[dapi] http request failed:", error instanceof Error ? error.name : "unknown error");
       if (!res.headersSent) res.writeHead(500, { "content-type": "text/plain" }).end("Internal error");
     }
   }
 
-  private open(client: string | null): Session {
-    const server = this.deps.createSession();
+  private open(client: string | null, project?: string): Session {
+    const server = this.deps.createSession(project);
     const hosts = [this.deps.host, "localhost"];
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),

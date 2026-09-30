@@ -51,4 +51,31 @@ describe("catalog", () => {
     expect(isToolName("media_grab")).toBe(true);
     expect(isToolName("media.frame")).toBe(false);
   });
+
+  it("offers optional absolute project targeting on every tool", () => {
+    for (const tool of catalog) {
+      const project = tool.input.shape.project;
+      expect(project.safeParse(undefined).success, tool.name).toBe(true);
+      expect(project.parse("/projects/intro"), tool.name).toBe("/projects/intro");
+      expect(project.parse("C:\\projects\\intro"), tool.name).toBe("C:\\projects\\intro");
+      expect(project.safeParse("intro").success, tool.name).toBe(false);
+      expect(project.safeParse("/intro\0").success, tool.name).toBe(false);
+      const schema = toolJsonSchemas(tool).inputSchema;
+      expect(schema.required ?? [], tool.name).not.toContain("project");
+    }
+  });
+
+  it("retains field transforms, defaults, and cross-field checks with project targeting", () => {
+    const capture = toolByName("capture").input;
+    expect(capture.parse({ id: "intro", times: ["45f"], project: "/projects/intro" }).times).toEqual([1.5]);
+    expect(capture.safeParse({ id: "intro", separate: true, perSheet: 2, project: "/projects/intro" }).success).toBe(false);
+    expect(toolByName("agent_tool").input.parse({ name: "editor_context", project: "/projects/intro" })).toEqual({
+      name: "editor_context", args: {}, project: "/projects/intro",
+    });
+    const workspace = toolByName("workspace").input;
+    expect(workspace.parse({ action: "send", message: "  Make an intro  ", project: "/projects/intro" }).message).toBe("Make an intro");
+    expect(workspace.safeParse({ action: "send", project: "/projects/intro" }).success).toBe(false);
+    expect(workspace.safeParse({ action: "send", message: "   " }).success).toBe(false);
+    expect(workspace.parse({ action: "list" })).toEqual({ action: "list" });
+  });
 });

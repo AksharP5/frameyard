@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, onTestFinished, vi } from "vitest";
@@ -7,13 +7,13 @@ import { ChatStore } from "../src/host/store";
 import { FakeHarness } from "../src/host/fake";
 import type { HostMsg } from "../src/protocol";
 
-async function fixture(prepareTurn: AgentHostOptions["prepareTurn"]) {
+async function fixture(prepareTurn: AgentHostOptions["prepareTurn"], mcp: AgentHostOptions['mcp'] = null) {
   const dir = await mkdtemp(join(tmpdir(), "chat-lifecycle-"));
   const harness = new FakeHarness({ tickMs: 1 });
   const store = new ChatStore(dir);
   const host = new AgentHost({
     store, harnesses: [harness],
-    env: Promise.resolve({ env: {}, extraDirs: [] }), mcp: null,
+    env: Promise.resolve({ env: { RETAINED: 'yes' }, extraDirs: [] }), mcp,
     version: "test", prepareTurn,
   });
   await host.start();
@@ -24,8 +24,32 @@ async function fixture(prepareTurn: AgentHostOptions["prepareTurn"]) {
     projectId: "project", cwd: "/project", model: { harness: "claude", model: "fake-fast" }, text,
     ...options,
   });
-  return { host, harness, store, messages, connection, send };
+  return { host, harness, store, messages, connection, send, dir };
 }
+
+it("interrupts only the canonical project's agents and retains independent MCP bindings", async () => {
+  const released: string[] = [];
+  const mcp = { name: 'diffusion', url: 'http://localhost:1234/mcp?token=retained' } satisfies NonNullable<AgentHostOptions['mcp']>;
+  const f = await fixture(async ({ cwd }) => () => { released.push(cwd); }, mcp);
+  const first = join(f.dir, 'first'), second = join(f.dir, 'second'), alias = join(f.dir, 'alias');
+  await Promise.all([mkdir(first), mkdir(second)]);
+  await symlink(first, alias);
+  await Promise.all([f.send('ask format', { cwd: first }), f.send('ask format', { cwd: second })]);
+  await vi.waitFor(() => expect(f.harness.sessions).toHaveLength(2));
+  await vi.waitFor(() => expect(f.messages.filter(message => message.t === 'event' && message.event.type === 'request.opened')).toHaveLength(2));
+  for (const session of f.harness.sessions) {
+    const url = new URL(session.opened.mcp!.url);
+    expect(url.searchParams.get('project')).toBe(session.opened.cwd);
+    expect(url.searchParams.get('token')).toBe('retained');
+    expect(session.opened.env.env).toMatchObject({ RETAINED: 'yes', FRAMEYARD_PROJECT: session.opened.cwd });
+  }
+  expect(mcp.url).toBe('http://localhost:1234/mcp?token=retained');
+  await f.host.interruptProject(alias);
+  expect(released).toEqual([first]);
+  expect(f.messages.filter(message => message.t === 'event' && message.event.type === 'turn.completed')).toHaveLength(1);
+  await f.host.interruptProject(second);
+  expect(released).toEqual([first, second]);
+});
 
 it("waits for project preparation before opening the harness and releases after completion", async () => {
   const ready = Promise.withResolvers<() => void>();

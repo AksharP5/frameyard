@@ -18,7 +18,7 @@ export const DAPI_WIRE = {
   REPLY: "dapi:reply",
 } as const;
 
-export type DapiCall = { id: string; tool: string; args: unknown };
+export type DapiCall = { id: string; tool: string; args: unknown; awaitCleanup?: boolean };
 
 export type DapiCancel = { id: string };
 

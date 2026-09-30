@@ -39,7 +39,8 @@ function fixture(template: Partial<EncoderConfig> = { video: { enabled: false } 
   };
   const scene = { get: (trait: string) => trait === "Computed" ? { width: 640, height: 360, duration: 30 } : undefined };
   const world = { isInitialized: true, get: (trait: string) => trait === "FrameRate" ? { value: 30 } : undefined };
-  const engine = { world, stop: () => events.push("stop"), start: () => { assert.equal(world.isInitialized, true); events.push("start"); } };
+  let running = true;
+  const engine = { world, running: () => running, stop: () => { running = false; events.push("stop"); }, start: () => { assert.equal(world.isInitialized, true); running = true; events.push("start"); } };
   const session = { world, engine, project: { dir: () => "/project" } } as unknown as EditorSession;
   const deps: Record<string, unknown> = {
     "solid-js": { createSignal },
@@ -115,7 +116,7 @@ function fixture(template: Partial<EncoderConfig> = { video: { enabled: false } 
   const controller = new AbortController();
   const context = { requireSession: () => session, signal: controller.signal } as ToolContext;
   return {
-    ...module.exports, events, writes, world, controller, hooks,
+    ...module.exports, events, writes, world, engine, controller, hooks,
     encodedConfig: () => encodedConfig,
     export: (path = "/project/export.mp4") => module.exports.exportScene({ id: "scene", path }, context),
     render: () => module.exports.renderScene(session.engine, {
@@ -227,4 +228,15 @@ test("leaving a project during setup does not restart its disposed engine", asyn
   assert.equal((await pending).type, "canceled");
   assert.deepEqual(f.events, ["stop"]);
   assert.equal(f.renderOverlay(), null);
+});
+
+
+test("exporting a stopped background engine does not start its presentation loop", async () => {
+  const f = fixture();
+  f.engine.stop();
+  f.events.length = 0;
+  await f.export();
+  assert.equal(f.engine.running(), false);
+  assert.ok(!f.events.includes("start"));
+  assert.ok(f.events.includes("dispose"));
 });

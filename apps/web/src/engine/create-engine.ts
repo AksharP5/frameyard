@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import { assetSystem, renderSystem, transformSystem, playbackSystem, motionSystem, AudioEngine, createRuntimeWorld, Geometry, Mode, RenderSurface, Time, ChildOf, syncInteractiveState } from '@diffusionstudio/runtime';
+import { assetSystem, renderSystem, transformSystem, playbackSystem, motionSystem, AudioEngine, createRuntimeWorld, Geometry, Playback, Mode, RenderSurface, Time, ChildOf, syncInteractiveState } from '@diffusionstudio/runtime';
 import { hudSystem } from './hud';
 import { createSignal, type Accessor, type Setter } from 'solid-js';
 import { AssetSelection, Hud, Keys, MODIFIER_KEYS, ObjectMaskTool, Pointer, PointerEvents, ProjectConfig, SnapLines } from './traits';
@@ -10,6 +10,8 @@ import { inputSystem } from './input/input-system';
 import { clearClipFrames, clearClipPeaks, clearMedia, clearPeaks, timelineSystem, TimelineSurface } from './timeline';
 import { clearObjectTrackOf, clearObjectTracks } from './object-mask';
 import { shortcutSystem } from './input/shortcuts';
+import { mainBridge } from '@/lib/ipc';
+import { MAIN_CHANNELS } from '@desktop/main-channels';
 
 import type { RuntimeWorld } from '@diffusionstudio/runtime';
 import type { CanvasPointerEvent, PointerEventType } from '@diffusionstudio/runtime';
@@ -37,6 +39,7 @@ class Engine {
 
 	private unsubscribe: (() => void)[] = [];
 	private interactiveDirty = true;
+	private visible = new URLSearchParams(window.location.search).get('workspace') !== 'background';
 
 	public running: Accessor<boolean>;
 	private setRunning: Setter<boolean>;
@@ -51,6 +54,7 @@ class Engine {
 
 	public constructor(projectId: string, options: EngineOptions = {}) {
 		this.world = createRuntimeWorld(projectId);
+		this.unsubscribe.push(mainBridge.handle(MAIN_CHANNELS.WORKSPACE_VISIBILITY, ({ visible }) => this.setVisible(visible)));
 		this.world.add(Pointer, Keys, SnapLines, Hud, ObjectMaskTool, PointerEvents, AssetSelection, ProjectConfig, TimelineSurface);
 
 		this.unsubscribe.push(
@@ -211,7 +215,7 @@ class Engine {
 	}
 
 	private scheduleFrame(): void {
-		if (!this.running()) return;
+		if (!this.running() || !this.visible) return;
 		this.rafId ??= requestAnimationFrame(this.loop);
 		// Keep audio inside its 500 ms lookahead if presentation stops. A fallback
 		// must not cancel a waiting display frame or flood an already busy GPU.
@@ -261,25 +265,44 @@ class Engine {
 	};
 
 	private runSystems(): void {
-		inputSystem(this.world);
-		// Timeline selection is applied while drawing. Consume a pending click
-		// before a key in the same frame can act on the previous selection.
-		const pointer = this.world.get(TimelineSurface)?.pointer?.position;
-		if (this.world.get(Keys)?.pressed.size && pointer && pointer.state !== 'idle') timelineSystem(this.world);
-		shortcutSystem(this.world);
+		if (this.visible) {
+			inputSystem(this.world);
+			// Consume pending timeline selection before shortcuts use it.
+			const pointer = this.world.get(TimelineSurface)?.pointer?.position;
+			if (this.world.get(Keys)?.pressed.size && pointer && pointer.state !== 'idle') timelineSystem(this.world);
+			shortcutSystem(this.world);
+		}
 		assetSystem(this.world);
 		playbackSystem(this.world);
 		motionSystem(this.world);
 		transformSystem(this.world);
-		if (renderSystem(this.world) !== false) hudSystem(this.world);
-		timelineSystem(this.world);
+		if (renderSystem(this.world) !== false && this.visible) hudSystem(this.world);
+		if (this.visible) timelineSystem(this.world);
+	}
+
+	/** Background projects compute on demand instead of keeping a display loop alive. */
+	public requestFrame(): void {
+		if (!this.world.isInitialized || !this.running()) return;
+		if (this.visible) { this.scheduleFrame(); return; }
+		this.lastTimestamp = null;
+		this.tick();
+	}
+
+	public setVisible(visible: boolean): void {
+		if (this.visible === visible) return;
+		this.visible = visible;
+		this.lastTimestamp = null;
+		if (visible) { this.scheduleFrame(); return; }
+		this.cancelFrame();
+		for (const scene of this.world.query(Playback)) scene.set(Playback, { playing: false });
+		this.requestFrame();
 	}
 
 	public start(): void {
 		if (this.running()) return;
 		this.setRunning(true);
 		this.lastTimestamp = null;
-		this.scheduleFrame();
+		this.requestFrame();
 	}
 
 	public stop(): void {

@@ -214,6 +214,7 @@ export function EditorPage() {
         applyBundle(result.code);
         hasFreshBundle = true;
         setEditorLoadState({ world, status: "ready", mountedFrame: engine.frame() });
+        engine.requestFrame();
         // What an export renders a second time, and the next open's head
         // start (see `rememberProjectBundle`) — recorded only once it has
         // actually mounted, so the record never runs ahead of the canvas.
