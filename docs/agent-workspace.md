@@ -208,6 +208,8 @@ following. Catalog attachments and **New animation** preserve your unsent draft.
 If a rename moves the project folder, Frameyard reloads Assistant for that folder and
 keeps the project's unsent draft and attachments. Native sessions remain saved under their original
 working directory; Frameyard does not present their history as a new conversation.
+Finish or cancel the project's agent work and renders before renaming it. Rename an
+open project from its own editor; use **Projects → Review** to bring it forward.
 A rejected send keeps its draft and attachments without adding an unsent message
 to the conversation.
 
