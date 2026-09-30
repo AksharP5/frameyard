@@ -12,7 +12,7 @@ Name a family on the [`<text>`](./text.md) element with `fontFamily`; pick the v
 </text>
 ```
 
-A Google family is downloaded the first time a text uses it, only the variants and scripts that text needs, and an export waits for it before drawing a frame. If a Google family and an installed font share a name, the Google family is used.
+During playback, a Google family loads the variants and scripts needed by the current text. Export preloads all scripts of the matching variant before drawing a frame, including the face the browser chooses for a synthesized weight or style. If a Google family and an installed font share a name, the Google family is used.
 
 ## HTML
 
