@@ -56,6 +56,7 @@ export function ObjectMaskInspector(props: ObjectMaskInspectorProps) {
 
   const hidden = useHas(() => props.mask, Hidden);
   const mask = useTrait(() => props.mask, Mask);
+  const assetId = useTrait(() => props.mask, AssetId);
 
   const maskAsset = (): MaskAsset | null => {
     const asset = world.get(Library)?.get(props.mask.get(AssetId)?.value ?? "");
@@ -111,7 +112,7 @@ export function ObjectMaskInspector(props: ObjectMaskInspectorProps) {
 
   // The tracked masks of the clip's footage: the header picks which of them this mask is.
   const { masks: sources } = useObjectMasks(() => getParentNode(getParentNode(props.mask)));
-  const source = () => sources().find((option) => option.asset.id === props.mask.get(AssetId)?.value);
+  const source = () => sources().find((option) => option.asset.id === assetId()?.value);
 
   /** Points the mask at another tracked mask's frames, placed where they were written for. */
   const switchSource = (next: ObjectMaskSource | null) => {

@@ -11,7 +11,7 @@ import { toast } from 'somoto';
 import { getDocumentEditor } from '../editor';
 import { commitObjectMask, encodeObjectMask } from './commit';
 import { maskFrame } from './frame';
-import { currentSourceFrame, getVideoRect } from './media';
+import { currentSourceFrame, getVideoRect, sourceSeconds } from './media';
 import {
 	clearObjectTrack, clearTargetEffect, finishMaskRestore, getMaskRestore, getObjectTrack, objectMaskModel, objectMaskModelLoad,
 	setMaskRestore, setObjectHover, setObjectMaskModel, setObjectMaskModelLoad, setObjectTrack,
@@ -42,11 +42,11 @@ type Session = {
 };
 
 /**
- * The frame the model holds encoded, by what it was decoded for — a clip, or
- * footage on its own (see `segmentFootage`) — and its source frame, so
- * prompts on it cost the decoder alone.
+ * The picture the model holds encoded, by its video track and timestamp,
+ * so prompts on it cost the decoder alone. A clip's footage or project rate
+ * can change without its entity or frame changing.
  */
-let held: { owner: Entity | string; frame: number } | null = null;
+let held: { video: InputVideoTrack; timestamp: number } | null = null;
 
 /**
  * Prompts the object on `clip` with one more point and segments the current
@@ -81,7 +81,7 @@ export function promptObjectMask(world: World, clip: Entity, point: MaskPoint): 
 
 	enqueue(world, track, async (session) => {
 		track.status = 'segmenting';
-		await holdFrame(session, clip, track.seedFrame);
+		await holdFrame(session, track.seedFrame);
 		session.model.reset();
 		const decoded = await session.model.seedHeld(track.points, 0);
 		if (track.controller.signal.aborted) return;
@@ -193,7 +193,7 @@ export function hoverObjectMask(world: World, clip: Entity, point: MaskPoint): v
 
 				const frame = currentSourceFrame(world, clip);
 				const session = await openClipSession(world, clip);
-				await holdFrame(session, clip, frame);
+				await holdFrame(session, frame);
 				// On the prompted frame the hover refines the prompt, elsewhere it starts one.
 				const refining = track?.clip === clip && track.seedFrame === frame;
 				const preview = refining
@@ -362,7 +362,7 @@ export function segmentFootage(request: FootageSegmentRequest): Promise<FootageS
 				const grid = session.model.maskSize;
 
 				if (request.preview) {
-					await holdFrame(session, `${asset.id}@${fps}`, seedFrame);
+					await holdFrame(session, seedFrame);
 					const mask = await session.model.preview(points);
 					resolve({ model, masks: [maskFrame(mask)], grid, seconds: session.seconds });
 					return;
@@ -501,7 +501,7 @@ async function openSession(asset: VideoAsset, fps: number, id: Sam2ModelId, onDo
 	return {
 		model,
 		video,
-		seconds: (frame) => sourceSeconds(frame, fps, asset, firstTimestamp),
+		seconds: (frame) => sourceSeconds(frame, fps, firstTimestamp),
 		aspect: asset.width / asset.height,
 	};
 }
@@ -511,22 +511,18 @@ function corrector(strokes: readonly MaskStroke[], aspect: number): ((mask: Sam2
 	return strokes.length > 0 ? (mask) => paintMask(mask, strokes, aspect) : undefined;
 }
 
-/** Has the model hold `frame` of what `owner` plays, unless it already does. */
-async function holdFrame(session: Session, owner: Entity | string, frame: number): Promise<void> {
-	if (held && held.owner === owner && held.frame === frame && session.model.holding) return;
+/** Has the model hold the source picture at `frame`, unless it already does. */
+async function holdFrame(session: Session, frame: number): Promise<void> {
+	const timestamp = session.seconds(frame);
+	if (held?.video === session.video && held.timestamp === timestamp && session.model.holding) return;
 	const { holdFrame: hold } = await import('@diffusionstudio/sam2');
-	await hold(session.model, { track: session.video, timestamp: session.seconds(frame) });
-	held = { owner, frame };
+	await hold(session.model, { track: session.video, timestamp });
+	held = { video: session.video, timestamp };
 }
 
 function releaseFrame(session: Session): void {
 	session.model.release();
 	held = null;
-}
-
-/** Where a project-rate source frame is in the file, on the file's own frame grid, as the preview decoder seeks it. */
-function sourceSeconds(frame: number, fps: number, asset: VideoAsset, firstTimestamp: number): number {
-	return Math.round((frame / fps) * asset.frameRate) / asset.frameRate + firstTimestamp;
 }
 
 export { clearObjectTrack };

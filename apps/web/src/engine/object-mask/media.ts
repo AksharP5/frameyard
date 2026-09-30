@@ -75,3 +75,8 @@ export function currentSourceFrame(world: World, entity: Entity): number {
 	const frame = store(world, Computed).localTime[entity.id()] ?? 0;
 	return Math.min(Math.max(frame, window.in), Math.max(window.in, window.out - 1));
 }
+
+/** The same source timestamp the video renderer seeks, without rounding to the video's nominal frame rate. */
+export function sourceSeconds(frame: number, fps: number, firstTimestamp: number): number {
+	return Math.max(0, firstTimestamp) + Math.max(0, frame / fps);
+}
