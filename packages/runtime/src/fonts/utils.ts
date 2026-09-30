@@ -11,7 +11,7 @@
 import { getFontFaceSet } from './face-set';
 import { getGoogleFonts, googleFontUrl, loadGoogleFonts, registerGoogleFont, RETRY_MS } from './google';
 import { FontStyle } from '../constants';
-import { Cache, Chars, Fonts, FramePromises, Mode, TextRange, TextStyle } from '../traits';
+import { Cache, Chars, Fonts, FramePromises, TextRange, TextStyle } from '../traits';
 import { getParentEntity } from '../queries/hierarchy';
 import { store } from '../world/store';
 
@@ -116,9 +116,13 @@ function loadEveryFace(set: FontFaceSet, family: string, weight: string, style: 
 		const [min, max = min] = face.weight.split(' ').map(Number);
 		if (min! <= w && w <= max!) faces.push(face);
 	}
-	// No face at that weight: the browser synthesizes it from the nearest.
+	// Let the browser resolve a missing weight or style, then warm every
+	// subset of that face so later export frames do not draw fallback glyphs.
 	if (!faces.length) {
-		return set.load(`${STYLE_MAP[style]} ${weight} 16px "${family}"`);
+		return set.load(`${STYLE_MAP[style]} ${weight} 16px "${family}"`)
+			.then((matched) => Promise.all([...set]
+				.filter((face) => matched.some((match) => face.family === match.family && face.weight === match.weight && face.style === match.style && face.stretch === match.stretch))
+				.map((face) => face.load())));
 	}
 
 	return Promise.all(faces.map((face) => face.load()));
@@ -127,8 +131,8 @@ function loadEveryFace(set: FontFaceSet, family: string, weight: string, style: 
 /**
  * Requests the fonts a text is set in: the node's own family, weight and
  * style, and each range override's (a range names only what it changes).
- * Called with the text node or with one of its ranges. An offline render
- * loads every subset and puts the load on the frame barrier, so
+ * Called with the text node or with one of its ranges. A world with a frame
+ * barrier (an export) loads every subset and puts the load on the barrier, so
  * no frame is sampled before its glyphs; the editor loads the subsets the
  * text needs and lets the browser fetch any other at first draw.
  */
@@ -155,7 +159,7 @@ function textFonts(world: World, entity: Entity): Promise<unknown> | null {
 	const weight = textStyle.fontWeight[eid] ?? '400';
 	const style = textStyle.fontStyle[eid] ?? FontStyle.NORMAL;
 	const text = store(world, Chars).value[eid];
-	const all = world.get(Mode)?.value !== 'realtime';
+	const all = !!world.get(FramePromises)?.list;
 
 	const pending: Promise<void>[] = [];
 	const request = (f: string, w: string, s: FontStyle) => {

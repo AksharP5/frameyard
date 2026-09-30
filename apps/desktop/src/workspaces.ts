@@ -4,6 +4,7 @@ import { basename, isAbsolute } from "node:path";
 import type { BrowserWindow } from "electron";
 import type { ToolOutput } from "@diffusionstudio/dapi";
 import { DapiError } from "@diffusionstudio/dapi";
+import type { ProjectInfo } from "./main-channels";
 
 type Row = ToolOutput<"workspace">["workspaces"][number];
 type Job = Row["jobs"][number] & { controller: AbortController; done: Promise<void>; finish(): void; heavy: boolean };
@@ -32,6 +33,7 @@ export class Workspaces {
   private readonly projects = new Map<string, Workspace>();
   private readonly tracked = new WeakSet<BrowserWindow>();
   private readonly modelOwners = new WeakSet<BrowserWindow>();
+  private readonly renaming = new Set<string>();
   private heavyTail: Promise<void> = Promise.resolve();
   private stopped = false;
 
@@ -46,7 +48,7 @@ export class Workspaces {
       return {
         dir: value.dir, name: value.name, visible: value.window?.isVisible() ?? false,
         agentActive: value.agentActive, jobs,
-        status: value.loading ? "loading" : value.error ? "error" : [...value.jobs.values()].some(job => job.state === "running" && job.heavy) ? "rendering" : jobs.some(job => job.state === "running") || value.agentActive ? "working" : jobs.length ? "queued" : "idle",
+        status: value.loading ? "loading" : value.error ? "error" : [...value.jobs.values()].some(job => job.state === "running" && job.heavy) ? "rendering" : jobs.some(job => job.state === "running") || value.agentActive || this.renaming.has(value.dir) ? "working" : jobs.length ? "queued" : "idle",
         ...(value.error ? { error: value.error } : {}),
       };
     }) };
@@ -76,6 +78,7 @@ export class Workspaces {
     if (!isAbsolute(path)) throw new Error("The project directory must be absolute");
     const dir = await realpath(path);
     signal?.throwIfAborted();
+    if (this.renaming.has(dir)) throw new DapiError("busy", "Wait for this project's rename to finish.");
     let project = this.projects.get(dir);
     if (!project) {
       project = { dir, name: basename(dir), id: "", window: null, ready: Promise.resolve(), loading: false, agentActive: false, jobs: new Map() };
@@ -87,6 +90,7 @@ export class Workspaces {
   private async openRuntime(project: Workspace, signal?: AbortSignal): Promise<BrowserWindow> {
     if (this.stopped) throw new Error("Frameyard is shutting down");
     signal?.throwIfAborted();
+    if (this.renaming.has(project.dir)) throw new DapiError("busy", "Wait for this project's rename to finish.");
     if (!project.window || project.window.isDestroyed()) this.mount(project);
     this.keep(project);
     await this.waitReady(project, signal);
@@ -98,6 +102,7 @@ export class Workspaces {
   /** Register a project already opened through the user's editor. */
   async adopt(window: BrowserWindow, path: string): Promise<void> {
     const dir = await realpath(path);
+    if (this.renaming.has(dir)) throw new DapiError("busy", "Wait for this project's rename to finish.");
     const existing = this.projects.get(dir);
     if (existing?.window && existing.window !== window && !existing.window.isDestroyed()) {
       throw new Error("This project is already open in another workspace. Review it from Projects.");
@@ -123,7 +128,7 @@ export class Workspaces {
   async detach(window: BrowserWindow, path: string): Promise<void> {
     const project = this.projects.get(path) ?? this.projects.get(await realpath(path));
     if (!project || project.window !== window) return;
-    if (project.agentActive || project.loading || project.jobs.size) throw new DapiError("busy", "Finish or cancel this project's work before leaving it.");
+    if (project.agentActive || project.loading || project.jobs.size || this.renaming.has(project.dir)) throw new DapiError("busy", "Finish or cancel this project's work before leaving it.");
     this.keep(project);
     project.window = null;
     this.deps.release(project.dir);
@@ -131,6 +136,7 @@ export class Workspaces {
   }
 
   setAgent(dir: string, active: boolean, error?: string): void {
+    if (active && this.renaming.has(dir)) throw new DapiError("busy", "Wait for this project's rename to finish.");
     const project = this.projects.get(dir);
     if (!project) return;
     project.agentActive = active;
@@ -201,12 +207,46 @@ export class Workspaces {
     const dir = await realpath(path);
     const project = this.projects.get(dir);
     if (!project) return;
-    if (project.agentActive || project.loading || project.jobs.size) throw new DapiError("busy", "Cancel or finish this project's work before closing it.");
+    if (project.agentActive || project.loading || project.jobs.size || this.renaming.has(dir)) throw new DapiError("busy", "Cancel or finish this project's work before closing it.");
     this.keep(project);
     this.projects.delete(dir);
     this.deps.release(dir);
     project.window?.destroy();
     this.publish();
+  }
+
+  /** Only the owning editor can flush its live state before moving the folder. */
+  async rename(path: string, window: BrowserWindow | null, operation: (dir: string) => Promise<ProjectInfo>): Promise<ProjectInfo> {
+    if (this.stopped) throw new Error("Frameyard is shutting down");
+    const dir = await realpath(path);
+    const project = this.projects.get(dir);
+    if (this.renaming.has(dir) || project?.agentActive || project?.loading || project?.jobs.size) {
+      throw new DapiError("busy", "Finish or cancel this project's work before renaming it.");
+    }
+    if (project?.window && !project.window.isDestroyed() && project.window !== window) {
+      throw new DapiError("busy", "Rename this open project from its editor. Review it from Projects first.");
+    }
+    this.renaming.add(dir);
+    if (project) this.keep(project);
+    this.publish();
+    try {
+      const result = await operation(dir);
+      if (project) {
+        if (result.dir !== dir) {
+          this.projects.delete(dir);
+          this.deps.release(dir);
+          project.dir = result.dir;
+          this.projects.set(result.dir, project);
+        }
+        project.name = result.displayName;
+        project.id = result.id;
+      }
+      return result;
+    } finally {
+      this.renaming.delete(dir);
+      this.publish();
+      if (project) this.idle(project);
+    }
   }
 
   dispose(): void {
@@ -255,7 +295,7 @@ export class Workspaces {
     window.on("close", event => {
       const project = this.owner(window);
       if (!project) return;
-      if (!project.agentActive && !project.jobs.size) return;
+      if (!project.agentActive && !project.jobs.size && !this.renaming.has(project.dir)) return;
       event.preventDefault();
       window.hide();
     });
@@ -298,7 +338,7 @@ export class Workspaces {
 
   private idle(project: Workspace): void {
     this.keep(project);
-    if (this.stopped || project.loading || this.running(project) || !project.window || project.window.isVisible()) return;
+    if (this.stopped || project.loading || this.renaming.has(project.dir) || this.running(project) || !project.window || project.window.isVisible()) return;
     project.idleTimer = setTimeout(() => {
       this.releaseRuntime(project);
       this.publish();

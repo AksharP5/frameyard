@@ -185,6 +185,7 @@ export function registerAgentBridge(dataDir: string, getWindow: (dir?: string) =
       codex.dispose();
     },
     runTool,
+    withProjectIdle: <T>(dir: string, operation: (dir: string) => Promise<T>) => codex.withProjectIdle(dir, operation),
     request: (request: import("./codex-contracts").CodexRequest) => codex.request(request),
     prepareTurn: async ({ cwd, text }: { cwd: string; text: string }) => {
       const dir = await realpath(cwd);

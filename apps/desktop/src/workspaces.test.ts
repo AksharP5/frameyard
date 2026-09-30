@@ -1,10 +1,13 @@
 import { EventEmitter } from "node:events";
-import { mkdtemp, mkdir, symlink, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, symlink, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BrowserWindow } from "electron";
 import { afterEach, expect, it, vi } from "vitest";
 import { Workspaces } from "./workspaces";
+
+vi.mock("electron", () => ({ app: { isPackaged: false, getPath: () => tmpdir() }, dialog: {}, shell: {}, ipcMain: { on: () => {} } }));
+const { initProject, renameProject } = await import("./projects");
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); vi.useRealTimers(); });
@@ -287,4 +290,77 @@ it("can release a deleted project's old editor mapping", async () => {
   await rm(dirs[0]!, { recursive: true });
   await manager.detach(window, dirs[0]!);
   expect(manager.getWindow(dirs[0]!)).toBeNull();
+});
+
+it("keeps one owning workspace through a real folder rename and its editor rewatch", async () => {
+  const { manager, dirs, release, windows } = await setup();
+  const original = await initProject(null, dirs[0]!);
+  const window = await manager.open(original.dir);
+  const renamed = await manager.rename(original.dir, window, dir => renameProject(dir, "Renamed"));
+  expect(renamed.id).toBe(original.id);
+  expect(manager.directory(window)).toBe(renamed.dir);
+  expect(manager.info(renamed.dir)).toEqual({ dir: renamed.dir, name: "Renamed", id: original.id });
+  await manager.detach(window, original.dir).catch(() => {});
+  await manager.adopt(window, renamed.dir);
+  expect(await manager.open(renamed.dir)).toBe(window);
+  expect(windows).toHaveLength(1);
+  expect(manager.list().workspaces).toHaveLength(1);
+  expect(release).toHaveBeenCalledWith(original.dir);
+  await manager.close(renamed.dir);
+  expect(window.isDestroyed()).toBe(true);
+});
+
+it("refuses an active agent, running tool or another window before changing project files", async () => {
+  const { manager, dirs } = await setup();
+  const original = await initProject(null, dirs[0]!);
+  const before = await readFile(`${original.dir}/package.json`, "utf8");
+  const window = await manager.open(original.dir);
+  const rename = vi.fn((dir: string) => renameProject(dir, "Renamed"));
+  manager.setAgent(original.dir, true);
+  await expect(manager.rename(original.dir, window, rename)).rejects.toMatchObject({ code: "busy" });
+  manager.setAgent(original.dir, false);
+  const started = Promise.withResolvers<void>(), finish = Promise.withResolvers<void>();
+  const job = manager.run(original.dir, "context", undefined, async () => { started.resolve(); await finish.promise; });
+  await started.promise;
+  try {
+    await expect(manager.rename(original.dir, window, rename)).rejects.toMatchObject({ code: "busy" });
+  } finally { finish.resolve(); await job; }
+  const other = await manager.open(dirs[1]!);
+  await expect(manager.rename(original.dir, other, rename)).rejects.toThrow("from its editor");
+  expect(rename).not.toHaveBeenCalled();
+  expect(await readFile(`${original.dir}/package.json`, "utf8")).toBe(before);
+  expect(manager.getWindow(original.dir)).toBe(window);
+});
+
+it("reserves only the renaming project and releases the reservation after a failed rename", async () => {
+  const { manager, dirs } = await setup();
+  await initProject(null, dirs[0]!);
+  const window = await manager.open(dirs[0]!);
+  const started = Promise.withResolvers<void>(), finish = Promise.withResolvers<void>();
+  const renaming = manager.rename(dirs[0]!, window, async () => {
+    started.resolve(); await finish.promise; throw new Error("Disk unavailable");
+  });
+  const failure = expect(renaming).rejects.toThrow("Disk unavailable");
+  await started.promise;
+  try {
+    await expect(manager.open(dirs[0]!)).rejects.toMatchObject({ code: "busy" });
+    await expect(manager.run(dirs[0]!, "context", undefined, async () => undefined)).rejects.toMatchObject({ code: "busy" });
+    expect(() => manager.setAgent(dirs[0]!, true)).toThrow("rename to finish");
+    expect(await manager.run(dirs[1]!, "context", undefined, async () => "independent")).toBe("independent");
+  } finally { finish.resolve(); await failure; }
+  expect(await manager.open(dirs[0]!)).toBe(window);
+  expect(manager.list().workspaces.filter(row => row.dir === dirs[0])).toHaveLength(1);
+});
+
+it("renames a closed dashboard project without creating a workspace or releasing an unmoved watcher", async () => {
+  const { manager, dirs, release } = await setup();
+  const original = await initProject(null, dirs[0]!);
+  const renamed = await manager.rename(original.dir, null, dir => renameProject(dir, "Renamed"));
+  expect(renamed.id).toBe(original.id);
+  expect(manager.list().workspaces).toEqual([]);
+  const window = await manager.open(renamed.dir);
+  release.mockClear();
+  await manager.rename(renamed.dir, window, dir => renameProject(dir, "Renamed"));
+  expect(release).not.toHaveBeenCalled();
+  expect(manager.getWindow(renamed.dir)).toBe(window);
 });

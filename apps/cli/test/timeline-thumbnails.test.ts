@@ -14,20 +14,24 @@ const built = await build({
 function fixture() {
   let active = 0, peak = 0;
   const calls: number[] = [];
+  const sourceCalls: string[] = [];
   const releases: (() => void)[] = [];
   const imageReleases: ((tag: string) => void)[] = [];
   const dependencies = {
     mediabunny: { CanvasSink: class {
+      readonly assetId: string;
+      constructor(track: { assetId: string }) { this.assetId = track.assetId; }
       async getCanvas(timestamp: number) {
         calls.push(timestamp);
+        sourceCalls.push(this.assetId);
         peak = Math.max(peak, ++active);
         await new Promise<void>((resolve) => releases.push(resolve));
         active--;
-        return { timestamp, canvas: { timestamp, width: 512, height: 512 } };
+        return { timestamp, canvas: { timestamp, width: 512, height: 512, assetId: this.assetId } };
       }
     } },
     '@diffusionstudio/runtime': {
-      getVideoTrack: async () => ({ getFirstTimestamp: async () => 0, computeDuration: async () => 600 }),
+      getVideoTrack: async (asset: { id: string }) => ({ assetId: asset.id, getFirstTimestamp: async () => 0, computeDuration: async () => 600 }),
       getAssetFile: async () => new File([], 'image.png'),
       secondsToFrames: (seconds: number, fps: number) => seconds * fps,
     },
@@ -59,7 +63,7 @@ function fixture() {
     }
     assert.fail('thumbnail requests did not settle');
   }
-  return { ...module.exports, request, calls, tick, drain, imageReleases, peak: () => peak };
+  return { ...module.exports, request, calls, sourceCalls, tick, drain, imageReleases, peak: () => peak };
 }
 
 test('zooming out over many cuts keeps thumbnail decoding bounded and fills every clip', async () => {
@@ -166,4 +170,38 @@ test('an obsolete still decode cannot replace a newer asset thumbnail', async ()
   f.imageReleases.shift()!('new');
   await f.tick();
   assert.equal((f.resolveStill(asset, 100)?.canvas as unknown as { tag: string })?.tag, 'new');
+});
+
+test('replacing a clip source discards its old thumbnails and pending strip without redoing unchanged sources', async () => {
+  const f = fixture();
+  f.requestFrames(f.request);
+  await f.drain();
+  f.requestFrames(f.request);
+  await f.drain();
+  const original = f.pickFrame(f.request.clip, f.request.asset.id, 300, f.request.interval);
+  assert.equal((original?.canvas as unknown as { assetId: string } | undefined)?.assetId, 'recording');
+
+  f.calls.length = 0;
+  f.requestFrames(f.request);
+  await f.drain();
+  assert.equal(f.calls.length, 0, 'unchanged source and viewport reuse their strip');
+
+  f.sourceCalls.length = 0;
+  f.requestFrames({ ...f.request, firstFrame: 9000, lastFrame: 9600 });
+  await f.tick();
+  assert.equal(f.calls.length, 1, 'the old source has an in-flight strip decode');
+  const replacement = { ...f.request, asset: { ...f.request.asset, id: 'replacement' } };
+  f.requestFrames(replacement);
+  assert.equal(f.pickFrame(f.request.clip, replacement.asset.id, 300, f.request.interval), null, 'the old source cannot appear while its replacement loads');
+  await f.drain();
+  assert.equal(f.sourceCalls.filter(id => id === f.request.asset.id).length, 1, 'the superseded source starts no further tile decodes');
+  f.requestFrames(replacement);
+  await f.drain();
+  const updated = f.pickFrame(f.request.clip, replacement.asset.id, 300, f.request.interval);
+  assert.equal((updated?.canvas as unknown as { assetId: string } | undefined)?.assetId, 'replacement');
+
+  f.calls.length = 0;
+  f.requestFrames(replacement);
+  await f.drain();
+  assert.equal(f.calls.length, 0, 'the replacement strip is reused on later frames');
 });

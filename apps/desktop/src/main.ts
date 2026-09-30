@@ -462,7 +462,13 @@ if (app.requestSingleInstanceLock()) {
   mainBridge.handle(MAIN_CHANNELS.PROJECTS_CREATE, ({ root, displayName }) =>
     createProject(root, displayName),
   );
-  mainBridge.handle(MAIN_CHANNELS.PROJECTS_RENAME, ({ dir, displayName }) => renameProject(dir, displayName));
+  mainBridge.handle(MAIN_CHANNELS.PROJECTS_RENAME, ({ dir, displayName }, event) =>
+    workspaces.rename(dir, BrowserWindow.fromWebContents(event.sender), path =>
+      codex.withProjectIdle(path, async dir => {
+        const result = await renameProject(dir, displayName);
+        if (legacyAgentProject === dir) legacyAgentProject = result.dir;
+        return result;
+      })));
   mainBridge.handle(MAIN_CHANNELS.PROJECTS_DUPLICATE, ({ dir }) => duplicateProject(dir));
   mainBridge.handle(MAIN_CHANNELS.PROJECTS_DELETE, ({ dir }) => deleteProject(dir).then(deleteProjectChats));
   mainBridge.handle(MAIN_CHANNELS.PROJECTS_COMPILE, ({ dir }) => compileProject(dir));
