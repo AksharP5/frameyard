@@ -328,7 +328,7 @@ export function watchProject(dir: string, onChange: (paths: string[]) => void, d
 		changes.add(event.path);
 	});
 
-	mainBridge.call(MAIN_CHANNELS.PROJECTS_WATCH, { dir });
+	mainBridge.call(MAIN_CHANNELS.PROJECTS_WATCH, { dir }).catch(error => console.error('[projects] Could not watch project', error));
 
 	return () => {
 		changes.dispose();

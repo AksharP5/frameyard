@@ -30,6 +30,8 @@ type Dependencies = {
 /** One editor runtime per canonical project, released when nobody needs its GPU. */
 export class Workspaces {
   private readonly projects = new Map<string, Workspace>();
+  private readonly tracked = new WeakSet<BrowserWindow>();
+  private readonly modelOwners = new WeakSet<BrowserWindow>();
   private heavyTail: Promise<void> = Promise.resolve();
   private stopped = false;
 
@@ -57,7 +59,7 @@ export class Workspaces {
   }
 
   directory(window: BrowserWindow): string | undefined {
-    return [...this.projects.values()].find(value => value.window === window)?.dir;
+    return this.owner(window)?.dir;
   }
 
   getWindow(dir: string): BrowserWindow | null {
@@ -65,6 +67,10 @@ export class Workspaces {
   }
 
   async open(path: string, signal?: AbortSignal): Promise<BrowserWindow> {
+    return this.openRuntime(await this.project(path, signal), signal);
+  }
+
+  private async project(path: string, signal?: AbortSignal): Promise<Workspace> {
     if (this.stopped) throw new Error("Frameyard is shutting down");
     signal?.throwIfAborted();
     if (!isAbsolute(path)) throw new Error("The project directory must be absolute");
@@ -75,6 +81,12 @@ export class Workspaces {
       project = { dir, name: basename(dir), id: "", window: null, ready: Promise.resolve(), loading: false, agentActive: false, jobs: new Map() };
       this.projects.set(dir, project);
     }
+    return project;
+  }
+
+  private async openRuntime(project: Workspace, signal?: AbortSignal): Promise<BrowserWindow> {
+    if (this.stopped) throw new Error("Frameyard is shutting down");
+    signal?.throwIfAborted();
     if (!project.window || project.window.isDestroyed()) this.mount(project);
     this.keep(project);
     await this.waitReady(project, signal);
@@ -95,12 +107,26 @@ export class Workspaces {
       if (value.agentActive || value.jobs.size) throw new Error("Finish or cancel this project's work before changing projects");
       value.window = null;
       this.keep(value);
+      this.deps.release(value.dir);
     }
     if (existing?.window === window) return;
-    const project = existing ?? { dir, name: basename(dir), id: "", window: null, ready: Promise.resolve(), loading: false, agentActive: false, jobs: new Map() };
+    const project: Workspace = existing ?? { dir, name: basename(dir), id: "", window: null, ready: Promise.resolve(), loading: false, agentActive: false, jobs: new Map() };
+    project.ready = Promise.resolve();
+    project.loading = false;
+    project.error = undefined;
     project.window = window;
     this.projects.set(dir, project);
-    this.track(project, window);
+    this.track(window);
+    this.publish();
+  }
+
+  async detach(window: BrowserWindow, path: string): Promise<void> {
+    const project = this.projects.get(path) ?? this.projects.get(await realpath(path));
+    if (!project || project.window !== window) return;
+    if (project.agentActive || project.loading || project.jobs.size) throw new DapiError("busy", "Finish or cancel this project's work before leaving it.");
+    this.keep(project);
+    project.window = null;
+    this.deps.release(project.dir);
     this.publish();
   }
 
@@ -123,8 +149,7 @@ export class Workspaces {
 
   /** GPU-heavy work is serialized across projects; edits and agent turns remain independent. */
   async run<T>(path: string, tool: string, signal: AbortSignal | undefined, operation: (window: BrowserWindow, signal: AbortSignal) => Promise<T>, heavy = false): Promise<T> {
-    const window = await this.open(path, signal);
-    const project = [...this.projects.values()].find(value => value.window === window)!;
+    const project = await this.project(path, signal);
     const controller = new AbortController();
     const completion = Promise.withResolvers<void>();
     const job: Job = { id: randomUUID(), tool, state: heavy ? "queued" : "running", controller, heavy, done: completion.promise, finish: completion.resolve };
@@ -133,7 +158,7 @@ export class Workspaces {
     signal?.addEventListener("abort", abort, { once: true });
     project.error = undefined;
     project.jobs.set(job.id, job);
-    this.keep(project);
+    this.idle(project);
     this.publish();
     const previous = this.heavyTail;
     if (heavy) this.heavyTail = previous.then(() => completion.promise);
@@ -147,16 +172,17 @@ export class Workspaces {
       controller.signal.throwIfAborted();
       job.state = "running";
       this.publish();
+      const window = await this.openRuntime(project, controller.signal);
+      if (tool === "media_segment") this.modelOwners.add(window);
       return await operation(window, controller.signal);
     } catch (error) {
       if (!controller.signal.aborted) project.error = error instanceof Error ? error.message : String(error);
-      this.releaseRuntime(project);
       throw error;
     } finally {
       signal?.removeEventListener("abort", abort);
       project.jobs.delete(job.id);
       // SAM retains its model per renderer; release hidden model owners before the next GPU job.
-      if (tool === "media_segment" && !project.jobs.size && !window.isVisible()) this.releaseRuntime(project);
+      if (project.window && this.modelOwners.has(project.window) && !this.running(project) && !project.window.isVisible()) this.releaseRuntime(project);
       job.finish();
       this.publish();
       this.idle(project);
@@ -164,7 +190,7 @@ export class Workspaces {
   }
 
   async cancel(path: string): Promise<void> {
-    const project = this.projects.get(await realpath(path));
+    const project = this.projects.get(path) ?? this.projects.get(await realpath(path));
     if (!project) return;
     const jobs = [...project.jobs.values()];
     for (const job of jobs) job.controller.abort(new DapiError("canceled", "The project's work was canceled."));
@@ -196,27 +222,55 @@ export class Workspaces {
     project.window = window;
     project.loading = true;
     project.error = undefined;
-    this.track(project, window);
-    project.ready = this.deps.open(window, project.dir).then(({ name, id }) => { project.name = name; project.id = id ?? ""; }).catch(error => {
-      project.error = error instanceof Error ? error.message : String(error);
-      this.releaseRuntime(project);
+    this.track(window);
+    const ready: Promise<void> = this.deps.open(window, project.dir).then(({ name, id }) => {
+      if (project.window !== window) throw new Error("The project window closed while opening");
+      project.name = name;
+      project.id = id ?? "";
+    }).catch(error => {
+      if (project.window === window) {
+        project.error = error instanceof Error ? error.message : String(error);
+        this.releaseRuntime(project);
+      }
       throw error;
-    }).finally(() => { project.loading = false; this.publish(); this.idle(project); });
+    }).finally(() => {
+      if (project.ready !== ready) return;
+      project.loading = false;
+      this.publish();
+      this.idle(project);
+    });
+    project.ready = ready;
     // Opening is shared by callers; keep failures handled even if one caller cancels its wait.
     void project.ready.catch(() => {});
     this.publish();
   }
 
-  private track(project: Workspace, window: BrowserWindow): void {
+  private owner(window: BrowserWindow): Workspace | undefined {
+    return [...this.projects.values()].find(project => project.window === window);
+  }
+
+  private track(window: BrowserWindow): void {
+    if (this.tracked.has(window)) return;
+    this.tracked.add(window);
     window.on("close", event => {
+      const project = this.owner(window);
+      if (!project) return;
       if (!project.agentActive && !project.jobs.size) return;
       event.preventDefault();
       window.hide();
     });
-    window.on("show", () => { this.keep(project); this.publish(); });
-    window.on("hide", () => { this.idle(project); this.publish(); });
+    window.on("show", () => { const project = this.owner(window); if (project) { this.keep(project); this.publish(); } });
+    window.on("hide", () => { const project = this.owner(window); if (project) { this.idle(project); this.publish(); } });
+    window.webContents.on("render-process-gone", () => {
+      const project = this.owner(window);
+      if (!project) return;
+      this.releaseRuntime(project);
+      this.publish();
+    });
     window.on("closed", () => {
-      if (project.window !== window) return;
+      const project = this.owner(window);
+      if (!project) return;
+      this.keep(project);
       project.window = null;
       this.deps.release(project.dir);
       this.publish();
@@ -238,9 +292,13 @@ export class Workspaces {
     project.idleTimer = undefined;
   }
 
+  private running(project: Workspace): boolean {
+    return [...project.jobs.values()].some(job => job.state === "running");
+  }
+
   private idle(project: Workspace): void {
     this.keep(project);
-    if (this.stopped || project.loading || project.jobs.size || !project.window || project.window.isVisible()) return;
+    if (this.stopped || project.loading || this.running(project) || !project.window || project.window.isVisible()) return;
     project.idleTimer = setTimeout(() => {
       this.releaseRuntime(project);
       this.publish();

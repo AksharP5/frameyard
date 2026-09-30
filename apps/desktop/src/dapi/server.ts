@@ -142,10 +142,11 @@ export class DapiServer {
   }
 
   private runRenderer(tool: GenericTool, args: unknown, signal: AbortSignal, project?: string): Promise<unknown> {
-    if (project && this.deps.workspaces) {
+    const workspaces = this.deps.workspaces;
+    if (project && workspaces) {
       const heavy = ["export", "capture", "media_segment", "media_filmstrip", "media_waveform"].includes(tool.name);
-      return this.deps.workspaces.run(project, tool.name, signal, (window, jobSignal) =>
-        this.renderer.call(tool.name, args, jobSignal, window, true), heavy);
+      return workspaces.run(project, tool.name, signal, (window, jobSignal) =>
+        this.renderer.call(tool.name, { ...args as object, project: workspaces.directory(window) }, jobSignal, window, true), heavy);
     }
     return this.renderer.call(tool.name, args, signal, this.deps.getWindow?.() ?? undefined);
   }

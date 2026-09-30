@@ -37,8 +37,12 @@ export type ImageExportResult =
  * DOM-backed node keeps what a seek did to it, so requested frames are
  * rendered in ascending order whatever order they were asked in, and never
  * measured or pre-rolled ahead of the first one drawn.
+ * `signal` also cancels setup while assets are still loading.
  */
-export async function createImageEncoder(world: World, config: ImageEncoderConfig) {
+export async function createImageEncoder(world: World, config: ImageEncoderConfig, signal?: AbortSignal) {
+	signal?.throwIfAborted();
+	const controller = new AbortController();
+	const abortSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
 	assert(config.frames.length > 0, 'No frames requested');
 
 	const scene = captureScene(world);
@@ -57,7 +61,7 @@ export async function createImageEncoder(world: World, config: ImageEncoderConfi
 	// its scene during the warmup below asks exactly that question.
 	world.add(Silent);
 
-	await warmupAssets(world);
+	await warmupAssets(world, abortSignal);
 
 	const computed = store(world, Computed);
 	const playback = store(world, Playback);
@@ -92,8 +96,7 @@ export async function createImageEncoder(world: World, config: ImageEncoderConfi
 
 	resize(config.resolution);
 
-	let canceled = false;
-	const cancel = () => (canceled = true);
+	const cancel = () => controller.abort();
 
 	const render = async (): Promise<ImageExportResult> => {
 		try {
@@ -104,7 +107,7 @@ export async function createImageEncoder(world: World, config: ImageEncoderConfi
 			const frameDuration = 1 / frameRate;
 
 			for (const frame of order) {
-				if (canceled) {
+				if (abortSignal.aborted) {
 					return { type: 'canceled' };
 				}
 
@@ -119,7 +122,8 @@ export async function createImageEncoder(world: World, config: ImageEncoderConfi
 
 				assetSystem(world);
 				playbackSystem(world);
-				await resolverSystem(world);
+				await resolverSystem(world, abortSignal);
+				abortSignal.throwIfAborted();
 				motionSystem(world);
 				// May be changed by a system
 				normalizeSceneTransform(world, sceneId);
@@ -130,10 +134,12 @@ export async function createImageEncoder(world: World, config: ImageEncoderConfi
 					png: await encodePng(canvas),
 					timecode: formatTimecode(playheadSeconds, frameRate),
 				});
+				abortSignal.throwIfAborted();
 			}
 
 			return { type: 'success', data: config.frames.map((frame) => images.get(frame)!) };
 		} catch (e) {
+			if (abortSignal.aborted) return { type: 'canceled' };
 			return {
 				type: 'error',
 				error: e instanceof Error ? e : new Error('Unknown error'),

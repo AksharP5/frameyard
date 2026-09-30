@@ -13,7 +13,7 @@ function windowFor() {
   let destroyed = false, visible = false;
   const window = Object.assign(new EventEmitter(), {
     isDestroyed: () => destroyed, isVisible: () => visible, isMinimized: () => false,
-    focus: vi.fn(), restore: vi.fn(),
+    focus: vi.fn(), restore: vi.fn(), webContents: new EventEmitter(),
     show: () => { visible = true; window.emit("show"); },
     hide: () => { visible = false; window.emit("hide"); },
     destroy: () => { destroyed = true; window.emit("closed"); },
@@ -154,4 +154,137 @@ it("releases a hidden segmentation model owner before another project's heavy jo
   }, true);
   finish.resolve();
   await Promise.all([tracking, capture]);
+});
+
+
+it("keeps a visible editor and independent work alive when one tool fails", async () => {
+  const { manager, dirs } = await setup();
+  await manager.show(dirs[0]!);
+  const started = Promise.withResolvers<BrowserWindow>();
+  const finish = Promise.withResolvers<void>();
+  const working = manager.run(dirs[0]!, "editor_update", undefined, async window => { started.resolve(window); await finish.promise; });
+  const window = await started.promise;
+  try {
+    await expect(manager.run(dirs[0]!, "context", undefined, async () => { throw new Error("Invalid layer"); })).rejects.toThrow("Invalid layer");
+    expect(window.isDestroyed()).toBe(false);
+  } finally { finish.resolve(); await working; }
+});
+
+it("opens only the running heavy project's renderer and evicts queued-only runtimes", async () => {
+  const { manager, dirs, windows } = await setup(100);
+  const started = Promise.withResolvers<void>(), finish = Promise.withResolvers<void>();
+  const running = manager.run(dirs[0]!, "export", undefined, async () => { started.resolve(); await finish.promise; }, true);
+  await started.promise;
+  const queued = dirs.slice(1).map(dir => manager.run(dir, "export", undefined, async () => undefined, true));
+  try {
+    await vi.waitFor(() => expect(manager.list().workspaces.filter(row => row.status === "queued")).toHaveLength(2));
+    expect(windows).toHaveLength(1);
+    vi.useFakeTimers();
+    const reviewed = await manager.open(dirs[1]!);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(reviewed.isDestroyed()).toBe(true);
+  } finally { finish.resolve(); await Promise.all([running, ...queued]); }
+});
+
+it("recovers a crashed renderer immediately while leaving another project alive", async () => {
+  const { manager, dirs } = await setup();
+  const first = await manager.open(dirs[0]!);
+  const other = await manager.open(dirs[1]!);
+  first.webContents.emit("render-process-gone", {}, { reason: "crashed" });
+  expect(first.isDestroyed()).toBe(true);
+  expect(await manager.open(dirs[0]!)).not.toBe(first);
+  expect(other.isDestroyed()).toBe(false);
+});
+
+it("switching the visible project's owner does not leave stale window listeners", async () => {
+  const { manager, dirs, release } = await setup();
+  const window = await manager.open(dirs[0]!);
+  await manager.adopt(window, dirs[1]!);
+  expect(release).toHaveBeenCalledWith(dirs[0]);
+  const oldOwner = await manager.open(dirs[0]!);
+  manager.setAgent(dirs[0]!, true);
+  const preventDefault = vi.fn();
+  window.emit("close", { preventDefault });
+  expect(preventDefault).not.toHaveBeenCalled();
+  expect(window.listenerCount("close")).toBe(1);
+  expect(oldOwner.isDestroyed()).toBe(false);
+});
+
+it("adopts a repaired editor without retaining the failed bootstrap", async () => {
+  const { dirs } = await setup();
+  const failed = windowFor(), repaired = windowFor();
+  const manager = new Workspaces({ createWindow: () => failed, open: async () => { throw new Error("Invalid source"); }, changed: vi.fn(), release: vi.fn() });
+  cleanups.push(() => { manager.dispose(); repaired.destroy(); });
+  await expect(manager.open(dirs[0]!)).rejects.toThrow("Invalid source");
+  await manager.adopt(repaired, dirs[0]!);
+  expect(await manager.open(dirs[0]!)).toBe(repaired);
+  expect(manager.list().workspaces[0]?.status).toBe("idle");
+});
+
+it("releases segmentation resources even with a same-project heavy job queued", async () => {
+  const { manager, dirs } = await setup();
+  const started = Promise.withResolvers<BrowserWindow>(), finish = Promise.withResolvers<void>();
+  const tracking = manager.run(dirs[0]!, "media_segment", undefined, async window => { started.resolve(window); await finish.promise; }, true);
+  const modelOwner = await started.promise;
+  const next = manager.run(dirs[0]!, "export", undefined, async window => {
+    expect(modelOwner.isDestroyed()).toBe(true);
+    expect(window).not.toBe(modelOwner);
+    expect(window.isDestroyed()).toBe(false);
+  }, true);
+  finish.resolve();
+  await Promise.all([tracking, next]);
+});
+
+it("a stale bootstrap failure cannot destroy a replacement runtime", async () => {
+  const { dirs } = await setup();
+  const old = windowFor(), replacement = windowFor();
+  const windows = [old, replacement];
+  const firstLoad = Promise.withResolvers<{ name: string }>();
+  const manager = new Workspaces({ createWindow: () => windows.shift()!, open: vi.fn().mockImplementationOnce(() => firstLoad.promise).mockResolvedValue({ name: "Replacement" }), changed: vi.fn(), release: vi.fn() });
+  cleanups.push(() => { manager.dispose(); old.destroy(); replacement.destroy(); });
+  const first = manager.open(dirs[0]!);
+  const failed = expect(first).rejects.toThrow("Old bootstrap failed");
+  await vi.waitFor(() => expect(manager.getWindow(dirs[0]!)).toBe(old));
+  old.destroy();
+  expect(await manager.open(dirs[0]!)).toBe(replacement);
+  firstLoad.reject(new Error("Old bootstrap failed"));
+  await failed;
+  expect(replacement.isDestroyed()).toBe(false);
+  expect(manager.list().workspaces[0]).toMatchObject({ name: "Replacement", status: "idle" });
+});
+
+it("blocks departure during work and ignores cleanup from an older editor owner", async () => {
+  const { manager, dirs, release } = await setup();
+  const window = await manager.open(dirs[0]!);
+  manager.setAgent(dirs[0]!, true);
+  await expect(manager.detach(window, dirs[0]!)).rejects.toMatchObject({ code: "busy" });
+  expect(manager.getWindow(dirs[0]!)).toBe(window);
+  manager.setAgent(dirs[0]!, false);
+  await manager.detach(window, dirs[0]!);
+  expect(window.isDestroyed()).toBe(false);
+  const replacement = await manager.open(dirs[0]!);
+  release.mockClear();
+  await manager.detach(window, dirs[0]!);
+  expect(manager.getWindow(dirs[0]!)).toBe(replacement);
+  expect(release).not.toHaveBeenCalled();
+});
+
+it("releases hidden segmentation models after another running tool finishes", async () => {
+  const { manager, dirs } = await setup();
+  const started = Promise.withResolvers<BrowserWindow>(), finish = Promise.withResolvers<void>();
+  const inspecting = manager.run(dirs[0]!, "context", undefined, async window => { started.resolve(window); await finish.promise; });
+  const window = await started.promise;
+  await manager.run(dirs[0]!, "media_segment", undefined, async () => undefined, true);
+  expect(window.isDestroyed()).toBe(false);
+  finish.resolve();
+  await inspecting;
+  expect(window.isDestroyed()).toBe(true);
+});
+
+it("can release a deleted project's old editor mapping", async () => {
+  const { manager, dirs } = await setup();
+  const window = await manager.open(dirs[0]!);
+  await rm(dirs[0]!, { recursive: true });
+  await manager.detach(window, dirs[0]!);
+  expect(manager.getWindow(dirs[0]!)).toBeNull();
 });

@@ -474,7 +474,11 @@ if (app.requestSingleInstanceLock()) {
     if (window === mainWindow) { legacyAgentProject = await realpath(dir); legacyAgentWindow = window; }
     watchProject(window, dir);
   });
-  mainBridge.handle(MAIN_CHANNELS.PROJECTS_UNWATCH, ({ dir }) => unwatchProject(dir));
+  mainBridge.handle(MAIN_CHANNELS.PROJECTS_UNWATCH, ({ dir }, event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window) throw new Error("No editor window");
+    return workspaces.detach(window, dir);
+  });
   mainBridge.handle(MAIN_CHANNELS.PROJECTS_MANIFEST_READ, ({ dir }) => readManifest(dir));
   mainBridge.handle(MAIN_CHANNELS.PROJECTS_MANIFEST_WRITE, ({ dir, manifest }) => writeManifest(dir, manifest));
   mainBridge.handle(MAIN_CHANNELS.PROJECTS_CONFIG_READ, ({ dir }) => readConfig(dir));

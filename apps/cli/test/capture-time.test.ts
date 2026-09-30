@@ -30,7 +30,7 @@ const built = await build({
   } }],
 });
 
-function fixture(frameRate = 30, onRender?: () => void) {
+function fixture(frameRate = 30, onRender?: () => void, warmupAssets: (world: unknown, signal?: AbortSignal) => Promise<void> = async () => {}) {
   const renderedTimes: number[] = [];
   const replies: CodexToolResult[] = [];
   let disposed = 0;
@@ -84,7 +84,7 @@ function fixture(frameRate = 30, onRender?: () => void) {
       captures.push(captured);
       return { world: captured, node: captured.scene, dispose() { disposed++; } };
     } },
-    "encoder-runtime": { captureScene: (current: World) => current.scene, normalizeSceneTransform() {}, resolverSystem: async () => {}, warmupAssets: async () => {} },
+    "encoder-runtime": { captureScene: (current: World) => current.scene, normalizeSceneTransform() {}, resolverSystem: async () => {}, warmupAssets },
     nodes: { resolveNode: (current: World) => current.scene, resolveElement: (current: World) => current.scene },
     "@/lib/ipc": { mainBridge: {
       handle(_channel: string, next: typeof handler) { handler = next; return () => {}; },
@@ -98,7 +98,7 @@ function fixture(frameRate = 30, onRender?: () => void) {
   };
   const module = { exports: {} as typeof import("../../web/src/dapi/handlers/capture") & typeof import("../../web/src/dapi/agent") };
   runInNewContext(`(function(require,module,exports){${built.outputFiles[0].text}\n})`, {
-    AbortController, HTMLCanvasElement: Canvas, OffscreenCanvas: class {}, OfflineAudioContext: class {}, FileReader: Reader, btoa,
+    AbortController, AbortSignal, HTMLCanvasElement: Canvas, OffscreenCanvas: class {}, OfflineAudioContext: class {}, FileReader: Reader, btoa,
   })((name: string) => {
     if (!(name in dependencies)) throw new Error(`Unexpected dependency ${name}`);
     return dependencies[name];
@@ -147,6 +147,27 @@ test("capture cancels remaining frames and disposes its rendering world", async 
   assert.equal(f.disposed(), 1);
   await assert.rejects(f.capture({ id: "demo", separate: true }, context), { name: "AbortError" });
   assert.equal(f.captures.length, 1, "an already canceled call must not create a capture world");
+});
+
+test("CLI and native capture pass cancellation through encoder warmup and dispose the capture", { timeout: 5000 }, async () => {
+  for (const native of [false, true]) {
+    const entered = Promise.withResolvers<void>();
+    const f = fixture(30, undefined, async (_world, signal) => {
+      assert.ok(signal);
+      entered.resolve();
+      await new Promise<void>((_, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+    });
+    const controller = new AbortController();
+    const context = { requireSession: () => f.session, signal: controller.signal } as Parameters<typeof f.capture>[1];
+    const pending = native
+      ? f.captureSceneFrames(f.session, "demo", [0], { signal: controller.signal })
+      : f.capture({ id: "demo", times: [0], separate: true }, context);
+    await entered.promise;
+    controller.abort();
+    await assert.rejects(pending, { name: "AbortError" });
+    assert.equal(f.disposed(), 1);
+    assert.deepEqual(f.renderedTimes, []);
+  }
 });
 
 test("the agent captures its current nonzero playhead without converting frame indices to seconds", async () => {
