@@ -84,7 +84,8 @@ export function resetAnimatedValues(world: World, entity: Entity | null, ignore?
 	computed.cornerRadiusBottomRight[eid] = read(MixedCornerRadius, 'bottomRight', 0);
 	computed.cornerRadiusBottomLeft[eid] = read(MixedCornerRadius, 'bottomLeft', 0);
 	computed.stopOffset[eid] = read(ColorStop, 'offset', 0);
-	computed.chars[eid] = read(Chars, 'value', '');
+	// Unset text overrides so static edits and playhead-driven captions read Chars.
+	computed.chars[eid] = undefined;
 
 	if (entity.has(UniformScale) && ignore !== UniformScale) {
 		computed.scaleX[eid] = read(UniformScale, 'value', 1);
@@ -135,7 +136,7 @@ function resetPresetValues(world: World, entity: Entity, animations: Entity[]): 
 	if (offsetX) computed.offsetX[eid] = entity.get(Offset)?.x ?? 0;
 	if (offsetY) computed.offsetY[eid] = entity.get(Offset)?.y ?? 0;
 	if (rotation) computed.rotation[eid] = entity.get(Rotation)?.value ?? 0;
-	if (chars) computed.chars[eid] = entity.get(Chars)?.value ?? '';
+	if (chars) computed.chars[eid] = undefined;
 }
 
 /**

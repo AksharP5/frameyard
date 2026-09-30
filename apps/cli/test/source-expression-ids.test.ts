@@ -8,6 +8,7 @@ import { createRequire } from 'node:module';
 import { runInNewContext } from 'node:vm';
 import { build } from 'esbuild';
 import { transformSync, type PluginObj } from '@babel/core';
+import { formatSource, parseSource } from '../../../packages/jsx/src/source.ts';
 
 const built = await build({
   stdin: { contents: `export { stampProject, applyEdits } from './edit'; export { sourcePlugin } from './source';`, resolveDir: fileURLToPath(new URL('../../desktop/src/', import.meta.url)) },
@@ -15,6 +16,41 @@ const built = await build({
 });
 const module = { exports: {} as Pick<typeof import('../../desktop/src/edit'), 'stampProject' | 'applyEdits'> & Pick<typeof import('../../desktop/src/source'), 'sourcePlugin'> };
 runInNewContext(`(function(require,module,exports){"use strict";${built.outputFiles[0].text}\n})`)(createRequire(import.meta.url), module, module.exports);
+
+test('source formatting preserves string identities and numeric document positions', () => {
+  for (const locator of [0, 2, '2', '000002', '331231', '1e3', '0x12', '', '#hero', 'hero:part', 'hero']) {
+    assert.deepEqual(parseSource(formatSource('index.tsx', locator)), { file: 'index.tsx', locator });
+  }
+  assert.deepEqual(parseSource('index.tsx:2'), { file: 'index.tsx', locator: 2 });
+  assert.deepEqual(parseSource('index.tsx:hero'), { file: 'index.tsx', locator: 'hero' });
+  assert.equal(parseSource('index.tsx:#%'), undefined);
+});
+
+test('authored numeric IDs compile and save independently of positional source locators', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'studio-numeric-id-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const file = join(dir, 'index.tsx');
+  await writeFile(file, 'export default () => <scene id="root"><rect id={"2"} x={10}/><rect id="other" x={20}/></scene>;\n');
+  const sources: string[] = [];
+  const collect: PluginObj = { visitor: { JSXAttribute(path) {
+    if (path.node.name.type === 'JSXIdentifier' && path.node.name.name === '__source' && path.node.value?.type === 'StringLiteral') sources.push(path.node.value.value);
+  } } };
+  transformSync(await readFile(file, 'utf8'), {
+    plugins: [[module.exports.sourcePlugin, { file: 'index.tsx' }], collect],
+    parserOpts: { plugins: ['jsx'] }, babelrc: false, configFile: false,
+  });
+  assert.deepEqual(sources.map(source => parseSource(source)?.locator), ['root', '2', 'other']);
+  const [, numericSource] = sources;
+  assert.ok(numericSource);
+  const result = await module.exports.applyEdits({ dir }, [
+    { kind: 'set', source: numericSource, props: { x: 42 } },
+    { kind: 'set', source: formatSource('index.tsx', 2), props: { y: 7 } },
+  ]);
+  assert.equal(result.remaining?.length, 0);
+  const saved = await readFile(file, 'utf8');
+  assert.match(saved, /id=\{"2"\} x=\{42\}/);
+  assert.match(saved, /id="other" x=\{20\} y=\{7\}/);
+});
 
 test('static expression IDs survive repeated compile preparation and remain writable by their authored identity', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'studio-expression-id-'));

@@ -189,6 +189,13 @@ export class MaskFile {
 		const dataStart = tableStart + header.frameCount * TABLE_ENTRY_BYTES;
 		if (bytes.byteLength < dataStart) throw new Error('The mask file is cut short');
 		const table = new DataView(bytes.buffer, bytes.byteOffset + tableStart, dataStart - tableStart);
+		const dataLength = bytes.byteLength - dataStart;
+		for (let i = 0; i < header.frameCount; i++) {
+			const at = i * TABLE_ENTRY_BYTES;
+			const offset = table.getUint32(at, true);
+			const frameLength = table.getUint32(at + 4, true);
+			if (offset > dataLength || frameLength > dataLength - offset) throw new Error(`The mask frame ${i} is cut short`);
+		}
 		return new MaskFile(header, table, bytes.subarray(dataStart));
 	}
 
@@ -198,7 +205,7 @@ export class MaskFile {
 
 	/** Whether frame `index` has a mask: in range, and tracked. */
 	public has(index: number): boolean {
-		return index >= 0 && index < this.frameCount && this.table.getUint32(index * TABLE_ENTRY_BYTES + 4, true) > 0;
+		return Number.isInteger(index) && index >= 0 && index < this.frameCount && this.table.getUint32(index * TABLE_ENTRY_BYTES + 4, true) > 0;
 	}
 
 	public score(index: number): number {
@@ -218,30 +225,41 @@ export class MaskFile {
 		const at = index * TABLE_ENTRY_BYTES;
 		const offset = this.table.getUint32(at, true);
 		const length = this.table.getUint32(at + 4, true);
-		const size = Math.min(field.length, this.header.gridWidth * this.header.gridHeight);
+		const size = this.header.gridWidth * this.header.gridHeight;
+		if (field.length < size) throw new Error('The mask field buffer is smaller than its grid');
 
 		let cursor = offset;
 		const end = offset + length;
 		let position = 0;
-		while (cursor < end && position < size) {
+		while (cursor < end) {
 			let value = 0;
 			let shift = 0;
 			let byte: number;
 			do {
+				if (cursor === end || shift > 49) throw new Error(`The mask frame ${index} is malformed`);
 				byte = this.data[cursor++]!;
 				value += (byte & 0x7f) * 2 ** shift;
 				shift += 7;
-			} while (byte & 0x80 && cursor < end);
+			} while (byte & 0x80);
 			const kind = value % 4;
-			const stop = Math.min(size, position + Math.floor(value / 4));
+			const count = Math.floor(value / 4);
+			if (!Number.isSafeInteger(value) || kind > RUN_LITERAL || count === 0 || count > size - position) {
+				throw new Error(`The mask frame ${index} is malformed`);
+			}
+			const stop = position + count;
 			if (kind === RUN_LITERAL) {
-				for (; position < stop && cursor < end; position++) field[position] = (this.data[cursor++]! << 24) >> 24;
+				if (count > end - cursor) throw new Error(`The mask frame ${index} is malformed`);
+				for (; position < stop; position++) {
+					const cell = this.data[cursor++]!;
+					if (cell === 0x80) throw new Error(`The mask frame ${index} is malformed`);
+					field[position] = (cell << 24) >> 24;
+				}
 			} else {
 				field.fill(kind === RUN_IN ? MASK_FIELD_MAX : -MASK_FIELD_MAX, position, stop);
 			}
 			position = stop;
 		}
-		if (position < size) field.fill(-MASK_FIELD_MAX, position, size);
+		if (position !== size) throw new Error(`The mask frame ${index} is malformed`);
 		return true;
 	}
 }
@@ -258,7 +276,12 @@ function readPreamble(bytes: Uint8Array): number {
 function parseHeader(json: ArrayBuffer | Uint8Array): MaskHeader {
 	const header = JSON.parse(new TextDecoder().decode(json)) as MaskHeader;
 	const counts = [header.gridWidth, header.gridHeight, header.width, header.height, header.frameCount];
-	if (!counts.every((value) => Number.isInteger(value) && value >= 0) || !(header.frameRate > 0)) {
+	if (
+		!counts.every((value) => Number.isSafeInteger(value) && value >= 0)
+		|| !Number.isSafeInteger(header.gridWidth * header.gridHeight)
+		|| !Number.isFinite(header.frameRate)
+		|| !(header.frameRate > 0)
+	) {
 		throw new Error('The mask file header is malformed');
 	}
 	return header;

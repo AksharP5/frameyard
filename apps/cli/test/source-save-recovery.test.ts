@@ -9,6 +9,7 @@ import { runInThisContext } from "node:vm";
 import { build } from "esbuild";
 import { watch } from "node:fs";
 import { setTimeout } from "node:timers/promises";
+import * as crypto from "node:crypto";
 import { ProjectChanges } from "../../desktop/src/project-changes.ts";
 import type { SourceEdit } from "../../desktop/src/edit.ts";
 
@@ -17,7 +18,7 @@ const built = await build({
   bundle: true, write: false, format: "cjs", platform: "node", external: ["ts-morph"],
 });
 
-function sourceWriter(failRename: (target: string) => boolean = () => false, afterStage?: () => Promise<void>) {
+function sourceWriter(failRename: (target: string) => boolean = () => false, afterStage?: () => Promise<void>, nextId?: () => number) {
   const module = { exports: {} as Pick<typeof import("../../desktop/src/edit.ts"), "applyEdits" | "stampProject"> };
   const require = createRequire(import.meta.url);
   runInThisContext(`(function(require,module,exports){${built.outputFiles[0].text}\n})`)(
@@ -31,7 +32,7 @@ function sourceWriter(failRename: (target: string) => boolean = () => false, aft
         if (failRename(target)) throw new Error("disk is full");
         return fs.rename(source, target);
       },
-    } : require(name), module, module.exports,
+    } : name === "node:crypto" && nextId ? { ...crypto, randomInt: nextId } : require(name), module, module.exports,
   );
   return Object.assign(module.exports.applyEdits, { stampProject: module.exports.stampProject });
 }
@@ -123,7 +124,12 @@ test("undoing a split acknowledges a child already removed with its sequence", a
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
   const path = join(dir, "index.tsx");
   await fs.writeFile(path, 'export default () => <scene id="scene"><rect id="first" start={1} end={3} /><rect id="second" start={3} end={6} /></scene>;');
-  const apply = sourceWriter();
+  const numericIds = ["123456", "331231"].map(id => parseInt(id, 36));
+  const apply = sourceWriter(undefined, undefined, () => {
+    const id = numericIds.shift();
+    assert.ok(id !== undefined, "the split only needs two generated IDs");
+    return id;
+  });
   const split = await apply({ dir }, [
     { kind: "insert", source: "pending#sequence", parent: "index.tsx:scene", tag: "sequence", props: {}, before: "index.tsx:second" },
     { kind: "insert", source: "pending#child", parent: "pending#sequence", tag: "rect", props: { start: 2, end: 3 } },

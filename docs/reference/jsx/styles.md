@@ -74,7 +74,7 @@ Under an `"opacity"` effect the mask is the cut-out: the clip shows inside the m
 
 | Prop | Type | Default | Meaning |
 | ---- | ---- | ------- | ------- |
-| `src` | `string` | none | The frames, a directory of numbered images whose alpha is the mask. |
+| `src` | `string` | none | A tracked `.mask` file, or a directory of numbered images whose alpha is the mask. |
 | `sourceIn` | `Time` | `0` | The node's source time the first frame belongs to, so the mask stays on the footage it was made from whatever the trim. |
 | `frameRate` | `number` | `30` | Frames per second the frames were written at (the composition's). |
 | `blur` | `number` | `0` | Feather: radius in px the edge falls off over. |
@@ -88,7 +88,7 @@ Under an `"opacity"` effect the mask is the cut-out: the clip shows inside the m
 ```tsx
 <video src="footage/skater.mp4" width={1920} height={1080}>
   <effect type="opacity" value={1}>
-    <mask src="masks/skater" sourceIn={2} frameRate={30} blur={6} />
+    <mask src="masks/skater.mask" sourceIn={2} frameRate={30} blur={6} />
   </effect>
 </video>
 ```

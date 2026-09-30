@@ -41,7 +41,7 @@ const outlines = new Map<Sam2Mask | MaskFrame, Path2D>();
 
 /** Whether the tool was up last frame, so putting it down cleans up once. */
 let active = false;
-let lastHover: { frame: number; x: number; y: number; label: 0 | 1 } | null = null;
+let lastHover: { clip: Entity; frame: number; x: number; y: number; label: 0 | 1 } | null = null;
 
 /**
  * Everything the tool puts on the canvas while it is up: the session over its
@@ -118,10 +118,10 @@ function updateHover(world: World, target: { clip: Entity; rect: VideoRect } | n
 	const frame = currentSourceFrame(world, target.clip);
 	const label = heldObjectMaskLabel(world);
 	if (
-		lastHover && lastHover.frame === frame && lastHover.label === label
+		lastHover && lastHover.clip === target.clip && lastHover.frame === frame && lastHover.label === label
 		&& Math.hypot(point.x - lastHover.x, point.y - lastHover.y) < HOVER_STEP
 	) return;
-	lastHover = { frame, x: point.x, y: point.y, label };
+	lastHover = { clip: target.clip, frame, x: point.x, y: point.y, label };
 	hoverObjectMask(world, target.clip, { ...point, label });
 }
 

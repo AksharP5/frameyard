@@ -372,7 +372,7 @@ function imagePreviewBytes(world: World, fill: Entity): { id: string; bytes: num
  * seek is the clip's own source frame less the offset, at the rate the
  * sequence was written at (the composition's, authored as its frameRate).
  */
-function forwardMaskDecoders(world: World, scene: Entity, entity: Entity): void {
+function forwardMaskDecoders(world: World, scene: Entity, entity: Entity, videos: VideoForwarding): void {
 	const cache = store(world, Cache);
 	const effects = cache.effects[entity.id()];
 	if (!effects?.length) return;
@@ -397,6 +397,7 @@ function forwardMaskDecoders(world: World, scene: Entity, entity: Entity): void 
 
 			const decoder = resolveVideoDecoder(world, mask);
 			if (!decoder) continue;
+			videos.active.add(mask);
 			const frame = Math.max(0, sourceFrame - (maskStore.offset[mask.id()] ?? 0));
 			// Seek first: the editor keeps no promise list, and an optional call
 			// skips its arguments along with itself.
@@ -458,7 +459,7 @@ function forwardDecoders(world: World, scene: Entity, entity: Entity, videos: Vi
 		}
 
 		if (visualsEnabled && entity.has(Geometry)) {
-			forwardMaskDecoders(world, scene, entity);
+			forwardMaskDecoders(world, scene, entity, videos);
 		}
 	}
 

@@ -37,7 +37,8 @@ export async function getLocalFonts(): Promise<FontSources[]> {
 		family,
 		variants: fonts.map((font) => ({
 			family,
-			source: `local('${font.fullName}'), local('${font.postscriptName}')`,
+			source: [font.fullName, font.postscriptName]
+				.map(name => `local('${name.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}')`).join(', '),
 			weight: matchFontWeight(font.style),
 			style: matchFontStyle(font.style),
 		})),
@@ -58,12 +59,12 @@ function matchFontStyle(style: string): FontStyle {
 function matchFontWeight(weight: string): string {
 	const matches: [RegExp, string][] = [
 		[/black|heavy/i, '900'],
-		[/extrabold|ultrabold/i, '800'],
-		[/semibold|demibold/i, '600'],
+		[/(extra|ultra)[ -]?bold/i, '800'],
+		[/(semi|demi)[ -]?bold/i, '600'],
 		[/bold|strong/i, '700'],
 		[/medium/i, '500'],
 		[/normal|regular|book|plain/i, '400'],
-		[/extralight|ultralight/i, '200'],
+		[/(extra|ultra)[ -]?light/i, '200'],
 		[/thin|hairline/i, '100'],
 		[/light/i, '300'],
 	];

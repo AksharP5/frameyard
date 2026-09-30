@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { runInThisContext } from 'node:vm';
 import { build } from 'esbuild';
-import type { ChatSummary } from '@diffusionstudio/agent-chat';
+import type { ChatSummary, HarnessInfo } from '@diffusionstudio/agent-chat';
 import type { CodexRequest } from '../../desktop/src/codex-contracts.ts';
 import type { ChatDraft } from '../../web/src/components/agent/chat-draft.ts';
 
@@ -30,6 +30,7 @@ function fixture(config: { localMode?: boolean; desktop?: boolean; nativeSendErr
   const savedDraft = structuredClone(config.savedDraft ?? {});
   let deletionError: Error | undefined;
   const noop = () => {};
+  let harnessesChanged: (harnesses: HarnessInfo[]) => void = noop;
   const dependencies: Record<string, unknown> = {
     'solid-js': solid, 'solid-js/store': store,
     somoto: { toast: { error: noop } },
@@ -47,7 +48,7 @@ function fixture(config: { localMode?: boolean; desktop?: boolean; nativeSendErr
     '@/init': { store: { define: (_key: string, value: unknown) => ({ value }) } },
     '@/lib/store': { createStoredSignal: (stored: { value: unknown }) => solid.createSignal(stored.value) },
     './connection': { hasHost: () => true, client: {
-      state: 'open', onState: () => noop, onHarnesses: noop, connect: noop,
+      state: 'open', onState: () => noop, onHarnesses: (listener: typeof harnessesChanged) => { harnessesChanged = listener; return noop; }, connect: noop,
       open: (id: string, listener: (message: Message) => void) => { listeners.set(id, listener); return () => { listeners.delete(id); }; },
       request: async (method: string) => {
         if (method === 'turn.send') return send.promise;
@@ -64,8 +65,20 @@ function fixture(config: { localMode?: boolean; desktop?: boolean; nativeSendErr
   runInThisContext(`(function(require,module,exports,window){${built.outputFiles[0].text}\n})`)(
     (name: string) => dependencies[name] ?? {}, module, module.exports, { desktop: config.desktop === false ? undefined : {} },
   );
-  return { ...module.exports, listeners, nativeRequests, savedDraft, accept: send.resolve, reject: send.reject, failDeletion: (error?: Error) => { deletionError = error; } };
+  return { ...module.exports, listeners, nativeRequests, savedDraft, accept: send.resolve, reject: send.reject, failDeletion: (error?: Error) => { deletionError = error; }, setHarnesses: (harnesses: HarnessInfo[]) => harnessesChanged(harnesses) };
 }
+
+test('the default model prefers available Codex families and preserves an explicit choice', () => {
+  const f = fixture();
+  f.ensureConnected();
+  f.setHarnesses([
+    { id: 'claude', label: 'Claude', status: 'ready', models: [{ id: 'fable', label: 'Fable' }] },
+    { id: 'codex', label: 'Codex', status: 'ready', models: [{ id: 'sol', label: 'Sol' }] },
+  ]);
+  assert.deepEqual(f.currentModel(), { harness: 'codex', model: 'sol' });
+  f.setStoredModel({ harness: 'claude', model: 'fable' });
+  assert.deepEqual(f.currentModel(), { harness: 'claude', model: 'fable' });
+});
 
 const options = { projectId: 'project', cwd: '/project', chatId: null, text: 'New prompt', attachments: [], model: { harness: 'claude' as const, model: 'model' } };
 

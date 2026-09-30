@@ -80,25 +80,44 @@ export async function trackObject(model: Sam2Video, request: TrackRequest): Prom
 
 	const forward = sink.samplesAtTimestamps(timestamps.slice(seedIndex + 1));
 	let index = seedIndex + 1;
+	let failure: { cause: unknown } | undefined;
+	const fail = (cause: unknown) => { failure ??= { cause }; };
+	const closeSample = (sample: VideoSample | null) => {
+		try { sample?.close(); } catch (cause) { fail(cause); }
+	};
+	// Own the rejection immediately while inference is working on the previous frame.
+	const readNext = () => forward.next().then(
+		(result) => ({ ok: true as const, result }),
+		(cause: unknown) => ({ ok: false as const, cause }),
+	);
 	// The next decode is requested before the current frame is processed, so
 	// decoding and inference overlap.
-	let pending = forward.next();
+	let pending = readNext();
 	try {
 		for (;;) {
-			const { done, value: sample } = await pending;
+			const decoded = await pending;
+			if (!decoded.ok) throw decoded.cause;
+			const { done, value: sample } = decoded.result;
 			if (done) break;
-			pending = forward.next();
+			pending = readNext();
 
 			if (signal?.aborted) {
-				sample?.close();
-				return;
+				closeSample(sample);
+				break;
 			}
 			if (sample) await process(sample, index);
 			index++;
 		}
+	} catch (cause) {
+		fail(cause);
 	} finally {
-		await forward.return();
+		const decoded = await pending;
+		if (!decoded.ok) fail(decoded.cause);
+		else if (!decoded.result.done) closeSample(decoded.result.value);
+		await forward.return().catch(fail);
 	}
+	if (failure) throw failure.cause;
+	if (signal?.aborted) return;
 
 	model.rewind();
 	previous = { timestamp: seedTimestamp, mask: seedMask };
@@ -106,27 +125,39 @@ export async function trackObject(model: Sam2Video, request: TrackRequest): Prom
 	for (let end = seedIndex; end > 0; end -= REVERSE_BATCH) {
 		const start = Math.max(0, end - REVERSE_BATCH);
 		const samples: (VideoSample | null)[] = [];
-		for await (const sample of sink.samplesAtTimestamps(timestamps.slice(start, end))) samples.push(sample);
-
-		for (let i = samples.length - 1; i >= 0; i--) {
-			const sample = samples[i];
-			if (!sample) continue;
-			if (signal?.aborted) {
-				sample.close();
-				continue;
+		try {
+			for await (const sample of sink.samplesAtTimestamps(timestamps.slice(start, end))) samples.push(sample);
+			for (let i = samples.length - 1; i >= 0; i--) {
+				if (signal?.aborted) break;
+				const sample = samples[i];
+				if (!sample) continue;
+				// Transfer ownership to process, which closes it even if inference fails.
+				samples[i] = null;
+				await process(sample, start + i);
 			}
-			await process(sample, start + i);
+		} catch (cause) {
+			failure = { cause };
+		} finally {
+			for (const sample of samples) closeSample(sample);
 		}
+		if (failure) throw failure.cause;
 		if (signal?.aborted) return;
 	}
 }
 
 async function withVideoFrame<T>(sample: VideoSample, run: (frame: VideoFrame) => Promise<T>): Promise<T> {
-	const frame = sample.toVideoFrame();
+	let frame: VideoFrame | undefined;
+	let failed = false;
 	try {
+		frame = sample.toVideoFrame();
 		return await run(frame);
+	} catch (cause) {
+		failed = true;
+		throw cause;
 	} finally {
-		frame.close();
-		sample.close();
+		let failure: { cause: unknown } | undefined;
+		try { frame?.close(); } catch (cause) { failure = { cause }; }
+		try { sample.close(); } catch (cause) { failure ??= { cause }; }
+		if (!failed && failure) throw failure.cause;
 	}
 }
