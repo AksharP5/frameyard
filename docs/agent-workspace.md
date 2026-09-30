@@ -79,7 +79,11 @@ dapi workspace close /absolute/projects/video-b
 activity, queued and running jobs, and errors. `show` opens a workspace for review;
 `cancel` stops its agent and cancellable jobs; `close` releases an idle project's editor resources.
 Heavy rendering jobs queue across workspaces to limit RAM and GPU use without
-reducing output quality. Idle background workspaces do not continuously play.
+reducing output quality. Waiting jobs load their editors when they start.
+Idle background workspaces do not continuously play.
+
+Close a busy project window to keep its agents working in the background.
+Finish or cancel work before returning that window to the dashboard.
 
 For stdio MCP agents, start `dapi --project /absolute/projects/video-a mcp` or set
 `FRAMEYARD_PROJECT` for that server process. HTTP MCP clients can call `workspace`

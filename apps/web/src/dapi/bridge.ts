@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import { DAPI_WIRE, isDapiError } from "@diffusionstudio/dapi";
+import { DAPI_WIRE, DapiError, isDapiError } from "@diffusionstudio/dapi";
 
 import type { DapiCall, DapiCancel, DapiReply } from "@diffusionstudio/dapi";
 import type { Handlers, ServedToolName, ToolContext } from "./handler";
@@ -65,6 +65,8 @@ class ToolBridge {
       // Every handler takes its own parsed args; the map's union type cannot
       // express that pairing, so the call site widens.
       const context = { ...this.context(controller.signal), awaitTracking: call.awaitCleanup };
+      const project = (call.args as { project?: string }).project;
+      if (project && context.session()?.project.dir() !== project) throw new DapiError("no-project", "The project's editor is no longer open in this window.");
       context.session()?.engine.requestFrame();
       const run = handler as (args: unknown, ctx: ToolContext) => Promise<unknown>;
       reply = { id: call.id, ok: true, data: await run(call.args, context) };

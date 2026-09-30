@@ -20,7 +20,7 @@ import {
 	AudioPlayback, Computed,
 	Position, Offset, Rotation, Scale, Skew,
 	Time, FrameRate, RenderSurface, AudioEngine, Root,
-	FramePromises,
+	FramePromises, Silent,
 } from '@diffusionstudio/runtime';
 
 import { TargetBuffer } from './buffer';
@@ -60,14 +60,25 @@ export function captureScene(world: World): Entity {
  *
  * The world stays the caller's — it built it, it disposes it. What is created
  * here is the audio context, the output, and the frames.
+ * `signal` cancels setup and frame readiness; the caller still disposes its world.
  */
-export async function createEncoder(world: World, config: EncoderConfig) {
+export async function createEncoder(world: World, config: EncoderConfig, signal?: AbortSignal) {
+	signal?.throwIfAborted();
+	const controller = new AbortController();
+	const abortSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
 	const scene = captureScene(world);
 	const sceneId = scene.id();
 	const computed = store(world, Computed);
 	const playback = store(world, Playback);
 
-	await warmupAssets(world);
+	// Ogg always carries audio; explicitly disabled audio needs no decoding or PCM buffer.
+	if (config.format === 'ogg') {
+		config.audio = { ...config.audio, enabled: true };
+		config.video = { ...config.video, enabled: false };
+	}
+	const audioEnabled = config.audio?.enabled ?? true;
+	if (!audioEnabled) world.add(Silent);
+	await warmupAssets(world, abortSignal);
 
 	const frameRate = world.get(FrameRate)?.value ?? 30;
 	const sceneWidth = computed.width[sceneId]!;
@@ -83,15 +94,6 @@ export async function createEncoder(world: World, config: EncoderConfig) {
 	const playheadStartSeconds = workareaStart / frameRate;
 	const duration = totalFrames / frameRate;
 
-	// Before the two below read them: ogg is an audio container, so asking for
-	// one is asking for the audio alone — and with `videoEnabled` derived
-	// first, it would still have gone looking for pictures to put in it.
-	if (config.format === 'ogg') {
-		config.audio = { ...config.audio, enabled: true };
-		config.video = { ...config.video, enabled: false };
-	}
-
-	const audioEnabled = config.audio?.enabled ?? true;
 	const videoEnabled = config.video?.enabled ?? true;
 	const numberOfChannels = config.audio?.numberOfChannels ?? 2;
 	const sampleRate = config.audio?.sampleRate ?? 48000;
@@ -129,12 +131,12 @@ export async function createEncoder(world: World, config: EncoderConfig) {
 	canvas.height = height;
 	world.set(RenderSurface, { resolution: scale });
 
-	const offlineAudioCtx = new OfflineAudioContext(
+	const offlineAudioCtx = audioEnabled ? new OfflineAudioContext(
 		numberOfChannels,
 		Math.ceil(duration * sampleRate),
 		sampleRate,
-	);
-	world.set(AudioEngine, { context: offlineAudioCtx });
+	) : null;
+	if (offlineAudioCtx) world.set(AudioEngine, { context: offlineAudioCtx });
 
 	setActive(world, scene);
 
@@ -146,10 +148,12 @@ export async function createEncoder(world: World, config: EncoderConfig) {
 	// Anchor audio scheduling: context starts at t=0 but the playhead starts at
 	// playheadStartSeconds, so audioDelay = -playheadStartSeconds shifts each
 	// entity's scheduled audio back into the encoded window.
-	if (!scene.has(AudioPlayback)) scene.add(AudioPlayback);
-	const audioPlayback = store(world, AudioPlayback);
-	audioPlayback.contextOffsetInSeconds[sceneId] = 0;
-	audioPlayback.timelineOffsetInSeconds[sceneId] = playheadStartSeconds;
+	if (audioEnabled) {
+		if (!scene.has(AudioPlayback)) scene.add(AudioPlayback);
+		const audioPlayback = store(world, AudioPlayback);
+		audioPlayback.contextOffsetInSeconds[sceneId] = 0;
+		audioPlayback.timelineOffsetInSeconds[sceneId] = playheadStartSeconds;
+	}
 
 	// Set up mediabunny output
 	const buffer = await TargetBuffer.create(config.target);
@@ -186,14 +190,14 @@ export async function createEncoder(world: World, config: EncoderConfig) {
 			output.setMetadataTags({ comment: config.comment });
 		}
 
-		const audioSource = new AudioSampleSource({
+		const audioSource = audioEnabled ? new AudioSampleSource({
 			codec: audioCodec,
 			bitrate: audioBitrate,
 			// The WASM AAC patch preserves priming PTS for MP4/MOV edit lists.
 			onEncoderConfig: containerFormat === 'mp4' || containerFormat === 'mov'
 				? (config) => { Object.assign(config, { frameyardPreservePacketTimestamps: true }); }
 				: undefined,
-		});
+		}) : null;
 
 		const sceneFills = [...world.query(Paint, Not(Geometry), ChildOf(scene))];
 
@@ -206,7 +210,7 @@ export async function createEncoder(world: World, config: EncoderConfig) {
 				: 'discard',
 		});
 
-		if (audioEnabled) {
+		if (audioSource) {
 			output.addAudioTrack(audioSource);
 		}
 
@@ -214,80 +218,71 @@ export async function createEncoder(world: World, config: EncoderConfig) {
 			output.addVideoTrack(videoSource);
 		}
 
-		// Audio worklet streams render-quantum chunks back to the main thread so
-		// we can hand them to mediabunny in step with the visual frame loop.
-		const audioWorkletUrl = createAudioWorkletUrl();
-		cleanups.push(() => URL.revokeObjectURL(audioWorkletUrl));
-		await offlineAudioCtx.audioWorklet.addModule(audioWorkletUrl);
-
 		const sharedBuffer = new SharedArrayBuffer(4);
 		const sharedUint32Array = new Uint32Array(sharedBuffer);
-		releaseWorklet = () => Atomics.store(sharedUint32Array, 0, 2 ** 31 - 1);
-		const mixNode = offlineAudioCtx.createGain();
-		cleanups.push(() => mixNode.disconnect());
-
-		const sinkNode = new AudioWorkletNode(offlineAudioCtx, 'sink', {
-			channelCount: numberOfChannels,
-			channelCountMode: 'explicit',
-			numberOfInputs: 1,
-			numberOfOutputs: 1,
-			outputChannelCount: [numberOfChannels],
-			processorOptions: {
-				buffer: sharedUint32Array,
-			},
-		});
-
-		cleanups.push(() => {
-			sinkNode.port.onmessage = null;
-			sinkNode.port.close();
-			sinkNode.disconnect();
-		});
-
-		mixNode.connect(sinkNode);
-		sinkNode.connect(offlineAudioCtx.destination);
-
-		// connect the scene bus to the mix node
-		const sceneBus = new AudioBus(world, scene);
-		cleanups.push(() => sceneBus.disconnect());
-		scene.add(AudioBusHandle);
-		scene.set(AudioBusHandle, sceneBus);
-		sceneBus.connect(mixNode);
-
-		let sampleIndex = 0;
+		let sinkNode: AudioWorkletNode | undefined;
 		let audioQueue = Promise.resolve();
 		let audioFailure: { error: unknown } | undefined;
-
 		const allAudioReceived = Promise.withResolvers<void>();
-
-		sinkNode.port.onmessage = event => {
-			if (output?.state === 'canceled') {
-				return;
-			}
-
-			const planarBuffer = event.data as Float32Array;
-
-			if (planarBuffer.length === 0) {
-				allAudioReceived.resolve();
-				return;
-			}
-			if (audioFailure) return;
-
-			const sampleCount = planarBuffer.length / numberOfChannels;
-
-			const audioSample = new AudioSample({
-				data: planarBuffer,
-				format: 'f32-planar',
-				numberOfChannels,
-				sampleRate,
-				timestamp: sampleIndex / sampleRate,
+		if (offlineAudioCtx && audioSource) {
+			// Stream audio in step with the visual loop, only when audio was requested.
+			const audioWorkletUrl = createAudioWorkletUrl();
+			cleanups.push(() => URL.revokeObjectURL(audioWorkletUrl));
+			await offlineAudioCtx.audioWorklet.addModule(audioWorkletUrl);
+			abortSignal.throwIfAborted();
+			releaseWorklet = () => Atomics.store(sharedUint32Array, 0, 2 ** 31 - 1);
+			const mixNode = offlineAudioCtx.createGain();
+			cleanups.push(() => mixNode.disconnect());
+			const sink = new AudioWorkletNode(offlineAudioCtx, 'sink', {
+				channelCount: numberOfChannels,
+				channelCountMode: 'explicit',
+				numberOfInputs: 1,
+				numberOfOutputs: 1,
+				outputChannelCount: [numberOfChannels],
+				processorOptions: { buffer: sharedUint32Array },
 			});
-			audioQueue = audioQueue
-				.then(() => audioFailure ? undefined : audioSource.add(audioSample))
-				.catch(error => { audioFailure ??= { error }; })
-				.finally(() => audioSample.close());
+			sinkNode = sink;
+			cleanups.push(() => {
+				sink.port.onmessage = null;
+				sink.port.close();
+				sink.disconnect();
+			});
+			mixNode.connect(sink);
+			sink.connect(offlineAudioCtx.destination);
+			const sceneBus = new AudioBus(world, scene);
+			cleanups.push(() => sceneBus.disconnect());
+			scene.add(AudioBusHandle);
+			scene.set(AudioBusHandle, sceneBus);
+			sceneBus.connect(mixNode);
+			let sampleIndex = 0;
+			sink.port.onmessage = event => {
+				if (output?.state === 'canceled') return;
 
-			sampleIndex += sampleCount;
-		};
+				const planarBuffer = event.data as Float32Array;
+
+				if (planarBuffer.length === 0) {
+					allAudioReceived.resolve();
+					return;
+				}
+				if (audioFailure) return;
+
+				const sampleCount = planarBuffer.length / numberOfChannels;
+
+				const audioSample = new AudioSample({
+					data: planarBuffer,
+					format: 'f32-planar',
+					numberOfChannels,
+					sampleRate,
+					timestamp: sampleIndex / sampleRate,
+				});
+				audioQueue = audioQueue
+					.then(() => audioFailure ? undefined : audioSource.add(audioSample))
+					.catch(error => { audioFailure ??= { error }; })
+					.finally(() => audioSample.close());
+
+				sampleIndex += sampleCount;
+			};
+		}
 
 		const emitProgress = createThrottledCallback(config.onProgress, 1000 / 3); // 3 times per second
 
@@ -295,9 +290,13 @@ export async function createEncoder(world: World, config: EncoderConfig) {
 		const cancellation = Promise.withResolvers<void>();
 		const cancel = () => {
 			canceled = true;
+			controller.abort();
 			releaseWorklet?.();
 			cancellation.resolve();
 		};
+		signal?.addEventListener('abort', cancel, { once: true });
+		cleanups.push(() => signal?.removeEventListener('abort', cancel));
+		if (abortSignal.aborted) cancel();
 
 		const render = async (): Promise<ExportResult> => {
 			let failure: Error | undefined;
@@ -311,6 +310,7 @@ export async function createEncoder(world: World, config: EncoderConfig) {
 				let audioRenderingDone = false;
 				let audioRenderingCompleted: Promise<AudioBuffer> | null = null;
 				if (audioEnabled) {
+					assert(offlineAudioCtx !== null, 'The audio export has no audio context');
 					audioRenderingCompleted = offlineAudioCtx.startRendering();
 					audioRenderingCompleted.then(() => { audioRenderingDone = true; }, () => { audioRenderingDone = true; });
 				}
@@ -333,7 +333,7 @@ export async function createEncoder(world: World, config: EncoderConfig) {
 					{
 						assetSystem(world);
 						playbackSystem(world);
-						await resolverSystem(world);
+						await resolverSystem(world, abortSignal);
 						if (canceled) return { type: 'canceled' };
 						motionSystem(world);
 						// May be changed by a system
@@ -387,6 +387,7 @@ export async function createEncoder(world: World, config: EncoderConfig) {
 					await Promise.race([audioRenderingCompleted, cancellation.promise]);
 					if (canceled) return { type: 'canceled' };
 
+					assert(sinkNode !== undefined, 'The audio export has no sink');
 					sinkNode.port.postMessage(null);
 					await Promise.race([allAudioReceived.promise, cancellation.promise]);
 					if (canceled) return { type: 'canceled' };
@@ -526,18 +527,33 @@ export function normalizeSceneTransform(world: World, sceneId: number): void {
  * a transcript that waits for the scene's own sources to land). Bounded, so
  * a source that keeps re-requesting cannot hold an export open forever.
  */
-export async function warmupAssets(world: World): Promise<void> {
+export async function warmupAssets(world: World, signal?: AbortSignal): Promise<void> {
 	for (let pass = 0; pass < 16; pass++) {
+		signal?.throwIfAborted();
 		assetSystem(world);
 		if (!world.get(FramePromises)?.list?.length) return;
-		await resolverSystem(world);
+		await resolverSystem(world, signal);
 	}
 }
 
-export async function resolverSystem(world: World) {
+export async function resolverSystem(world: World, signal?: AbortSignal) {
+	signal?.throwIfAborted();
 	const promises = world.get(FramePromises)?.list;
-	if (promises?.length) {
-		await Promise.all(promises.filter(promise => promise !== null));
-		world.set(FramePromises, { list: [] });
+	if (!promises?.length) return;
+	const ready = Promise.all(promises.filter(promise => promise !== null));
+	if (signal) {
+		const canceled = Promise.withResolvers<never>();
+		const abort = () => canceled.reject(signal.reason);
+		signal.addEventListener('abort', abort, { once: true });
+		try {
+			if (signal.aborted) abort();
+			await Promise.race([ready, canceled.promise]);
+			signal.throwIfAborted();
+		} finally {
+			signal.removeEventListener('abort', abort);
+		}
+	} else {
+		await ready;
 	}
+	world.set(FramePromises, { list: [] });
 }

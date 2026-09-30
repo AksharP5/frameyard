@@ -159,7 +159,7 @@ export async function renderScene(
             : prev,
         );
       },
-    });
+    }, controller.signal);
 
     // Even a canceled setup must enter render's cleanup once an encoder owns resources.
     if (controller.signal.aborted) encoder.cancel();

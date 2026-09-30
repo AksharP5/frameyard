@@ -43,6 +43,7 @@ function windowFor() {
     isMinimized: () => false,
     focus: vi.fn(),
     restore: vi.fn(),
+    webContents: new EventEmitter(),
     show: () => { visible = true; window.emit("show"); },
     hide: () => { visible = false; window.emit("hide"); },
     destroy: () => { destroyed = true; window.emit("closed"); },

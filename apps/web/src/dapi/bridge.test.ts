@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DAPI_WIRE } from '@diffusionstudio/dapi';
 import type { DapiCall } from '@diffusionstudio/dapi';
 import type { Handlers, ToolContext } from './handler';
+import type { EditorSession } from './session';
 
 const listeners = new Map<string, (data: unknown) => void>();
 const send = vi.fn();
@@ -46,4 +47,17 @@ describe('tool cancellation acknowledgement', () => {
     expect(handler).not.toHaveBeenCalled();
     expect(send).toHaveBeenCalledWith(DAPI_WIRE.REPLY, expect.objectContaining({ id: call.id, ok: false }));
   });
+});
+
+
+it('rejects a scoped tool when the renderer belongs to another project', async () => {
+  listeners.clear(); send.mockClear();
+  const instance = await bridge();
+  const handler = vi.fn();
+  const session = { project: { dir: () => '/projects/other' } } as EditorSession;
+  instance.register({ context: handler } as unknown as Handlers, signal => ({ ...context(signal), session: () => session }));
+  listeners.get(DAPI_WIRE.CALL)!({ ...call, args: { project: '/projects/expected' } });
+  await vi.waitFor(() => expect(send).toHaveBeenCalledWith(DAPI_WIRE.REPLY, expect.objectContaining({ ok: false, error: expect.objectContaining({ code: 'no-project' }) })));
+  expect(handler).not.toHaveBeenCalled();
+  vi.unstubAllGlobals();
 });

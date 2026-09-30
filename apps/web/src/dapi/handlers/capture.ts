@@ -32,7 +32,7 @@ export const capture: ToolHandler<"capture"> = async ({ id, sceneTime, times, se
     const frameRate = target.world.get(FrameRate)?.value ?? 30;
     const shots = times && times.length > 0 ? times.map((t) => Math.round(t * frameRate)) : [0];
     if (sceneTime) target.node.remove(Workarea);
-    const encoder = await createImageEncoder(target.world, { frames: shots, resolution: 720 });
+    const encoder = await createImageEncoder(target.world, { frames: shots, resolution: 720 }, ctx.signal);
     cancel = encoder.cancel;
     ctx.signal.addEventListener("abort", cancel, { once: true });
     if (ctx.signal.aborted) encoder.cancel();
@@ -82,7 +82,7 @@ export async function captureSceneFrames(
     options.signal?.throwIfAborted();
     for (const source of options.exclude ?? []) resolveNode(target.world, source).add(Hidden);
     if (options.sceneTime) target.node.remove(Workarea);
-    const encoder = await createImageEncoder(target.world, { frames, resolution: 720 });
+    const encoder = await createImageEncoder(target.world, { frames, resolution: 720 }, options.signal);
     cancel = encoder.cancel;
     options.signal?.addEventListener("abort", cancel, { once: true });
     if (options.signal?.aborted) encoder.cancel();
