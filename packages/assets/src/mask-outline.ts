@@ -81,7 +81,8 @@ export function traceMask(
 
 	// Crossings are keyed by the lattice edge they lie on: 2k for the edge from
 	// center k to the one right of it, 2k + 1 for the one below.
-	const next = new Int32Array(2 * stride * (h + 2)).fill(-1);
+	// Store links as crossing id + 1 so zero-initialized entries need no full-grid fill.
+	const next = new Int32Array(2 * stride * (h + 2));
 	for (let y = 0; y <= h; y++) {
 		for (let x = 0; x <= w; x++) {
 			const k = y * stride + x;
@@ -92,19 +93,19 @@ export function traceMask(
 			const segments = (joined ? SEGMENTS : SPLIT_SEGMENTS)[index]!;
 			// The cell's sides as crossings: top, right, bottom, left.
 			const sides = [2 * k, 2 * (k + 1) + 1, 2 * (k + stride), 2 * k + 1];
-			for (let i = 0; i < segments.length; i += 2) next[sides[segments[i]!]!] = sides[segments[i + 1]!]!;
+			for (let i = 0; i < segments.length; i += 2) next[sides[segments[i]!]!] = sides[segments[i + 1]!]! + 1;
 		}
 	}
 
 	const xs: number[] = [];
 	const ys: number[] = [];
 	for (let start = 0; start < next.length; start++) {
-		if (next[start]! < 0) continue;
+		if (next[start] === 0) continue;
 		xs.length = 0;
 		ys.length = 0;
 		// Each crossing is unlinked as it is taken, so the walk stops back at its start.
 		let id = start;
-		while (id >= 0 && next[id]! >= 0) {
+		while (next[id]! > 0) {
 			const k = id >> 1;
 			const cx = (k % stride) - 1;
 			const cy = Math.floor(k / stride) - 1;
@@ -117,8 +118,8 @@ export function traceMask(
 			const t = padding ? 0.5 : -logits[k]! / (logits[j]! - logits[k]!);
 			xs.push(cx + 0.5 + (down ? 0 : t));
 			ys.push(cy + 0.5 + (down ? t : 0));
-			const following = next[id]!;
-			next[id] = -1;
+			const following = next[id]! - 1;
+			next[id] = 0;
 			id = following;
 		}
 		drawLoop(xs, ys, w, h, path, amount * MAX_RELAX_PASSES, 0.5);
