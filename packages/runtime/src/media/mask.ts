@@ -30,7 +30,6 @@ export type MaskOutline = { path: Path2D; width: number; height: number; smoothi
  * instead, the outline is filled on a canvas the shape of the footage.
  */
 export class MaskDecoder {
-	public errored = false;
 	public disposed = false;
 	public asset: MaskAsset;
 	public readonly initialized: Promise<void>;
@@ -47,11 +46,14 @@ export class MaskDecoder {
 	/** Whether the canvas holds the drawn frame, and its outline at the smoothing last asked for. */
 	private pictured = false;
 	private outline: MaskOutline | null = null;
+	private error: Error | undefined;
 
 	public readonly canvas = new OffscreenCanvas(0, 0);
 	private readonly ctx = this.canvas.getContext('2d')!;
 
-	public constructor(asset: MaskAsset) {
+	public get errored(): boolean { return this.error !== undefined; }
+
+	public constructor(asset: MaskAsset, public realtime = false) {
 		this.asset = asset;
 		this.stat = asset.stat;
 		this.frameRate = asset.frameRate;
@@ -70,9 +72,20 @@ export class MaskDecoder {
 			const scale = PICTURE_SIDE / Math.min(width || gridWidth, height || gridHeight);
 			this.canvas.width = Math.max(1, Math.round((width || gridWidth) * scale));
 			this.canvas.height = Math.max(1, Math.round((height || gridHeight) * scale));
-		} catch {
-			this.errored = true;
+		} catch (cause) {
+			if (!this.disposed) this.fail(cause);
 		}
+	}
+
+	private fail(cause: unknown): void {
+		this.error = new Error(`Could not decode mask ${this.asset.path}: ${String(cause)}`, { cause });
+		this.field = null;
+		this.file = null;
+		this.outline = null;
+		this.drawn = -1;
+		this.pictured = false;
+		this.canvas.width = 0;
+		this.canvas.height = 0;
 	}
 
 	/** Whether this decoder is for bytes the asset no longer has: its file went missing and was made again. */
@@ -81,22 +94,33 @@ export class MaskDecoder {
 	}
 
 	public seekTo(frame: number, frameRate: number): Promise<void> | void {
+		if (this.disposed) return;
 		const target = Math.round((frame / frameRate) * this.frameRate);
-		if (this.file) return this.draw(target);
-		if (this.errored || this.disposed) return;
+		if (this.file || this.errored) return this.draw(target);
 		return this.initialized.then(() => this.draw(target));
 	}
 
 	private draw(target: number): void {
+		if (this.disposed) return;
+		if (this.error) {
+			if (!this.realtime) throw this.error;
+			return;
+		}
 		const file = this.file;
-		if (!file || !this.field || this.disposed || file.frameCount === 0) return;
+		if (!file || !this.field || file.frameCount === 0) return;
 
 		// Past either end the nearest frame stands, as a sequence's last frame does.
 		const index = Math.min(Math.max(target, 0), file.frameCount - 1);
 		if (index === this.drawn) return;
 
 		// A frame the object was not tracked on masks nothing.
-		if (!file.field(index, this.field)) this.field.fill(-MASK_FIELD_MAX);
+		try {
+			if (!file.field(index, this.field)) this.field.fill(-MASK_FIELD_MAX);
+		} catch (cause) {
+			this.fail(cause);
+			if (!this.realtime) throw this.error;
+			return;
+		}
 		this.drawn = index;
 		this.pictured = false;
 		this.outline = null;

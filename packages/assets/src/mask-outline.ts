@@ -60,6 +60,15 @@ export function traceMask(
 	smoothing = DEFAULT_MASK_SMOOTHING,
 ): void {
 	if (width === 0 || height === 0) return;
+	// Blur and interpolation cannot introduce a positive logit into an empty field.
+	let occupied = false;
+	for (let i = 0; i < width * height; i++) {
+		if (field[i]! > 0) {
+			occupied = true;
+			break;
+		}
+	}
+	if (!occupied) return;
 	const amount = Math.min(1, Math.max(0, smoothing));
 
 	// Everything below is on the upsampled grid, padded by a cell saturated out

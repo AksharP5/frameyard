@@ -953,6 +953,7 @@ export function resolveVideoDecoder(world: World, entity: Entity): VideoDecoderI
 			existing.hasCache = hasCache;
 			existing.frameRate = getSequenceFrameRate(entity, existing.asset);
 		} else if (existing instanceof MaskDecoder) {
+			existing.realtime = hasCache;
 			existing.frameRate = getSequenceFrameRate(entity, existing.asset);
 		}
 		return existing;
@@ -969,7 +970,7 @@ export function resolveVideoDecoder(world: World, entity: Entity): VideoDecoderI
 		decoder = new SequenceDecoder(asset, hasCache);
 		decoder.frameRate = getSequenceFrameRate(entity, asset);
 	} else if (asset.type === 'MASK') {
-		decoder = new MaskDecoder(asset);
+		decoder = new MaskDecoder(asset, hasCache);
 		decoder.frameRate = getSequenceFrameRate(entity, asset);
 	} else if (asset.type === 'VIDEO') {
 		decoder = hasCache ? new VideoBuffer(asset) : new VideoExporter(asset, world.get(OriginalMedia) ?? null);
