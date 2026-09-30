@@ -78,3 +78,6 @@ NodeId = string                                     // an element's `id` in the 
 ```
 
 Time inputs take the `Time` format unless noted otherwise.
+
+For a numeric JSX ID, use `file:#id` when qualifying it, such as `intro.tsx:#2`
+for `id="2"`. Source references returned by the editor already use this form.

@@ -141,7 +141,8 @@ export function isCompositionTag(tag: string): boolean {
 
 /**
  * A source id is `file:locator`, where a numeric locator is the element's
- * position in document order and anything else is its id. The file is where the
+ * position in document order. Ambiguous string ids use `#` plus a URI-encoded
+ * id, so `file:2` is a position and `file:#2` names `id="2"`. The file is where the
  * element was last seen: an id that moved to another file reads as gone rather
  * than as some other element, which is the safe way to be wrong.
  */
@@ -152,12 +153,26 @@ export function parseSource(id: string): { file: string; locator: number | strin
   const suffix = id.slice(at + 1);
   if (!suffix) return undefined;
 
+  if (suffix.startsWith("#")) {
+    try {
+      return { file: id.slice(0, at), locator: decodeURIComponent(suffix.slice(1)) };
+    } catch {
+      return undefined;
+    }
+  }
+
   const index = Number(suffix);
   return { file: id.slice(0, at), locator: Number.isInteger(index) ? index : suffix };
 }
 
-/** The inverse of `parseSource`. */
-export const formatSource = (file: string, locator: number | string): string => `${file}:${locator}`;
+/** Keep string ids distinct from numeric positions without changing ordinary names. */
+export function formatSource(file: string, locator: number | string): string {
+  const suffix = typeof locator === "string"
+    && (Number.isInteger(Number(locator)) || locator.startsWith("#") || locator.includes(":"))
+    ? `#${encodeURIComponent(locator)}`
+    : locator;
+  return `${file}:${suffix}`;
+}
 
 
 export interface AuthoredElement {
