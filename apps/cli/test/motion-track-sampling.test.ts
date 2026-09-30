@@ -8,7 +8,7 @@ const bundle = await build({
   stdin: {
     contents: `
       export { createWorld } from 'koota';
-      export { Geometry, Computed, Cache, Keyframe, KeyframeTrack, Paint, Color, ChildOf, Effect, Animation, Opacity, Offset } from './traits';
+      export { Geometry, Computed, Cache, Keyframe, KeyframeTrack, Paint, Color, ChildOf, Effect, Animation, Opacity, Offset, UniformScale, Blur } from './traits';
       export { AnimationType } from './constants';
       export { createRuntimeWorld } from './world/create-world';
       export { motionSystem } from './systems/motion';
@@ -20,13 +20,13 @@ const bundle = await build({
 });
 const module = { exports: {} as
   Pick<typeof import('koota'), 'createWorld'>
-  & Pick<typeof import('../../../packages/runtime/src/traits'), 'Geometry' | 'Computed' | 'Cache' | 'Keyframe' | 'KeyframeTrack' | 'Paint' | 'Color' | 'ChildOf' | 'Effect' | 'Animation' | 'Opacity' | 'Offset'>
+  & Pick<typeof import('../../../packages/runtime/src/traits'), 'Geometry' | 'Computed' | 'Cache' | 'Keyframe' | 'KeyframeTrack' | 'Paint' | 'Color' | 'ChildOf' | 'Effect' | 'Animation' | 'Opacity' | 'Offset' | 'UniformScale' | 'Blur'>
   & Pick<typeof import('../../../packages/runtime/src/constants'), 'AnimationType'>
   & Pick<typeof import('../../../packages/runtime/src/world/create-world'), 'createRuntimeWorld'>
   & Pick<typeof import('../../../packages/runtime/src/systems/motion'), 'motionSystem'>
 };
 runInThisContext(`(function(module,exports){"use strict";${bundle.outputFiles[0].text}\n})`)(module, module.exports);
-const { createWorld, Geometry, Computed, Cache, Keyframe, KeyframeTrack, motionSystem, createRuntimeWorld, Paint, Color, ChildOf, Effect, Animation, AnimationType, Opacity, Offset } = module.exports;
+const { createWorld, Geometry, Computed, Cache, Keyframe, KeyframeTrack, motionSystem, createRuntimeWorld, Paint, Color, ChildOf, Effect, Animation, AnimationType, Opacity, Offset, UniformScale, Blur } = module.exports;
 
 function fixture(frames: { time: number; value: number; easing?: string }[]) {
   const world = createWorld();
@@ -135,13 +135,47 @@ test('preset animation restores authored values after a seek and an edit', () =>
     fade.destroy();
 
     const slide = world.spawn(Animation({ type: AnimationType.SLIDE_LEFT, duration: 3 }), ChildOf(node));
-    assert.equal(sample(0).offsetX, 100);
+    assert.equal(sample(0).offsetX, 112);
     node.set(Offset, { x: 24 });
     assert.equal(sample(4).offsetX, 24);
     assert.equal(sample(4).offsetY, 4);
     assert.equal(sample(4).opacity, 0.4);
     slide.destroy();
     assert.equal(sample(4).offsetX, 24);
+  } finally { world.destroy(); }
+});
+
+test('overlapping presets compose against authored opacity, scale and blur without accumulating on seeks', () => {
+  const world = createRuntimeWorld('relative-presets');
+  try {
+    const node = world.spawn(Geometry, Computed({ visibility: 1, start: 0, end: 10, origin: 0 }),
+      Opacity({ value: .8 }), UniformScale({ value: 2 }), Blur({ value: 6 }), Cache);
+    world.spawn(Animation({ type: AnimationType.FADE, duration: 5 }), ChildOf(node));
+    const slide = world.spawn(Animation({ type: AnimationType.SLIDE_UP, duration: 5 }), ChildOf(node));
+    world.spawn(Animation({ type: AnimationType.GROW, duration: 5 }), ChildOf(node));
+    world.spawn(Animation({ type: AnimationType.BLUR, duration: 5 }), ChildOf(node));
+    const sample = (frame: number) => {
+      node.set(Computed, { localTime: frame });
+      motionSystem(world);
+      const { opacity, scaleX, scaleY, blur } = node.get(Computed)!;
+      return { opacity, scaleX, scaleY, blur };
+    };
+
+    assert.deepEqual(sample(0), { opacity: 0, scaleX: 1, scaleY: 1, blur: 30 });
+    const overlapping = sample(2);
+    slide.remove(ChildOf(node));
+    const single = sample(2);
+    assert.ok(single.opacity > 0 && single.opacity < .8);
+    assert.ok(Math.abs(overlapping.opacity - single.opacity * single.opacity / .8) < 1e-12,
+      'fade and slide multiply their opacity ramps');
+    slide.add(ChildOf(node));
+    assert.deepEqual(sample(2), overlapping, 'repeating a frame starts from authored values');
+    assert.deepEqual(sample(4), { opacity: .8, scaleX: 2, scaleY: 2, blur: 6 });
+    assert.deepEqual(sample(2), overlapping, 'backward seeking does not compound the previous frame');
+    node.set(Opacity, { value: .4 });
+    node.set(UniformScale, { value: 3 });
+    node.set(Blur, { value: 8 });
+    assert.deepEqual(sample(4), { opacity: .4, scaleX: 3, scaleY: 3, blur: 8 });
   } finally { world.destroy(); }
 });
 

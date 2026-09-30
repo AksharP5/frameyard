@@ -12,11 +12,11 @@ const runtimeBuild = await build({
   stdin: {
     contents: `
       import { createRuntimeWorld, Chars, Cache, Color, Computed, FONT_WEIGHTS, Size, Source,
-        TextAlign, TextBaseline, TextStyle, Tool, ToolType, WebFonts, getWebFonts,
-        isCaption, isText, loadWebFont, colorToHex } from '@diffusionstudio/runtime';
+        TextAlign, TextBaseline, TextStyle, Tool, ToolType,
+        isCaption, isText, colorToHex } from '@diffusionstudio/runtime';
       export const runtime = { createRuntimeWorld, Chars, Cache, Color, Computed, FONT_WEIGHTS, Size, Source,
-        TextAlign, TextBaseline, TextStyle, Tool, ToolType, WebFonts, getWebFonts,
-        isCaption, isText, loadWebFont, colorToHex };
+        TextAlign, TextBaseline, TextStyle, Tool, ToolType,
+        isCaption, isText, colorToHex };
       export * as solid from 'solid-js';
       export * as kootaSolid from '@diffusionstudio/koota-solid';
       export * as keyframes from './keyframes';
@@ -59,7 +59,7 @@ const panelCode = await transform(jsx.code, { format: 'cjs' });
 
 type Controls = {
   GrowingTextArea: ComponentProps<typeof import('../../web/src/components/sidebar-right/inspector/text.tsx').GrowingTextArea>;
-  FontDropdown: ComponentProps<typeof import('../../web/src/components/sidebar-right/inspector/text.tsx').FontDropdown>;
+  FontDropdown: ComponentProps<typeof import('../../web/src/components/sidebar-right/inspector/font-picker.tsx').FontDropdown>;
   ColorOpacityRow: ComponentProps<typeof import('../../web/src/components/ui/color-opacity-row.tsx').ColorOpacityRow>;
   'Font size': ComponentProps<typeof import('../../web/src/components/ui/text-field.tsx').ControlledTextField>;
   Select: SelectProps<string>;
@@ -98,9 +98,10 @@ function fixture(paint: 'color' | 'fill' = 'color') {
     '@/engine/hooks/use-document': { useDocument: () => () => document },
     '@/engine/history': { getEditHistory },
     '@/engine/keyframes': keyframes,
+    './font-picker': { FontDropdown: capture('FontDropdown') },
     'test-renderer': {
       createComponent(component: (props: object) => unknown, props: object) {
-        if (component === module.exports.FontDropdown || component === module.exports.GrowingTextArea) {
+        if (component === module.exports.GrowingTextArea) {
           controls.set(component.name, props);
           return;
         }

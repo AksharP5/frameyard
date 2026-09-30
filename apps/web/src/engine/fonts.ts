@@ -5,7 +5,7 @@
 /**
  * The half of the font story that needs a browser the runtime cannot assume:
  * the machine's own families, behind the Local Font Access API. Web fonts and
- * loading live in `@diffusionstudio/runtime` (`getWebFonts`, `loadWebFont`),
+ * loading live in `@diffusionstudio/runtime` (`loadGoogleFonts`, `requestFont`),
  * which the CLI shares.
  */
 

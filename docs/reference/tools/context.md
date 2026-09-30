@@ -55,7 +55,7 @@ With no project open (the app sits at the dashboard) the report is just `{ rootD
 
 `projectDir` is the folder the app is editing, which is not necessarily the one a command was run from: check it before writing to source files.
 
-`fontFamilies` is what text can be drawn with right now — loaded into the world, not merely named in the source — and always includes the editor default. For every family installed on the machine, see [`fonts`](./fonts.md).
+`fontFamilies` is what text can be drawn with right now — loaded into the world, not merely named in the source — and always includes the editor default. For every family a text can name, see [`fonts`](./fonts.md).
 
 In a configured hosted build, `generations` tracks asynchronous `generate.*`
 declarations. Poll until nothing is `generating`. A `done` row's `asset` is a

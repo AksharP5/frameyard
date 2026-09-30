@@ -2,12 +2,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { platform } from "node:os";
-import { DapiError, FONT_LIMIT } from "@diffusionstudio/dapi";
+import { DapiError, FONT_LIMIT, toolByName } from "@diffusionstudio/dapi";
+import { googleFontUrl, loadGoogleFonts, POPULAR_FONTS } from "../../../../../packages/runtime/src/fonts/google";
 
 import type { FontFamily } from "@diffusionstudio/dapi";
 import type { MainHandler } from "../handler";
+
+const POPULAR_RANK = new Map<string, number>(POPULAR_FONTS.map((family, index) => [family, index]));
 
 // JXA script that walks every registered font family via NSFontManager and
 // emits each variant's CSS-style weight, italic flag, and CSS `local()` source.
@@ -49,7 +52,7 @@ function run() {
         source: "local('" + fullName + "'), local('" + fontName + "')",
       });
     }
-    if (variants.length > 0) out.push({ family: family, variants: variants });
+    if (variants.length > 0) out.push({ family: family, provider: "local", variants: variants });
   }
   return JSON.stringify(out);
 }
@@ -102,7 +105,7 @@ export function parseFontconfigFonts(output: string): FontFamily[] {
       .map((name) => `local('${name!.replaceAll("\\", "\\\\").replaceAll("'", "\\'")}')`)
       .join(", ");
     const style = slant === 0 ? "normal" : "italic";
-    const entry = families.get(family) ?? { family, variants: [] };
+    const entry = families.get(family) ?? { family, provider: "local", variants: [] };
     families.set(family, entry);
     const variant = { weight: String(cssWeight(weight)), style, source } as const;
     if (entry.variants.some((item) =>
@@ -115,47 +118,71 @@ export function parseFontconfigFonts(output: string): FontFamily[] {
   return [...families.values()].sort((a, b) => a.family.localeCompare(b.family));
 }
 
-function listLocalFonts(): FontFamily[] {
+async function listLocalFonts(signal: AbortSignal): Promise<FontFamily[]> {
   const system = platform();
   if (system !== "darwin" && system !== "linux") {
     throw new DapiError("unsupported", "fonts is supported on macOS and Linux.");
   }
 
   const linux = system === "linux";
-  const result = spawnSync(
-    linux ? "fc-list" : "osascript",
-    linux ? ["--format", FONTCONFIG_FORMAT] : ["-l", "JavaScript", "-e", LIST_FONTS_JXA],
-    { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
-  );
-  if (result.error) {
-    throw new DapiError(
-      "unsupported",
-      linux ? `Unable to run fc-list. Install fontconfig: ${result.error.message}` : result.error.message,
-      { cause: result.error },
+  const output = await new Promise<string>((resolve, reject) => {
+    execFile(
+      linux ? "fc-list" : "osascript",
+      linux ? ["--format", FONTCONFIG_FORMAT] : ["-l", "JavaScript", "-e", LIST_FONTS_JXA],
+      { encoding: "utf8", maxBuffer: 16 * 1024 * 1024, signal },
+      (error, stdout) => {
+        if (!error) { resolve(stdout); return; }
+        if (signal.aborted) { reject(error); return; }
+        reject(new DapiError("unsupported", linux ? `Unable to list local fonts with fc-list: ${error.message}` : error.message, { cause: error }));
+      },
     );
-  }
-  if (result.status !== 0) {
-    throw new Error(result.stderr.trim() || "Failed to enumerate fonts.");
-  }
+  });
   return linux
-    ? parseFontconfigFonts(result.stdout)
-    : JSON.parse(result.stdout.trim()) as FontFamily[];
+    ? parseFontconfigFonts(output)
+    : toolByName("fonts").output.shape.families.parse(JSON.parse(output.trim()));
 }
 
-export const fonts: MainHandler<"fonts"> = async ({ family, weights, style, limit = FONT_LIMIT }) => {
+export const fonts: MainHandler<"fonts"> = async ({ family, provider, popular, weights, style, limit = FONT_LIMIT }, ctx) => {
+  ctx.signal.throwIfAborted();
   const pattern = family?.toLowerCase();
   const wanted = weights && weights.length > 0 ? new Set(weights) : null;
+  const matches = (name: string) => (!pattern || name.toLowerCase().includes(pattern)) && (!popular || POPULAR_RANK.has(name));
 
   const families: FontFamily[] = [];
-  for (const entry of listLocalFonts()) {
-    if (pattern && !entry.family.toLowerCase().includes(pattern)) continue;
-    const variants = entry.variants.filter((variant) => {
-      if (wanted && !wanted.has(variant.weight)) return false;
-      if (style && variant.style !== style) return false;
-      return true;
+  const push = (entry: FontFamily) => {
+    const variants = entry.variants.filter(variant => (!wanted || wanted.has(variant.weight)) && (!style || variant.style === style));
+    if (variants.length) families.push({ ...entry, variants });
+  };
+
+  const google = provider === "local" ? null : await loadGoogleFonts();
+  for (const font of google?.values() ?? []) {
+    if (!matches(font.family)) continue;
+    push({
+      family: font.family,
+      provider: "google",
+      category: font.category,
+      stylesheet: googleFontUrl(font),
+      variants: [
+        ...font.weights.map(weight => ({ weight: String(weight), style: "normal" as const })),
+        ...font.italics.map(weight => ({ weight: String(weight), style: "italic" as const })),
+      ],
     });
-    if (variants.length === 0) continue;
-    families.push({ family: entry.family, variants });
   }
+
+  if (provider !== "google" && !popular) {
+    const local = await listLocalFonts(ctx.signal).catch(error => {
+      ctx.signal.throwIfAborted();
+      if (provider === "local") throw error;
+      return [];
+    });
+    for (const entry of local) {
+      if (entry.family.startsWith(".") || google?.has(entry.family) || !matches(entry.family)) continue;
+      push(entry);
+    }
+  }
+
+  ctx.signal.throwIfAborted();
+  const rank = (name: string) => POPULAR_RANK.get(name) ?? Infinity;
+  families.sort((left, right) => rank(left.family) - rank(right.family) || left.family.localeCompare(right.family));
   return { families: families.slice(0, limit), total: families.length };
 };

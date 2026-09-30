@@ -54,7 +54,7 @@ editing, and export still work. See [local setup](../../linux.md).
 | [`whoami`](./whoami.md) | `dapi whoami` | Hosted account; null in local mode |
 | [`logs`](./logs.md) | `dapi logs` | App logs |
 | [`screenshot`](./screenshot.md) | `dapi screenshot` | Window screenshot |
-| [`fonts`](./fonts.md) | `dapi fonts` | Local fonts |
+| [`fonts`](./fonts.md) | `dapi fonts` | Fonts |
 | [`report`](./report.md) | `dapi report` | Report a bug |
 
 How the surface is divided:

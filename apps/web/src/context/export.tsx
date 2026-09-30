@@ -12,8 +12,8 @@ import { useEngineContext } from "@/engine";
 import { ProjectConfig } from "@/engine/traits";
 import { getExportError, resolveExportSettings } from "@/engine/export-settings";
 import { useProject } from "@/context/project";
-import { ExportProgress, type ExportConfig } from "@/components/sidebar-right/inspector/export-progress";
-import { renderScene, renderOverlay, cancelRender } from "@/context/render";
+import { ExportProgress } from "@/components/sidebar-right/inspector/export-progress";
+import { renderScene, renderOverlay, cancelRender, type ExportConfig } from "@/context/render";
 import { MIME_TYPES } from "@/components/sidebar-right/inspector/export-templates";
 
 import type { Entity } from "koota";
@@ -139,12 +139,9 @@ export function ExportProvider(props: { children: JSX.Element }) {
       {props.children}
       <ExportProgress
         open={!!renderOverlay()}
+        audioOnly={renderOverlay()?.audioOnly ?? false}
         progress={renderOverlay()?.progress ?? 0}
         remaining={renderOverlay()?.remaining}
-        config={renderOverlay()?.config as ExportConfig | undefined}
-        width={renderOverlay()?.width ?? 0}
-        height={renderOverlay()?.height ?? 0}
-        duration={renderOverlay()?.duration ?? 0}
         onCancel={cancelRender}
       />
     </ExportContext.Provider>
