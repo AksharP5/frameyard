@@ -8,6 +8,7 @@ import { Icon } from "@/components/ui/icon";
 import { useAuth } from "@/context/auth";
 import { useAvatar } from "@/hooks/use-avatar";
 import { cx } from "@/lib/cva";
+import { WorkspaceActivityButton } from '@/components/workspaces/activity';
 
 type DashboardSidebarItemProps = {
   icon: string;
@@ -62,6 +63,7 @@ export function DashboardSidebarHeader() {
           </p>
         </div>
       </div>
+      <WorkspaceActivityButton />
     </div>
   );
 }

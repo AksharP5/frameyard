@@ -6,13 +6,19 @@ import { app, BrowserWindow, dialog, nativeImage, session, shell } from "electro
 import { userDataDirectory } from "./app-paths";
 import { isAbsolute, join } from "node:path";
 import { existsSync } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { abortFileWrite, closeFileWrite, openFileWrite } from "./file-write";
 import type { OpenFileWrite } from "./file-write";
 import { allowsMediaCheck, allowsMediaRequest, isEditorUrl, isExternalWebUrl } from "./window-security";
 import { DapiServer } from "./dapi/server";
-import { agentChatEndpoint, deleteProjectChats, startAgentChat, stopAgentChat } from "./agent-chat";
+import { RendererCalls } from "./dapi/renderer-calls";
+import { Workspaces } from "./workspaces";
+import { toolByName } from "@diffusionstudio/dapi";
+import type { ToolArgs, ToolOutput } from "@diffusionstudio/dapi";
+import type { CodexRequest } from "./codex-contracts";
+import { agentChatEndpoint, cancelProjectAgents, deleteProjectChats, startAgentChat, stopAgentChat } from "./agent-chat";
 import { cliStatus, installCli, uninstallCli } from "./cli-install";
 import { applyMcp, healMcpRegistrations, mcpStatus } from "./mcp-install";
 import { enableHeadless } from "./headless";
@@ -58,7 +64,7 @@ import {
 import type { DeepLinkChannel } from "./main-channels";
 import type { LogEntry } from "@diffusionstudio/dapi";
 
-const DEV_URL = "http://localhost:5173";
+const DEV_URL = process.env.FRAMEYARD_DEV_URL ?? "http://localhost:5173";
 const AUTH_PROTOCOL = "diffusion";
 const MACOS_CORNER_RADIUS = 18;
 const MACOS_BACKDROP = { blur: 80, red: 0.07, green: 0.07, blue: 0.07, alpha: 0.9 };
@@ -97,20 +103,33 @@ if (process.platform === "darwin") {
   ));
 }
 
-function applyCornerRadius(radius: number) {
-  if (!setNativeCornerRadius || !mainWindow || mainWindow.isDestroyed()) return;
-  setNativeCornerRadius(mainWindow.getNativeWindowHandle(), radius);
+function applyCornerRadius(radius: number, window = mainWindow) {
+  if (!setNativeCornerRadius || !window || window.isDestroyed()) return;
+  setNativeCornerRadius(window.getNativeWindowHandle(), radius);
 }
 
-function applyBackdrop() {
-  if (!setNativeBackdrop || !mainWindow || mainWindow.isDestroyed()) return;
+function applyBackdrop(window = mainWindow) {
+  if (!setNativeBackdrop || !window || window.isDestroyed()) return;
   const { blur, red, green, blue, alpha } = MACOS_BACKDROP;
-  setNativeBackdrop(mainWindow.getNativeWindowHandle(), blur, red, green, blue, alpha);
+  setNativeBackdrop(window.getNativeWindowHandle(), blur, red, green, blue, alpha);
 }
 
-const openWrites = new Map<string, OpenFileWrite>();
+const openWrites = new Map<string, { entry: OpenFileWrite; owner: number }>();
+
+function ownedWrite(id: string, owner: number): OpenFileWrite | undefined {
+  const write = openWrites.get(id);
+  if (write && write.owner !== owner) throw new Error("This output belongs to another project window");
+  return write?.entry;
+}
+
+async function abortWindowWrites(owner: number): Promise<void> {
+  const writes = [...openWrites].filter(([, write]) => write.owner === owner);
+  for (const [id] of writes) openWrites.delete(id);
+  await Promise.all(writes.map(([, write]) => abortFileWrite(write.entry).catch(error => console.error("Could not release interrupted output", error))));
+}
 
 let mainWindow: BrowserWindow | null = null;
+const editorWindows = new Set<BrowserWindow>();
 
 // Deep links that arrived before the renderer could take them, keyed by the
 // channel they belong to so auth and checkout never drain each other's link.
@@ -146,6 +165,7 @@ function captureConsole(window: BrowserWindow) {
   window.webContents.on("render-process-gone", (_event, details) => {
     pushLog("error", `Renderer process gone: ${details.reason} (exit code ${details.exitCode})`, "");
     void disposeOriginalVideos(window.webContents.id);
+    void abortWindowWrites(window.webContents.id);
   });
 }
 
@@ -193,9 +213,9 @@ function takePendingDeepLink(channel: DeepLinkChannel): string | null {
   return url;
 }
 
-async function setFileInputFiles(selector: string, absolutePath: string) {
-  if (!mainWindow) throw new Error("No main window");
-  const wc = mainWindow.webContents;
+async function setFileInputFiles(window: BrowserWindow | null, selector: string, absolutePath: string) {
+  if (!window) throw new Error("No editor window");
+  const wc = window.webContents;
   // Stay attached between calls — attach/detach dominates the cost of a
   // transfer, and file materialization happens in bursts.
   if (!wc.debugger.isAttached()) wc.debugger.attach("1.3");
@@ -211,8 +231,8 @@ async function setFileInputFiles(selector: string, absolutePath: string) {
   });
 }
 
-function createWindow(show = true) {
-  mainWindow = new BrowserWindow({
+function createWindow(show = true, background = false): BrowserWindow {
+  const window = new BrowserWindow({
     show: false,
     width: 1200,
     height: 800,
@@ -231,54 +251,62 @@ function createWindow(show = true) {
     },
   });
 
-  captureConsole(mainWindow);
+  if (!background) mainWindow = window;
+  editorWindows.add(window);
+  captureConsole(window);
 
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+  window.webContents.setWindowOpenHandler(({ url }) => {
     openExternalWebUrl(url);
     return { action: "deny" };
   });
-  mainWindow.webContents.on("will-navigate", (event, url) => {
+  window.webContents.on("will-navigate", (event, url) => {
     if (isEditorUrl(url, editorUrl())) return;
     event.preventDefault();
     openExternalWebUrl(url);
   });
 
-  applyCornerRadius(MACOS_CORNER_RADIUS);
-  applyBackdrop();
+  applyCornerRadius(MACOS_CORNER_RADIUS, window);
+  applyBackdrop(window);
 
-  mainWindow.once("ready-to-show", () => {
-    applyCornerRadius(MACOS_CORNER_RADIUS);
-    applyBackdrop();
+  window.once("ready-to-show", () => {
+    applyCornerRadius(MACOS_CORNER_RADIUS, window);
+    applyBackdrop(window);
 
     if (show) {
-      mainWindow?.show();
+      window?.show();
     }
   });
 
-  mainWindow.on("show", () => {
-    applyCornerRadius(MACOS_CORNER_RADIUS);
-    applyBackdrop();
+  window.on("hide", () => mainBridge.emit(window, MAIN_CHANNELS.WORKSPACE_VISIBILITY, { visible: false }));
+  window.on("show", () => {
+    mainBridge.emit(window, MAIN_CHANNELS.WORKSPACE_VISIBILITY, { visible: true });
+    applyCornerRadius(MACOS_CORNER_RADIUS, window);
+    applyBackdrop(window);
   });
 
-  mainWindow.on("enter-full-screen", () => {
-    applyCornerRadius(0);
-    mainBridge.emit(mainWindow, MAIN_CHANNELS.WINDOW_FULLSCREEN_CHANGE, { fullscreen: true });
+  window.on("enter-full-screen", () => {
+    applyCornerRadius(0, window);
+    mainBridge.emit(window, MAIN_CHANNELS.WINDOW_FULLSCREEN_CHANGE, { fullscreen: true });
   });
-  mainWindow.on("leave-full-screen", () => {
-    applyCornerRadius(MACOS_CORNER_RADIUS);
-    mainBridge.emit(mainWindow, MAIN_CHANNELS.WINDOW_FULLSCREEN_CHANGE, { fullscreen: false });
+  window.on("leave-full-screen", () => {
+    applyCornerRadius(MACOS_CORNER_RADIUS, window);
+    mainBridge.emit(window, MAIN_CHANNELS.WINDOW_FULLSCREEN_CHANGE, { fullscreen: false });
   });
-  const mediaOwner = mainWindow.webContents.id;
-  mainWindow.webContents.once("destroyed", () => { void disposeOriginalVideos(mediaOwner); });
-  mainWindow.on("closed", () => {
-    mainWindow = null;
+  const mediaOwner = window.webContents.id;
+  window.webContents.once("destroyed", () => { void disposeOriginalVideos(mediaOwner); void abortWindowWrites(mediaOwner); });
+  window.on("closed", () => {
+    editorWindows.delete(window);
+    if (mainWindow === window) mainWindow = null;
   });
 
   if (!app.isPackaged) {
-    mainWindow.loadURL(DEV_URL);
+    const url = new URL(DEV_URL);
+    if (background) url.searchParams.set("workspace", "background");
+    void window.loadURL(url.href);
   } else {
-    mainWindow.loadFile(join(app.getAppPath(), "web", "index.html"));
+    void window.loadFile(join(app.getAppPath(), "web", "index.html"), background ? { query: { workspace: "background" } } : undefined);
   }
+  return window;
 }
 
 if (process.defaultApp && process.argv.length >= 2) {
@@ -291,16 +319,70 @@ if (process.defaultApp && process.argv.length >= 2) {
 
 if (app.requestSingleInstanceLock()) {
   mainBridge.authorizeSender((event) =>
-    event.sender === mainWindow?.webContents &&
+    [...editorWindows].some(window => event.sender === window.webContents) &&
     event.senderFrame === event.sender.mainFrame &&
     isEditorUrl(event.senderFrame?.url ?? "", editorUrl()));
-  const codex = registerAgentBridge(app.getPath("userData"), () => mainWindow);
+  let legacyAgentWindow: BrowserWindow | null = null;
+  let legacyAgentProject: string | undefined;
+  const renderer = new RendererCalls();
+  const workspaces = new Workspaces({
+    createWindow: () => createWindow(false, true),
+    open: async (window, dir) => toolByName("open").output.parse(await renderer.call("open", { dir }, new AbortController().signal, window)),
+    changed: result => {
+      for (const window of editorWindows) mainBridge.emit(window, MAIN_CHANNELS.WORKSPACES_CHANGED, result);
+    },
+    release: unwatchProject,
+  });
+  const codex = registerAgentBridge(app.getPath("userData"), dir => dir ? workspaces.getWindow(dir) : mainWindow, {
+    window: (dir, signal) => workspaces.open(dir, signal),
+    run: (dir, name, signal, operation, heavy) => workspaces.run(dir, name, signal, operation, heavy),
+    externalTurn: (dir, active) => workspaces.setAgent(dir, active),
+    event: event => {
+      if (event.type === "turn") workspaces.setAgent(event.dir, event.status === "started", event.error);
+    },
+  });
+  const requestCodex = async (request: CodexRequest) => {
+    if (request.method === "send" && !request.input.expectedTurnId) {
+      const dir = await realpath(request.input.dir);
+      const window = await workspaces.open(dir);
+      const context = toolByName("context").output.parse(await renderer.call("context", {}, new AbortController().signal, window));
+      if (workspaces.list().workspaces.some(value => value.dir === dir && value.agentActive)) throw new Error("Another agent is already working in this project");
+      request = { ...request, input: { ...request.input, dir, context: { ...context, ...request.input.context as object } } };
+      workspaces.setAgent(context.projectDir!, true);
+      try { return await codex.request(request); }
+      catch (error) { workspaces.setAgent(context.projectDir!, false, error instanceof Error ? error.message : String(error)); throw error; }
+    }
+    return codex.request(request);
+  };
+  const workspaceAction = async (input: ToolArgs<"workspace">, signal = new AbortController().signal): Promise<ToolOutput<"workspace">> => {
+    const request = toolByName("workspace").input.parse(input);
+    if (request.action === "list") return workspaces.list();
+    const dir = request.dir ?? request.project;
+    if (!dir) throw new Error("Supply the project's directory");
+    if (request.action === "open") await workspaces.open(dir, signal);
+    if (request.action === "show") await workspaces.show(dir, signal);
+    if (request.action === "cancel") {
+      await Promise.all([workspaces.cancel(dir), requestCodex({ method: "cancel", input: { dir } }), cancelProjectAgents(dir)]);
+    }
+    if (request.action === "close") await workspaces.close(dir);
+    if (request.action === "send") {
+      const response = await requestCodex({ method: "send", input: { dir, text: request.message!, context: {} } });
+      if (response.method !== "send") throw new Error("Codex returned an unexpected response");
+      return { ...workspaces.list(), ...response.result };
+    }
+    return workspaces.list();
+  };
+  mainBridge.handle(MAIN_CHANNELS.CODEX_REQUEST, requestCodex);
+  mainBridge.handle(MAIN_CHANNELS.WORKSPACES_LIST, () => workspaces.list());
+  mainBridge.handle(MAIN_CHANNELS.WORKSPACES_ACTION, input => workspaceAction(input));
   const dapi = new DapiServer({
-    version: app.getVersion(),
-    logs: () => logBuffer,
-    docsDir: docsDir(),
-    onFirstConnection: enableHeadless,
-    runAgentTool: codex.runTool,
+    version: app.getVersion(), logs: () => logBuffer, docsDir: docsDir(),
+    onFirstConnection: enableHeadless, runAgentTool: codex.runTool,
+    renderer, workspaces, workspaceAction,
+    getWindow: () => legacyAgentWindow && !legacyAgentWindow.isDestroyed() ? legacyAgentWindow : mainWindow,
+    getDefaultProject: () => legacyAgentProject,
+    onOpenProject: (window, show) => { legacyAgentWindow = window; legacyAgentProject = workspaces.directory(window); if (show) { window.show(); window.focus(); } },
+    port: process.env.FRAMEYARD_MCP_PORT === undefined ? undefined : Number(process.env.FRAMEYARD_MCP_PORT),
   });
   app.on("second-instance", (_event, argv) => {
     const url = findProtocolUrl(argv);
@@ -353,10 +435,11 @@ if (app.requestSingleInstanceLock()) {
   mainBridge.handle(MAIN_CHANNELS.CHECKOUT_GET_PENDING_CALLBACK, () =>
     takePendingDeepLink(MAIN_CHANNELS.CHECKOUT_CALLBACK),
   );
-  mainBridge.handle(MAIN_CHANNELS.WINDOW_IS_FULLSCREEN, () => mainWindow?.isFullScreen() ?? false);
-  mainBridge.handle(MAIN_CHANNELS.WINDOW_CAPTURE, async () => {
-    if (!mainWindow || mainWindow.isDestroyed()) throw new Error("No main window");
-    const image = await mainWindow.webContents.capturePage(undefined, { stayHidden: true });
+  mainBridge.handle(MAIN_CHANNELS.WINDOW_IS_FULLSCREEN, (_input, event) => BrowserWindow.fromWebContents(event.sender)?.isFullScreen() ?? false);
+  mainBridge.handle(MAIN_CHANNELS.WINDOW_CAPTURE, async (_input, event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window || window.isDestroyed()) throw new Error("No editor window");
+    const image = await window.webContents.capturePage(undefined, { stayHidden: true });
     const { width, height } = image.getSize();
     const png = image.toPNG();
     // A plain Uint8Array over the PNG, so the renderer sees bytes and not a Buffer.
@@ -369,12 +452,12 @@ if (app.requestSingleInstanceLock()) {
   mainBridge.handle(MAIN_CHANNELS.CLI_STATUS, () => cliStatus());
   mainBridge.handle(MAIN_CHANNELS.CLI_INSTALL, () => installCli());
   mainBridge.handle(MAIN_CHANNELS.CLI_UNINSTALL, () => uninstallCli());
-  mainBridge.handle(MAIN_CHANNELS.PROJECTS_PICK_ROOT, () => pickRoot(mainWindow));
-  mainBridge.handle(MAIN_CHANNELS.PROJECTS_PICK_FOLDER, () => pickFolder(mainWindow));
+  mainBridge.handle(MAIN_CHANNELS.PROJECTS_PICK_ROOT, (_input, event) => pickRoot(BrowserWindow.fromWebContents(event.sender)));
+  mainBridge.handle(MAIN_CHANNELS.PROJECTS_PICK_FOLDER, (_input, event) => pickFolder(BrowserWindow.fromWebContents(event.sender)));
   mainBridge.handle(MAIN_CHANNELS.PROJECTS_DEFAULT_ROOT, () => defaultRoot(mainWindow));
   mainBridge.handle(MAIN_CHANNELS.PROJECTS_SCAN, ({ root }) => scanProjects(root));
   mainBridge.handle(MAIN_CHANNELS.PROJECTS_GET, ({ dir }) => getProject(dir));
-  mainBridge.handle(MAIN_CHANNELS.PROJECTS_INIT, ({ dir }) => initProject(mainWindow, dir));
+  mainBridge.handle(MAIN_CHANNELS.PROJECTS_INIT, ({ dir }, event) => initProject(BrowserWindow.fromWebContents(event.sender), dir));
   mainBridge.handle(MAIN_CHANNELS.PROJECTS_RESOLVE, ({ dir }) => resolveProject(dir));
   mainBridge.handle(MAIN_CHANNELS.PROJECTS_CREATE, ({ root, displayName }) =>
     createProject(root, displayName),
@@ -384,9 +467,13 @@ if (app.requestSingleInstanceLock()) {
   mainBridge.handle(MAIN_CHANNELS.PROJECTS_DELETE, ({ dir }) => deleteProject(dir).then(deleteProjectChats));
   mainBridge.handle(MAIN_CHANNELS.PROJECTS_COMPILE, ({ dir }) => compileProject(dir));
   mainBridge.handle(MAIN_CHANNELS.PROJECTS_WRITE, ({ dir, edits }) => writeProject(dir, edits));
-  mainBridge.handle(MAIN_CHANNELS.PROJECTS_WATCH, ({ dir }, event) =>
-    watchProject(BrowserWindow.fromWebContents(event.sender), dir),
-  );
+  mainBridge.handle(MAIN_CHANNELS.PROJECTS_WATCH, async ({ dir }, event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window) throw new Error("No editor window");
+    await workspaces.adopt(window, dir);
+    if (window === mainWindow) { legacyAgentProject = await realpath(dir); legacyAgentWindow = window; }
+    watchProject(window, dir);
+  });
   mainBridge.handle(MAIN_CHANNELS.PROJECTS_UNWATCH, ({ dir }) => unwatchProject(dir));
   mainBridge.handle(MAIN_CHANNELS.PROJECTS_MANIFEST_READ, ({ dir }) => readManifest(dir));
   mainBridge.handle(MAIN_CHANNELS.PROJECTS_MANIFEST_WRITE, ({ dir, manifest }) => writeManifest(dir, manifest));
@@ -396,28 +483,28 @@ if (app.requestSingleInstanceLock()) {
   mainBridge.handle(MAIN_CHANNELS.PROJECTS_FS_STAT, ({ dir, source }) => statEntry(dir, source));
   mainBridge.handle(MAIN_CHANNELS.PROJECTS_FS_REMOVE, ({ dir, path }) => removeEntry(dir, path));
   mainBridge.handle(MAIN_CHANNELS.PROJECTS_FS_REAL_PATH, ({ dir, source }) => realPathEntry(dir, source));
-  mainBridge.handle(MAIN_CHANNELS.FILE_TRANSFER, ({ selector, absolutePath }) =>
-    setFileInputFiles(selector, absolutePath),
+  mainBridge.handle(MAIN_CHANNELS.FILE_TRANSFER, ({ selector, absolutePath }, event) =>
+    setFileInputFiles(BrowserWindow.fromWebContents(event.sender), selector, absolutePath),
   );
 
-  mainBridge.handle(MAIN_CHANNELS.FILE_WRITE_OPEN, async ({ path, exclusive }) => {
+  mainBridge.handle(MAIN_CHANNELS.FILE_WRITE_OPEN, async ({ path, exclusive }, event) => {
     if (!isAbsolute(path)) throw new Error(`The output path must be absolute (got "${path}").`);
     // Bytes stay in a temp file until publishing. An exclusive write fails if
     // another process claims the output name while encoding.
     const entry = await openFileWrite(path, exclusive === true);
     const id = randomUUID();
-    openWrites.set(id, entry);
+    openWrites.set(id, { entry, owner: event.sender.id });
     return { id };
   });
 
-  mainBridge.handle(MAIN_CHANNELS.FILE_WRITE_CHUNK, async ({ id, data, position }) => {
-    const entry = openWrites.get(id);
+  mainBridge.handle(MAIN_CHANNELS.FILE_WRITE_CHUNK, async ({ id, data, position }, event) => {
+    const entry = ownedWrite(id, event.sender.id);
     if (!entry) throw new Error(`No open file for write id ${id}`);
     await entry.handle.write(data, 0, data.byteLength, position);
   });
 
-  mainBridge.handle(MAIN_CHANNELS.FILE_WRITE_CLOSE, async ({ id }) => {
-    const entry = openWrites.get(id);
+  mainBridge.handle(MAIN_CHANNELS.FILE_WRITE_CLOSE, async ({ id }, event) => {
+    const entry = ownedWrite(id, event.sender.id);
     if (!entry) return;
     openWrites.delete(id);
     await closeFileWrite(entry, noteRenamed);
@@ -425,8 +512,8 @@ if (app.requestSingleInstanceLock()) {
 
   // Abort drops only the temp file. A destination created during encoding
   // belongs to the other writer and is left alone.
-  mainBridge.handle(MAIN_CHANNELS.FILE_WRITE_ABORT, async ({ id }) => {
-    const entry = openWrites.get(id);
+  mainBridge.handle(MAIN_CHANNELS.FILE_WRITE_ABORT, async ({ id }, event) => {
+    const entry = ownedWrite(id, event.sender.id);
     if (!entry) return;
     openWrites.delete(id);
     await abortFileWrite(entry);
@@ -440,12 +527,12 @@ if (app.requestSingleInstanceLock()) {
 
     setupAppMenu();
     session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
-      const trusted = !!mainWindow && contents === mainWindow.webContents && details.isMainFrame && isEditorUrl(details.requestingUrl, editorUrl());
+      const trusted = [...editorWindows].some(window => contents === window.webContents) && details.isMainFrame && isEditorUrl(details.requestingUrl, editorUrl());
       const types = "mediaTypes" in details ? details.mediaTypes : undefined;
       callback(trusted && (permission !== "media" || allowsMediaRequest(types)));
     });
     session.defaultSession.setPermissionCheckHandler((contents, permission, _origin, details) => {
-      const trusted = !!mainWindow && contents === mainWindow.webContents && details.isMainFrame &&
+      const trusted = !!contents && [...editorWindows].some(window => contents === window.webContents) && details.isMainFrame &&
         isEditorUrl(details.requestingUrl ?? contents.getURL(), editorUrl());
       return trusted && (permission !== "media" || allowsMediaCheck(details.mediaType));
     });
@@ -476,6 +563,7 @@ if (app.requestSingleInstanceLock()) {
     event.preventDefault();
     if (shutdown === "stopping") return;
     shutdown = "stopping";
+    workspaces.dispose();
     codex.dispose();
     unwatchAll();
     stopAgentChat();

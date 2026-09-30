@@ -10,4 +10,7 @@ import { agentTool } from "./agent-tool";
 import type { MainHandlers } from "../handler";
 
 /** Every tool main answers itself, keyed by its catalog name. */
-export const mainHandlers: MainHandlers = { logs, fonts, report, agent_tool: agentTool };
+export const mainHandlers: MainHandlers = { logs, fonts, report, agent_tool: agentTool, workspace: async (args, ctx) => {
+  if (!ctx.workspace) throw new Error("Project workspaces are unavailable");
+  return ctx.workspace(args);
+} };

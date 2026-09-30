@@ -10,7 +10,7 @@
 // Tool calls from the MCP server use their own wire (DAPI_WIRE in
 // @diffusionstudio/dapi), in the other direction: main asks, the renderer answers.
 import type { AnimationRequest, AnimationResponse } from "./animation-contracts";
-import type { LogEntry, MediaTranscribeResult, ScreenshotResult } from "@diffusionstudio/dapi";
+import type { LogEntry, MediaTranscribeResult, ScreenshotResult, ToolArgs, ToolOutput } from "@diffusionstudio/dapi";
 import type { SourceEdit, WriteResult } from "./edit-types";
 import type { CodexRequest, CodexResponse, CodexEvent, CodexToolResult } from "./codex-contracts";
 import type { CatalogRequest, CatalogResponse } from "./hyperframes-contracts";
@@ -59,6 +59,8 @@ export const MAIN_CHANNELS = {
   MEDIA_ORIGINAL_VIDEO_READ: "media:original-video-read",
   MEDIA_ORIGINAL_VIDEO_CLOSE: "media:original-video-close",
   CODEX_REQUEST: "codex:request",
+  WORKSPACES_LIST: "workspaces:list",
+  WORKSPACES_ACTION: "workspaces:action",
   AGENT_TOOL_CALL: "agent:tool-call",
   EDITOR_TOOL_RESULT: "editor:tool-result",
   HYPERFRAMES_REQUEST: "hyperframes:request",
@@ -112,6 +114,9 @@ export const MAIN_CHANNELS = {
   WINDOW_FULLSCREEN_CHANGE: "window:fullscreen-change",
   PROJECTS_CHANGED: "projects:changed",
   CODEX_EVENT: "codex:event",
+  WORKSPACES_CHANGED: "workspaces:changed",
+  WORKSPACE_VISIBILITY: "workspace:visibility",
+  EDITOR_TOOL_CANCEL: "editor:tool-cancel",
   EDITOR_TOOL: "editor:tool",
   MEDIA_PLAYBACK_PROGRESS: "media:playback-progress",
 } as const;
@@ -208,6 +213,8 @@ export type DeepLinkChannel =
   typeof MAIN_CHANNELS.AUTH_CALLBACK | typeof MAIN_CHANNELS.CHECKOUT_CALLBACK;
 
 export type MainRequestMap = {
+  [MAIN_CHANNELS.WORKSPACES_LIST]: { request: void; response: ToolOutput<"workspace"> };
+  [MAIN_CHANNELS.WORKSPACES_ACTION]: { request: ToolArgs<"workspace">; response: ToolOutput<"workspace"> };
   [MAIN_CHANNELS.CODEX_REQUEST]: { request: CodexRequest; response: CodexResponse };
   [MAIN_CHANNELS.AGENT_TOOL_CALL]: { request: { dir: string; name: string; args: unknown }; response: CodexToolResult };
   [MAIN_CHANNELS.EDITOR_TOOL_RESULT]: { request: { id: string; result: CodexToolResult }; response: void };
@@ -394,6 +401,9 @@ export type FsStat = { size: number; mtime: number };
 export type MainRequestChannel = keyof MainRequestMap;
 
 export type MainEventMap = {
+  [MAIN_CHANNELS.WORKSPACES_CHANGED]: ToolOutput<"workspace">;
+  [MAIN_CHANNELS.WORKSPACE_VISIBILITY]: { visible: boolean };
+  [MAIN_CHANNELS.EDITOR_TOOL_CANCEL]: { id: string };
   [MAIN_CHANNELS.MEDIA_PLAYBACK_PROGRESS]: PlaybackProgress;
   [MAIN_CHANNELS.CODEX_EVENT]: CodexEvent;
   [MAIN_CHANNELS.EDITOR_TOOL]: EditorToolRequest;

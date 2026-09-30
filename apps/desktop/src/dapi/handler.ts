@@ -2,12 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import type { AgentToolResult, LogEntry, ToolArgs, ToolResult } from "@diffusionstudio/dapi";
+import type { AgentToolResult, LogEntry, ToolArgs, ToolResult, ToolOutput } from "@diffusionstudio/dapi";
 
 /** What a main-process handler gets besides its arguments. */
 export type MainContext = {
   /** Fires when the caller cancels or goes away. */
   signal: AbortSignal;
+  workspace?(request: ToolArgs<"workspace">): Promise<ToolOutput<"workspace">>;
   /** The app's console buffer, oldest first. */
   logs(): LogEntry[];
   /** The app's version. */
@@ -17,7 +18,7 @@ export type MainContext = {
 };
 
 /** The tools that need the file system or a child process, not a window. */
-export type MainToolName = "logs" | "fonts" | "report" | "agent_tool";
+export type MainToolName = "logs" | "fonts" | "report" | "agent_tool" | "workspace";
 
 export type MainHandler<N extends MainToolName> = (args: ToolArgs<N>, ctx: MainContext) => Promise<ToolResult<N>>;
 

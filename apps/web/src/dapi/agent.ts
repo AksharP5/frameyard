@@ -48,13 +48,19 @@ export async function addAgentAsset(path: string, start?: number, fit?: "contain
 }
 
 export function registerAgentTools() {
-  return mainBridge.handle(MAIN_CHANNELS.EDITOR_TOOL, async (request) => {
+  const controllers = new Map<string, AbortController>();
+  const cancel = mainBridge.handle(MAIN_CHANNELS.EDITOR_TOOL_CANCEL, ({ id }) => controllers.get(id)?.abort());
+  const unregister = mainBridge.handle(MAIN_CHANNELS.EDITOR_TOOL, async (request) => {
+    const controller = new AbortController();
+    controllers.set(request.id, controller);
     let result: CodexToolResult;
     try {
       const session = requireEditorSession();
       if (session.project.dir() !== request.dir) throw new Error("The agent's project is no longer open");
       const tool = editorToolSchema.parse(request);
       const { world } = session;
+      controller.signal.throwIfAborted();
+      session.engine.requestFrame();
       let data: unknown;
       if (tool.name === "editor_capture") {
         await flushProjectEdits(world);
@@ -66,7 +72,7 @@ export function registerAgentTools() {
         const playheadFrame = tool.args.time === undefined ? active.get(Computed)?.localTime ?? 0 : Math.round(tool.args.time * fps);
         const end = active.get(Computed)?.end ?? 0;
         if (tool.args.time !== undefined && playheadFrame >= end) throw new Error("Capture time must be within the scene duration");
-        const [frame] = await captureSceneFrames(session, id, [playheadFrame], { sceneTime: true });
+        const [frame] = await captureSceneFrames(session, id, [playheadFrame], { sceneTime: true, signal: controller.signal });
         if (!frame) throw new Error("No preview frame was rendered");
         result = { success: true, contentItems: [{ type: "inputImage", imageUrl: `data:image/png;base64,${frame.base64}` }] };
       } else {
@@ -132,12 +138,19 @@ export function registerAgentTools() {
         if (tool.name === "editor_insert_asset") {
           data = await addAgentAsset(tool.args.path, tool.args.start, tool.args.fit);
         }
+        session.engine.requestFrame();
         data ??= await getEditorContext(() => session);
         result = { success: true, contentItems: [{ type: "inputText", text: JSON.stringify(data) }] };
       }
     } catch (error) {
       result = { success: false, contentItems: [{ type: "inputText", text: error instanceof Error ? error.message : String(error) }] };
     }
+    controllers.delete(request.id);
     await mainBridge.call(MAIN_CHANNELS.EDITOR_TOOL_RESULT, { id: request.id, result });
   });
+  return () => {
+    unregister();
+    cancel();
+    for (const controller of controllers.values()) controller.abort();
+  };
 }

@@ -28,7 +28,9 @@ class ToolBridge {
     window.desktop?.on(DAPI_WIRE.CALL, (payload) => void this.dispatch(payload as DapiCall));
     window.desktop?.on(DAPI_WIRE.CANCEL, (payload) => {
       const { id } = payload as DapiCancel;
+      const held = this.held.some((call) => call.id === id);
       this.held = this.held.filter((call) => call.id !== id);
+      if (held) window.desktop?.send(DAPI_WIRE.REPLY, { id, ok: false, error: { code: "canceled", message: "The call was canceled." } });
       this.inFlight.get(id)?.abort();
     });
   }
@@ -62,15 +64,18 @@ class ToolBridge {
       if (!handler) throw new Error(`The app has no handler for "${call.tool}"`);
       // Every handler takes its own parsed args; the map's union type cannot
       // express that pairing, so the call site widens.
+      const context = { ...this.context(controller.signal), awaitTracking: call.awaitCleanup };
+      context.session()?.engine.requestFrame();
       const run = handler as (args: unknown, ctx: ToolContext) => Promise<unknown>;
-      reply = { id: call.id, ok: true, data: await run(call.args, this.context(controller.signal)) };
+      reply = { id: call.id, ok: true, data: await run(call.args, context) };
     } catch (error) {
       const message = (error as Error).message;
       reply = { id: call.id, ok: false, error: isDapiError(error) ? { code: error.code, message } : { message } };
     } finally {
       this.inFlight.delete(call.id);
     }
-    if (!controller.signal.aborted) window.desktop?.send(DAPI_WIRE.REPLY, reply);
+    // Main waits for this acknowledgement before releasing shared render resources.
+    window.desktop?.send(DAPI_WIRE.REPLY, reply);
   }
 }
 

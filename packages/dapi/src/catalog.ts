@@ -6,6 +6,7 @@ import type { z } from "zod";
 import type { GenericTool } from "./tool";
 
 import { open } from "./tools/open";
+import { workspace } from "./tools/workspace";
 import { context } from "./tools/context";
 import { capture } from "./tools/capture";
 import { check } from "./tools/check";
@@ -33,6 +34,7 @@ import { agentTool } from "./tools/agent-tool";
  */
 export const catalog = [
   open,
+  workspace,
   context,
   capture,
   check,

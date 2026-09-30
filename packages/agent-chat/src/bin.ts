@@ -23,6 +23,7 @@ type StartMessage = { type: "start"; config: AgentHostConfig };
 type StopMessage = { type: "stop" };
 type DeleteProjectMessage = { type: "deleteProject"; projectId: string };
 type PreparedMessage = { type: "turn-prepared"; id: string; error?: string };
+type InterruptProjectMessage = { type: "interrupt-project"; id: string; cwd: string };
 
 function parseArgs(argv: string[]): Record<string, string | true> {
   const out: Record<string, string | true> = {};
@@ -72,7 +73,14 @@ async function main(): Promise<void> {
       parentPort.postMessage({ type: "prepare-turn", id, ...input });
     });
     parentPort.on("message", ({ data }) => {
-      const message = data as StartMessage | StopMessage | DeleteProjectMessage | PreparedMessage;
+      const message = data as StartMessage | StopMessage | DeleteProjectMessage | PreparedMessage | InterruptProjectMessage;
+      if (message?.type === "interrupt-project") {
+        if (typeof message.id !== "string" || typeof message.cwd !== "string") return;
+        void (running ? running.interruptProject(message.cwd) : Promise.reject(new Error("Agent host is not ready")))
+          .then(() => parentPort.postMessage({ type: "project-interrupted", id: message.id }))
+          .catch((error: unknown) => parentPort.postMessage({ type: "project-interrupted", id: message.id, error: error instanceof Error ? error.message : String(error) }));
+        return;
+      }
       if (message?.type === "turn-prepared") {
         const pending = preparations.get(message.id);
         if (!pending) return;

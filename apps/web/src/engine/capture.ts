@@ -83,8 +83,6 @@ export interface Capture {
  * nothing for that stamp.
  */
 export async function createCapture(source: World, node: Entity, options: CaptureOptions = {}): Promise<Capture> {
-	const code = options.code ?? await bundleFor(source, options.dir);
-
 	// The stamp, not the entity: the two worlds hand out ids of their own, and
 	// the stamp is the same element in both.
 	const stamp = node.get(Source)?.value;
@@ -92,6 +90,8 @@ export async function createCapture(source: World, node: Entity, options: Captur
 		throw new Error('This element is not in the project source yet — save the project and try again.');
 	}
 
+	// Compilation may remount the editor, so capture its source address first.
+	const code = options.code ?? await bundleFor(source, options.dir);
 	const mode = options.mode ?? 'offline-video';
 	const frameRate = options.frameRate ?? source.get(FrameRate)?.value ?? 30;
 

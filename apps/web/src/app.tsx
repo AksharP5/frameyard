@@ -20,6 +20,7 @@ import { AuthCallbackPage } from '@/pages/auth-callback';
 import { NotFoundPage } from '@/pages/not-found';
 import { DashboardPage } from '@/pages/dashboard';
 import { localMode } from '@/lib/local-mode';
+import { WorkspaceActivity } from '@/components/workspaces/activity';
 
 const ProjectPage = lazy(() => import('@/pages/project').then(module => ({ default: module.ProjectPage })));
 
@@ -76,6 +77,7 @@ function App() {
                 <PurchaseSuccess />
               </Show>
               <EditorApi />
+              <WorkspaceActivity />
             </AuthProvider>
           </AppContextMenu>
           <Toaster />

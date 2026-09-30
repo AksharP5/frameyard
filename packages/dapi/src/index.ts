@@ -65,6 +65,8 @@ export type AgentToolContent = z.output<typeof AgentToolContentItemSchema>;
 
 export type OpenRequest = ToolArgs<"open">;
 export type OpenResult = ToolResult<"open">;
+export type WorkspaceRequest = ToolArgs<"workspace">;
+export type WorkspaceResult = ToolResult<"workspace">;
 export type ContextResult = ToolResult<"context">;
 export type CaptureRequest = ToolArgs<"capture">;
 export type CaptureResult = ToolResult<"capture">;

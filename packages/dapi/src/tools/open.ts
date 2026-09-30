@@ -9,9 +9,10 @@ export const open = defineTool({
   name: "open",
   title: "Open project",
   description:
-    "Open a folder as a project in the running app, creating the project files if the folder is not one yet, and show it in the editor. Returns the project's id, display name, and folder. Run this once before tools that need an open project (capture, check, export, context, and library paths in media tools).",
+    "Open a folder in an independent project workspace, creating the project files if the folder is not one yet. Show it for review unless background is true. This MCP session stays bound to that project while other agents work on different videos. Returns the project's id, display name, and folder. Tools can also target a workspace explicitly with project.",
   input: z.object({
     dir: z.string().min(1).describe("absolute path of the project folder to open or create"),
+    background: z.boolean().optional().describe("keep the workspace hidden instead of showing its editor"),
   }),
   output: z.object({
     id: z.string().describe("package.json projectId; empty for a folder that predates ids"),

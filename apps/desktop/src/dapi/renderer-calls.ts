@@ -23,6 +23,7 @@ type InFlight = {
 export class RendererCalls {
   private readonly inFlight = new Map<string, InFlight>();
   private window: BrowserWindow | null = null;
+  private readonly tracked = new WeakSet<BrowserWindow>();
 
   start(): void {
     ipcMain.on(DAPI_WIRE.REPLY, (event, reply: DapiReply) => {
@@ -37,13 +38,14 @@ export class RendererCalls {
     if (windows.length > 0) this.track(windows[windows.length - 1]!);
   }
 
-  async call(tool: string, args: unknown, signal: AbortSignal): Promise<unknown> {
-    const window = await this.ready(signal);
+  async call(tool: string, args: unknown, signal: AbortSignal, target?: BrowserWindow, awaitCleanup = false): Promise<unknown> {
+    if (target) this.track(target);
+    const window = await this.ready(signal, 30000, target);
     if (signal.aborted) throw new DapiError("canceled", "The call was canceled.");
     const id = randomUUID();
     return new Promise((resolve, reject) => {
       const onAbort = () => {
-        this.inFlight.get(id)?.reject(new DapiError("canceled", "The call was canceled."));
+        if (!awaitCleanup) this.inFlight.get(id)?.reject(new DapiError("canceled", "The call was canceled."));
         if (!window.isDestroyed()) window.webContents.send(DAPI_WIRE.CANCEL, { id } satisfies DapiCancel);
       };
       signal.addEventListener("abort", onAbort, { once: true });
@@ -52,7 +54,8 @@ export class RendererCalls {
         resolve: (data) => {
           this.inFlight.delete(id);
           signal.removeEventListener("abort", onAbort);
-          resolve(data);
+          if (signal.aborted) reject(new DapiError("canceled", "The call was canceled."));
+          else resolve(data);
         },
         reject: (error) => {
           this.inFlight.delete(id);
@@ -61,7 +64,7 @@ export class RendererCalls {
         },
       });
       try {
-        window.webContents.send(DAPI_WIRE.CALL, { id, tool, args } satisfies DapiCall);
+        window.webContents.send(DAPI_WIRE.CALL, { id, tool, args, ...(awaitCleanup ? { awaitCleanup: true } : {}) } satisfies DapiCall);
       } catch (error) {
         this.inFlight.get(id)?.reject(error instanceof Error ? error : new Error(String(error)));
       }
@@ -69,6 +72,8 @@ export class RendererCalls {
   }
 
   private track(window: BrowserWindow): void {
+    if (this.tracked.has(window)) return;
+    this.tracked.add(window);
     this.window = window;
     const fail = (why: string) => () => this.failWindow(window, why);
     window.webContents.on("did-start-navigation", (event) => {
@@ -88,9 +93,9 @@ export class RendererCalls {
   }
 
   // Resolves with the current window once it has finished loading.
-  private ready(signal: AbortSignal, timeoutMs = 30000): Promise<BrowserWindow> {
+  private ready(signal: AbortSignal, timeoutMs = 30000, target?: BrowserWindow): Promise<BrowserWindow> {
     if (signal.aborted) return Promise.reject(new DapiError("canceled", "The call was canceled."));
-    const window = this.window;
+    const window = target ?? this.window;
     if (!window || window.isDestroyed()) return Promise.reject(new Error("The app has no window"));
     if (window.webContents.isCrashed()) return Promise.reject(new Error("The app's renderer crashed"));
     if (!window.webContents.isLoadingMainFrame()) return Promise.resolve(window);

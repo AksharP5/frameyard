@@ -20,7 +20,7 @@ function fixture() {
   const values = new Map<symbol, unknown>([[keys, { pressed: new Set(), held: new Set(), lifted: new Set() }]]);
   const ticks: { now: number; delta: number }[] = [];
   const world = {
-    add() {}, onAdd: () => () => {}, onRemove: () => () => {},
+    isInitialized: true, add() {}, onAdd: () => () => {}, onRemove: () => () => {},
     get: (key: symbol) => values.get(key), set: (key: symbol, value: unknown) => values.set(key, value),
   };
   const noop = () => {};
@@ -32,6 +32,8 @@ function fixture() {
   };
   const dependencies = {
     '@diffusionstudio/runtime': runtime,
+    '@/lib/ipc': { mainBridge: { handle: () => () => {} } },
+    '@desktop/main-channels': { MAIN_CHANNELS: { WORKSPACE_VISIBILITY: 'workspace:visibility' } },
     'solid-js': { createSignal<T>(initial: T) {
       let value = initial;
       return [() => value, (next: T | ((previous: T) => T)) => { value = typeof next === 'function' ? (next as (previous: T) => T)(value) : next; }];
@@ -46,7 +48,7 @@ function fixture() {
   const module = { exports: {} as typeof import('../../web/src/engine/create-engine.ts') };
   runInNewContext(built.outputFiles[0].text, {
     module, require: (name: keyof typeof dependencies) => dependencies[name],
-    ResizeObserver: class {},
+    URLSearchParams, window: { location: { search: '' } }, ResizeObserver: class {},
     performance: { now: () => now },
     requestAnimationFrame: (callback: () => void) => { const id = ++nextId; frames.set(id, callback); return id; },
     cancelAnimationFrame: (id: number) => frames.delete(id),

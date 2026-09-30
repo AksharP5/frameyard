@@ -1,3 +1,4 @@
+import { realpath } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { dialog, type BrowserWindow, type WebContentsDidStartNavigationEventParams } from "electron";
@@ -29,8 +30,15 @@ const descriptions = {
   editor_add_highlight: "Enlarge a live region of the composited scene and optionally move it to the center. Adds an editable Highlight effect above existing visuals without copying footage or audio. Supply normalized region {x,y,width,height} and start/end in scene seconds; end is exclusive. mode=center moves toward destination [x,y], default [.5,.5]; in-place enlarges where the region is. Pass the attached sceneId, sceneSize and frameRate when available so stale frame geometry is rejected. Options: magnification default1.8, dim .45, blur8px, radius12px, shadow .35, enter/exit .35seconds. Returns source ID and snapped timing; use editor_update for revisions.",
 };
 
-export function registerAgentBridge(dataDir: string, getWindow: () => BrowserWindow | null) {
-  const pending = new Map<string, (value: CodexToolResult) => void>();
+type WorkspaceBridge = {
+  window(dir: string, signal?: AbortSignal): Promise<BrowserWindow>;
+  run<T>(dir: string, name: string, signal: AbortSignal | undefined, operation: (window: BrowserWindow, signal: AbortSignal) => Promise<T>, heavy?: boolean): Promise<T>;
+  event(event: import("./codex-contracts").CodexEvent): void;
+  externalTurn?(dir: string, active: boolean): void;
+};
+
+export function registerAgentBridge(dataDir: string, getWindow: (dir?: string) => BrowserWindow | null, workspaces?: WorkspaceBridge) {
+  const pending = new Map<string, { window: BrowserWindow; finish(value: CodexToolResult): void }>();
   const tools: CodexTool[] = editorToolSchema.options.map((option) => ({
     name: option.shape.name.value,
     description: descriptions[option.shape.name.value],
@@ -45,7 +53,7 @@ export function registerAgentBridge(dataDir: string, getWindow: () => BrowserWin
     { name: "hyfrme_catalog", description: "Browse, inspect, install and render Hyfrme motion blocks from the separate Hyfrme catalog. Use type=block. Installed HTML, JavaScript, fonts and licenses remain editable; render produces a project library asset.", inputSchema: z.json().parse(z.toJSONSchema(catalogRequestSchema)) },
   );
 
-  const runTool = async (path: string, name: string, args: unknown, signal?: AbortSignal): Promise<CodexToolResult> => {
+  const dispatchTool = async (path: string, name: string, args: unknown, signal?: AbortSignal, target?: BrowserWindow): Promise<CodexToolResult> => {
     signal?.throwIfAborted();
     if (name === "project_animations") {
       const request = animationRequestSchema.parse({ ...z.record(z.string(), z.unknown()).parse(args), dir: path });
@@ -73,26 +81,33 @@ export function registerAgentBridge(dataDir: string, getWindow: () => BrowserWin
         return { success: true, contentItems: [{ type: "inputText", text: JSON.stringify(data) }] };
       }
       const tool = editorToolSchema.parse({ name, args });
-      const window = getWindow();
+      const window = target ?? getWindow(dir);
       if (!window || window.isDestroyed() || window.webContents.isLoadingMainFrame()) throw new Error("Editor is not ready");
       const id = randomUUID();
       return new Promise<CodexToolResult>((resolve) => {
         const finish = (result: CodexToolResult) => {
           if (!pending.delete(id)) return;
           clearTimeout(timer);
+          signal?.removeEventListener("abort", onAbort);
           window.webContents.off("did-start-navigation", onNavigate);
           window.webContents.off("render-process-gone", onGone);
           window.off("closed", onClosed);
           resolve(result);
         };
         const fail = (text: string) => finish({ success: false, contentItems: [{ type: "inputText", text }] });
+        const onAbort = () => mainBridge.emit(window, MAIN_CHANNELS.EDITOR_TOOL_CANCEL, { id });
         const onNavigate = (event: WebContentsDidStartNavigationEventParams) => {
           if (event.isMainFrame && !event.isSameDocument) fail("The editor reloaded before replying");
         };
         const onGone = () => fail("The editor renderer crashed before replying");
         const onClosed = () => fail("The editor window closed before replying");
-        const timer = setTimeout(() => fail("Editor did not respond within 60 seconds"), 60_000);
-        pending.set(id, finish);
+        const timer = setTimeout(() => {
+          fail("Editor did not respond within 60 seconds");
+          // A timed-out capture cannot keep the GPU after its queue slot is released.
+          if (name === "editor_capture" && !window.isDestroyed()) window.destroy();
+        }, 60_000);
+        pending.set(id, { window, finish });
+        signal?.addEventListener("abort", onAbort, { once: true });
         window.webContents.on("did-start-navigation", onNavigate);
         window.webContents.on("render-process-gone", onGone);
         window.on("closed", onClosed);
@@ -105,15 +120,22 @@ export function registerAgentBridge(dataDir: string, getWindow: () => BrowserWin
     });
   };
 
+  const runTool = (dir: string, name: string, args: unknown, signal?: AbortSignal): Promise<CodexToolResult> => {
+    if (!workspaces) return dispatchTool(dir, name, args, signal);
+    const input = args !== null && typeof args === "object" ? args as Record<string, unknown> : {};
+    const heavy = name === "editor_capture" || ((name === "project_animations" || name === "manim_animations" || name.endsWith("_catalog")) && ["render", "export", "editable"].includes(String(input.action)));
+    return workspaces.run(dir, name, signal, (window, signal) => dispatchTool(dir, name, args, signal, window), heavy);
+  };
+
   const restoreProject = async (dir: string, id: string) => {
     unwatchProject(dir);
     try {
       return await restoreCheckpoint(dir, id);
     } finally {
       // A refresh failure must not make a completed restore retryable.
-      try { watchProject(getWindow(), dir); }
+      try { watchProject(getWindow(dir), dir); }
       catch (error) { console.error("[projects] Could not restart watching after restore", error); }
-      try { mainBridge.emit(getWindow(), MAIN_CHANNELS.PROJECTS_CHANGED, { dir, path: "package.json" }); }
+      try { mainBridge.emit(getWindow(dir), MAIN_CHANNELS.PROJECTS_CHANGED, { dir, path: "package.json" }); }
       catch (error) { console.error("[projects] Could not refresh editor after restore", error); }
     }
   };
@@ -121,7 +143,10 @@ export function registerAgentBridge(dataDir: string, getWindow: () => BrowserWin
   const codex = new CodexService({
     dataDir, tools, runTool,
     restoreCheckpoint: restoreProject,
-    onEvent: (event) => mainBridge.emit(getWindow(), MAIN_CHANNELS.CODEX_EVENT, event),
+    onEvent: (event) => {
+      workspaces?.event(event);
+      mainBridge.emit(getWindow(event.dir), MAIN_CHANNELS.CODEX_EVENT, event);
+    },
     importGenerated: async (dir, image) => z.json().parse(await importGeneratedAsset({
       dir, prompt: image.prompt || "Codex generated image",
       ...(image.savedPath ? { savedPath: image.savedPath } : { result: image.result }),
@@ -150,15 +175,23 @@ export function registerAgentBridge(dataDir: string, getWindow: () => BrowserWin
   });
   mainBridge.handle(MAIN_CHANNELS.ASSETS_SEARCH, (request) => searchAssets(request));
   mainBridge.handle(MAIN_CHANNELS.ASSETS_IMPORT, (request) => codex.withProjectMutation(request.dir, (dir) => importAsset({ ...request, dir })));
-  mainBridge.handle(MAIN_CHANNELS.EDITOR_TOOL_RESULT, ({ id, result }) => {
-    pending.get(id)?.(result);
+  mainBridge.handle(MAIN_CHANNELS.EDITOR_TOOL_RESULT, ({ id, result }, event) => {
+    const request = pending.get(id);
+    if (request?.window.webContents === event.sender) request.finish(result);
   });
   return {
     dispose: () => {
-      for (const finish of pending.values()) finish({ success: false, contentItems: [{ type: "inputText", text: "The editor stopped before replying" }] });
+      for (const { finish } of pending.values()) finish({ success: false, contentItems: [{ type: "inputText", text: "The editor stopped before replying" }] });
       codex.dispose();
     },
     runTool,
-    prepareTurn: ({ cwd, text }: { cwd: string; text: string }) => codex.prepareExternalTurn(cwd, text),
+    request: (request: import("./codex-contracts").CodexRequest) => codex.request(request),
+    prepareTurn: async ({ cwd, text }: { cwd: string; text: string }) => {
+      const dir = await realpath(cwd);
+      await workspaces?.window(dir);
+      const release = await codex.prepareExternalTurn(dir, text);
+      workspaces?.externalTurn?.(dir, true);
+      return () => { release(); workspaces?.externalTurn?.(dir, false); };
+    },
   };
 }

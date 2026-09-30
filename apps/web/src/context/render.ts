@@ -102,6 +102,7 @@ export async function renderScene(
     console.info(`[export] ${percent}%`);
   };
 
+  const wasRunning = engine.running();
   engine.stop();
 
   const event = {
@@ -181,6 +182,6 @@ export async function renderScene(
     cancelActive = undefined;
     setOverlay(null);
     capture?.dispose();
-    if (world.isInitialized) engine.start();
+    if (world.isInitialized && wasRunning) engine.start();
   }
 }

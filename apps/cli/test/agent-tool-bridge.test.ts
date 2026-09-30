@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { build } from "esbuild";
+import type { BrowserWindow } from "electron";
 import type { CodexOptions, CodexToolResult } from "../../desktop/src/codex-contracts";
 
 test("CLI and Codex calls share tool validation, editor replies, and forced project scope", async () => {
@@ -27,7 +31,7 @@ test("CLI and Codex calls share tool validation, editor replies, and forced proj
   const moduleSource = bundle.outputFiles[0].text + "\n//# sourceURL=diffusion-agent-tool-test.mjs";
   const app = await import(`data:text/javascript;base64,${Buffer.from(moduleSource).toString("base64")}`) as {
     registerAgentBridge: typeof import("../../desktop/src/agent-bridge").registerAgentBridge;
-    handlers: Map<string, (input: unknown) => Promise<CodexToolResult>>;
+    handlers: Map<string, (input: unknown, event?: { sender: unknown }) => Promise<CodexToolResult>>;
     events: { name: string; data: { id: string; dir: string; name: string; args: unknown } }[];
     options: CodexOptions;
   };
@@ -66,7 +70,9 @@ test("CLI and Codex calls share tool validation, editor replies, and forced proj
   assert.equal(request.data.dir, dir);
   assert.deepEqual(request.data.args, { id: "title", text: "Updated" });
   const result: CodexToolResult = { success: true, contentItems: [{ type: "inputText", text: "saved" }] };
-  await app.handlers.get("editor:tool-result")!({ id: request.data.id, result });
+  await app.handlers.get("editor:tool-result")!({ id: request.data.id, result }, { sender: {} });
+  assert.equal(app.events.at(-1), request);
+  await app.handlers.get("editor:tool-result")!({ id: request.data.id, result }, { sender: window.webContents });
   assert.deepEqual(await pending, result);
 });
 
@@ -136,4 +142,109 @@ test("agent tools cancel before delayed mutations and forward cancellation into 
     controller.abort(cancelled);
     await assert.rejects(pending, (error) => error === cancelled);
   }
+});
+
+test("a timed-out native capture destroys its renderer before the next project's GPU job starts", async (t) => {
+  const stubs: Record<string, string> = {
+    "electron": `export const dialog = {};`,
+    "./main-manager": `
+      export const handlers = new Map();
+      let onEditorCall = () => {};
+      export function setOnEditorCall(handler){onEditorCall=handler}
+      export const mainBridge = {
+        handle(name, handler){handlers.set(name,handler)},
+        emit(window, name, request){if(name === 'editor:tool')onEditorCall(window,request)}
+      };
+    `,
+    "./codex": `export class CodexService { withProjectMutation(dir,operation){return operation(dir)} }`,
+    "./agent-assets": `export function importAsset(){} export function searchAssets(){} export function importGeneratedAsset(){}`,
+    "./hyperframes-catalog": `export function handleCatalogRequest(){}`,
+    "./projects": `export function unwatchProject(){} export function watchProject(){}`,
+    "./manim": `export function handleManimRequest(){}`,
+    "./animations": `export function handleAnimationRequest(){}`,
+  };
+  const bundle = await build({
+    stdin: {
+      contents: `export {registerAgentBridge} from './agent-bridge'; export {Workspaces} from './workspaces'; export {handlers,setOnEditorCall} from './main-manager';`,
+      resolveDir: new URL("../../desktop/src/", import.meta.url).pathname,
+    },
+    bundle: true, platform: "node", format: "esm", write: false,
+    plugins: [{ name: "capture-timeout-boundary", setup(builder) {
+      builder.onResolve({ filter: /.*/ }, ({ path }) => path in stubs ? { path, namespace: "capture-timeout-boundary" } : undefined);
+      builder.onLoad({ filter: /.*/, namespace: "capture-timeout-boundary" }, ({ path }) => ({ contents: stubs[path], loader: "js" }));
+    } }],
+  });
+  type EditorCall = { id: string; dir: string; name: string };
+  const app = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`) as {
+    registerAgentBridge: typeof import("../../desktop/src/agent-bridge").registerAgentBridge;
+    Workspaces: typeof import("../../desktop/src/workspaces").Workspaces;
+    handlers: Map<string, (input: unknown, event: { sender: unknown }) => Promise<void>>;
+    setOnEditorCall(handler: (window: BrowserWindow, request: EditorCall) => void): void;
+  };
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "frameyard-native-capture-timeout-")));
+  const firstDir = join(directory, "first"), nextDir = join(directory, "next");
+  await Promise.all([mkdir(firstDir), mkdir(nextDir)]);
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const order: string[] = [];
+  const windows = new Map<BrowserWindow, string>();
+  const firstStarted = Promise.withResolvers<BrowserWindow>();
+  const nextQueued = Promise.withResolvers<void>();
+  const nextStarted = Promise.withResolvers<{ window: BrowserWindow; request: EditorCall }>();
+  const manager = new app.Workspaces({
+    createWindow: () => {
+      let destroyed = false;
+      const window = Object.assign(new EventEmitter(), {
+        isDestroyed: () => destroyed,
+        isVisible: () => false,
+        webContents: Object.assign(new EventEmitter(), { isLoadingMainFrame: () => false }),
+        destroy: () => {
+          destroyed = true;
+          order.push(`destroy:${windows.get(window as unknown as BrowserWindow)}`);
+          window.emit("closed");
+        },
+      });
+      return window as unknown as BrowserWindow;
+    },
+    open: async (window, dir) => { windows.set(window, dir); return { name: dir }; },
+    release: dir => { order.push(`release:${dir}`); },
+    changed: result => {
+      if (result.workspaces.find(row => row.dir === nextDir)?.jobs.some(job => job.state === "queued")) nextQueued.resolve();
+    },
+  });
+  t.after(async () => {
+    manager.dispose();
+    for (const window of windows.keys()) if (!window.isDestroyed()) window.destroy();
+    await rm(directory, { recursive: true, force: true });
+  });
+  app.setOnEditorCall((window, request) => {
+    order.push(`dispatch:${request.dir}`);
+    if (request.dir === firstDir) firstStarted.resolve(window);
+    if (request.dir === nextDir) nextStarted.resolve({ window, request });
+  });
+  const bridge = app.registerAgentBridge(directory, dir => dir ? manager.getWindow(dir) : null, {
+    window: (dir, signal) => manager.open(dir, signal),
+    run: (dir, name, signal, operation, heavy) => manager.run(dir, name, signal, operation, heavy),
+    event: () => {},
+  });
+  const first = bridge.runTool(firstDir, "editor_capture", {});
+  const firstWindow = await firstStarted.promise;
+  const next = bridge.runTool(nextDir, "editor_capture", {});
+  await nextQueued.promise;
+  t.mock.timers.tick(59_999);
+  assert.equal(firstWindow.isDestroyed(), false);
+  assert.equal(order.includes(`dispatch:${nextDir}`), false);
+
+  t.mock.timers.tick(1);
+  const failed = await first;
+  assert.equal(failed.success, false);
+  assert.deepEqual(failed.contentItems, [{ type: "inputText", text: "Editor did not respond within 60 seconds" }]);
+  const { window: nextWindow, request } = await nextStarted.promise;
+  assert.equal(firstWindow.isDestroyed(), true);
+  assert.equal(nextWindow.isDestroyed(), false);
+  assert.deepEqual(order.slice(0, 4), [
+    `dispatch:${firstDir}`, `destroy:${firstDir}`, `release:${firstDir}`, `dispatch:${nextDir}`,
+  ]);
+  const result: CodexToolResult = { success: true, contentItems: [{ type: "inputText", text: "captured" }] };
+  await app.handlers.get("editor:tool-result")!({ id: request.id, result }, { sender: nextWindow.webContents });
+  assert.deepEqual(await next, result);
 });

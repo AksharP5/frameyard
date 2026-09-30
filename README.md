@@ -56,7 +56,9 @@ load project-local Babel plugins on your machine.
 The **Assistant** panel can connect to your installed Codex or Claude Code CLI.
 Agents and the visual editor share project files. Frameyard saves a checkpoint
 before each agent turn. [Agent workspace](docs/agent-workspace.md) explains
-context, approvals, and recovery.
+context, approvals, and recovery. Agents can work on separate videos in parallel;
+use **Activity** or `dapi --project <dir>` to target each project. Heavy jobs
+queue to limit memory and GPU use without reducing output quality.
 
 For OpenCode and other external agents, use **MCP & CLI** in Frameyard to
 connect the local editor tools. OpenCode runs in its own app or terminal;

@@ -5,16 +5,22 @@
 
 import { existsSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import { z } from "zod";
 import { version } from "../../../package.json";
 import { toolByName } from "@diffusionstudio/dapi";
-import { APP_NAME, call, isAppDown, launchApp, ping, waitForApp } from "./cli-client";
+import { APP_NAME, call as callTool, isAppDown, launchApp, ping, waitForApp } from "./cli-client";
 import { runProxy } from "./mcp-proxy";
 import { writeEditPlan } from "./edit-plan";
 import { convertAnimation, exportAnimation, listAnimations, renderAnimation } from "./animation";
 
-import type { GenericTool, ToolInput, ToolName } from "@diffusionstudio/dapi";
+import type { GenericTool, ToolInput, ToolName, ToolOutput } from "@diffusionstudio/dapi";
+
+let project: string | undefined;
+
+function call<N extends ToolName>(name: N, input: ToolInput<N>): Promise<ToolOutput<N>> {
+  return callTool(name, { ...input, project: input.project ?? project });
+}
 
 function fail(message: string): never {
   console.error(message);
@@ -97,7 +103,12 @@ program
     `The ${APP_NAME} CLI: understand, generate, and edit footage.
 Analyze video/audio/images, generate them with AI, and compose assets.
 Use for any media analysis, media generation, or video editing task. No ffmpeg needed.`)
-  .version(version);
+  .version(version)
+  .addOption(new Option("--project <dir>", "target an independent project workspace").env("FRAMEYARD_PROJECT"))
+  .hook("preAction", () => {
+    const dir = program.opts<{ project?: string }>().project;
+    project = dir === undefined ? undefined : resolve(dir);
+  });
 
 program
   .command("edit-plan <plan>")
@@ -126,26 +137,23 @@ const animations = program
 
 animations
   .command("list")
-  .option("--project <dir>", "project containing diffusion.animations", ".")
-  .action(async (opts: { project: string }) => {
-    console.log(JSON.stringify(await listAnimations(opts.project)));
+  .action(async () => {
+    console.log(JSON.stringify(await listAnimations(project ?? resolve("."))));
   });
 
 animations
   .command("render <id>")
-  .option("--project <dir>", "project containing diffusion.animations", ".")
-  .action(async (id: string, opts: { project: string }) => {
-    console.log(JSON.stringify(await runAnimation((signal) => renderAnimation(id, opts.project, undefined, signal))));
+  .action(async (id: string) => {
+    console.log(JSON.stringify(await runAnimation((signal) => renderAnimation(id, project ?? resolve("."), undefined, signal))));
   });
 
 animations
   .command("editable <id>")
   .description("Convert supported authored objects to fresh editable native JSX layers")
-  .option("--project <dir>", "project containing diffusion.animations", ".")
   .option("--allow-partial", "create an incomplete editable study when features cannot be converted")
-  .action(async (id: string, opts: { project: string; allowPartial?: boolean }) => {
+  .action(async (id: string, opts: { allowPartial?: boolean }) => {
     const { tree: _tree, ...report } = await runAnimation((signal) =>
-      convertAnimation(id, opts.project, { allowPartial: opts.allowPartial, signal }),
+      convertAnimation(id, project ?? resolve("."), { allowPartial: opts.allowPartial, signal }),
     );
     console.log(JSON.stringify(report));
   });
@@ -153,12 +161,11 @@ animations
 animations
   .command("export <id> <output>")
   .description("Export MP4 video or QuickTime MOV; transparent animations require MOV")
-  .option("--project <dir>", "project containing diffusion.animations", ".")
   .option("--overwrite", "replace an existing export")
-  .action(async (id: string, output: string, opts: { project: string; overwrite?: boolean }) => {
+  .action(async (id: string, output: string, opts: { overwrite?: boolean }) => {
     console.log(JSON.stringify(
       await runAnimation((signal) =>
-        exportAnimation(id, opts.project, output, { overwrite: opts.overwrite, signal }),
+        exportAnimation(id, project ?? resolve("."), output, { overwrite: opts.overwrite, signal }),
       ),
     ));
   });
@@ -173,7 +180,7 @@ program
   .action(async (path: string | undefined, opts: { background?: boolean }) => {
     const launched = await launchApp(opts.background ?? false);
     await (launched ? waitForApp() : ping()).catch(appError);
-    if (path !== undefined) await run("open", { dir: resolve(path) });
+    if (path !== undefined) await run("open", { dir: resolve(path), background: opts.background });
   });
 
 program
@@ -181,7 +188,25 @@ program
   .description(
     `Serve ${APP_NAME}'s MCP server over stdio. Launches the app in the background if it is not running. HTTP agents can use the authenticated URL shown in Frameyard's agent settings.`,
   )
-  .action(() => runProxy().catch(appError));
+  .action(() => runProxy(project).catch(appError));
+
+const workspace = program
+  .command("workspace")
+  .description(describe("workspace"));
+
+workspace.command("list")
+  .description("List project workspaces, agents, and queued or running jobs")
+  .action(() => run("workspace", { action: "list" }));
+
+for (const action of ["open", "show", "close", "cancel"] as const) {
+  workspace.command(`${action} [dir]`)
+    .description(`${action} a project workspace; defaults to --project or FRAMEYARD_PROJECT`)
+    .action((dir: string | undefined) => run("workspace", { action, dir: dir === undefined ? undefined : resolve(dir) }));
+}
+
+workspace.command("send <message>")
+  .description("Start a native Codex Assistant turn in the targeted background project")
+  .action((message: string) => run("workspace", { action: "send", message }));
 
 program
   .command("context")

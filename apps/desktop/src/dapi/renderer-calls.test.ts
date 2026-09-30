@@ -102,3 +102,20 @@ it("forwards cancellation for a dispatched call and ignores late replies", async
   expect(window.webContents.send).toHaveBeenLastCalledWith(DAPI_WIRE.CANCEL, { id: request.id });
   ipcMain.emit(DAPI_WIRE.REPLY, { sender: window.webContents }, { id: request.id, ok: true, data: "late" });
 });
+
+
+it("keeps a canceled project call pending until renderer cleanup is acknowledged", async () => {
+  const { calls, window } = setup();
+  const controller = new AbortController();
+  const result = calls.call("export", {}, controller.signal, window as unknown as import("electron").BrowserWindow, true);
+  const failed = expect(result).rejects.toMatchObject({ code: "canceled" });
+  let settled = false;
+  void result.then(() => { settled = true; }, () => { settled = true; });
+  await Promise.resolve();
+  const [, request] = window.webContents.send.mock.calls[0]!;
+  controller.abort();
+  await Promise.resolve();
+  expect(settled).toBe(false);
+  ipcMain.emit(DAPI_WIRE.REPLY, { sender: window.webContents }, { id: request.id, ok: true, data: "cleaned" });
+  await failed;
+});
