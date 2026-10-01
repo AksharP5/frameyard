@@ -22,7 +22,7 @@
     "install:linux": "node scripts/install-linux.mjs",
     "setup:local": "node scripts/setup-local.mjs",
     "release": "node scripts/release.mjs",
-    "postinstall": "patch-package",
+    "postinstall": "node scripts/postinstall.mjs",
     "lint": "npm run lint --workspaces --if-present",
     "check": "npm run check --workspaces --if-present && tsc -p docs/examples/tsconfig.core.json --noEmit",
     "check:examples": "tsc -p docs/examples --noEmit",
@@ -33,6 +33,9 @@
     "semver": "7.8.5"
   },
   "overrides": {
+    "appdmg": {
+      "image-size": "2.0.4"
+    },
     "@electron/packager": {
       "extract-zip": "npm:@electron-internal/extract-zip@1.0.4"
     },
