@@ -470,7 +470,15 @@ if (app.requestSingleInstanceLock()) {
         return result;
       })));
   mainBridge.handle(MAIN_CHANNELS.PROJECTS_DUPLICATE, ({ dir }) => duplicateProject(dir));
-  mainBridge.handle(MAIN_CHANNELS.PROJECTS_DELETE, ({ dir }) => deleteProject(dir).then(deleteProjectChats));
+  mainBridge.handle(MAIN_CHANNELS.PROJECTS_DELETE, async ({ dir }, event) => {
+    const id = await workspaces.delete(dir, BrowserWindow.fromWebContents(event.sender), path =>
+      codex.withProjectIdle(path, async dir => {
+        const id = await deleteProject(dir);
+        if (legacyAgentProject === dir) { legacyAgentProject = undefined; legacyAgentWindow = null; }
+        return id;
+      }));
+    deleteProjectChats(id);
+  });
   mainBridge.handle(MAIN_CHANNELS.PROJECTS_COMPILE, ({ dir }) => compileProject(dir));
   mainBridge.handle(MAIN_CHANNELS.PROJECTS_WRITE, ({ dir, edits }) => writeProject(dir, edits));
   mainBridge.handle(MAIN_CHANNELS.PROJECTS_WATCH, async ({ dir }, event) => {
