@@ -330,16 +330,17 @@ if (app.requestSingleInstanceLock()) {
   let quitting = false;
   let mainIdleTimer: ReturnType<typeof setTimeout> | null = null;
   const busyWindows = new Set<BrowserWindow>();
-  const visible = () => [...editorWindows].some(window => !window.isDestroyed() && window.isVisible());
+  const presented = (window: BrowserWindow) => window.isVisible() || window.isMinimized();
+  const visible = () => [...editorWindows].some(window => !window.isDestroyed() && presented(window));
   const refreshTray = () => tray?.refresh();
   const scheduleMainIdle = () => {
     if (mainIdleTimer) clearTimeout(mainIdleTimer);
     mainIdleTimer = null;
     const window = mainWindow;
-    if (!window || window.isDestroyed() || window.isVisible() || busyWindows.has(window) || workspaces.directory(window)) return;
+    if (!window || window.isDestroyed() || presented(window) || busyWindows.has(window) || workspaces.directory(window)) return;
     mainIdleTimer = setTimeout(() => {
       mainIdleTimer = null;
-      if (mainWindow === window && !window.isDestroyed() && !window.isVisible() && !busyWindows.has(window) && !workspaces.directory(window)) window.destroy();
+      if (mainWindow === window && !window.isDestroyed() && !presented(window) && !busyWindows.has(window) && !workspaces.directory(window)) window.destroy();
     }, WINDOW_IDLE_MS);
     mainIdleTimer.unref();
   };
@@ -348,6 +349,7 @@ if (app.requestSingleInstanceLock()) {
     window.on("close", event => {
       if (quitting) return;
       event.preventDefault();
+      if (window.isMinimized()) window.restore();
       window.hide();
     });
     window.on("show", () => { void app.dock?.show(); refreshTray(); scheduleMainIdle(); });
@@ -372,7 +374,11 @@ if (app.requestSingleInstanceLock()) {
     refreshTray();
   };
   const hideWindows = () => {
-    for (const window of editorWindows) if (!window.isDestroyed() && window.isVisible()) window.hide();
+    for (const window of editorWindows) {
+      if (window.isDestroyed() || !presented(window)) continue;
+      if (window.isMinimized()) window.restore();
+      window.hide();
+    }
     if (!visible()) void app.dock?.hide();
     refreshTray();
   };

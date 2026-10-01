@@ -47,7 +47,7 @@ export class Workspaces {
     return { workspaces: [...this.projects.values()].map((value): Row => {
       const jobs = [...value.jobs.values()].map(({ id, tool, state }) => ({ id, tool, state }));
       return {
-        dir: value.dir, name: value.name, visible: value.window?.isVisible() ?? false,
+        dir: value.dir, name: value.name, visible: value.window ? value.window.isVisible() || value.window.isMinimized() : false,
         agentActive: value.agentActive, jobs,
         status: value.loading ? "loading" : value.error ? "error" : [...value.jobs.values()].some(job => job.state === "running" && job.heavy) ? "rendering" : jobs.some(job => job.state === "running") || value.agentActive || this.changing.has(value.dir) ? "working" : jobs.length ? "queued" : "idle",
         ...(value.error ? { error: value.error } : {}),
@@ -197,7 +197,7 @@ export class Workspaces {
       signal?.removeEventListener("abort", abort);
       project.jobs.delete(job.id);
       // SAM retains its model per renderer; release hidden model owners before the next GPU job.
-      if (project.window && this.modelOwners.has(project.window) && !this.running(project) && !project.window.isVisible()) this.releaseRuntime(project);
+      if (project.window && this.modelOwners.has(project.window) && !this.running(project) && !project.window.isVisible() && !project.window.isMinimized()) this.releaseRuntime(project);
       job.finish();
       this.publish();
       this.idle(project);
@@ -371,7 +371,7 @@ export class Workspaces {
 
   private idle(project: Workspace): void {
     this.keep(project);
-    if (this.stopped || project.loading || this.changing.has(project.dir) || this.running(project) || !project.window || project.window.isVisible() || this.uiBusy.has(project.window)) return;
+    if (this.stopped || project.loading || this.changing.has(project.dir) || this.running(project) || !project.window || project.window.isVisible() || project.window.isMinimized() || this.uiBusy.has(project.window)) return;
     project.idleTimer = setTimeout(() => {
       this.releaseRuntime(project);
       this.publish();
