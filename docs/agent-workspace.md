@@ -112,7 +112,8 @@ Choose a suggestion with the mouse, Enter, or Tab to attach that skill's native
 name and path. Escape closes suggestions. Removing the `$name` mention also
 removes its attachment. **Add context** opens image and editor context tools.
 While Codex is working, Enter or **Steer Codex** sends new direction to the same
-active turn with fresh selection and playhead context. **Stop** remains separate.
+active turn with fresh selection and playhead context. **Stop** interrupts the turn
+and cancels its queued or running editor tools.
 Steering does not create another checkpoint or restart the turn. If the turn ends
 before the message arrives, the draft stays available to send as a new turn.
 Model and reasoning changes apply between turns.

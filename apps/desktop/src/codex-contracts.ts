@@ -71,7 +71,7 @@ export type CodexOptions = {
   binary?: string;
   onEvent: (event: CodexEvent) => void;
   tools?: CodexTool[];
-  runTool: (dir: string, name: string, args: unknown) => Promise<CodexToolResult>;
+  runTool: (dir: string, name: string, args: unknown, signal?: AbortSignal) => Promise<CodexToolResult>;
   restoreCheckpoint?: (dir: string, id: string) => Promise<unknown>;
   importGenerated?: (dir: string, image: { savedPath?: string; result: string; prompt: string }) => Promise<JsonValue>;
 };

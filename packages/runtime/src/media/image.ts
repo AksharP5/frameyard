@@ -40,6 +40,7 @@ export class BitmapImageDecoder implements ImageDecoder {
 
 		try {
 			const file = await getAssetFile(this.asset);
+			if (this.disposed) return;
 			const result = await createImageBitmap(file);
 			if (this.disposed) {
 				result.close();
@@ -101,6 +102,7 @@ export class ElementImageDecoder implements ImageDecoder {
 
 		try {
 			const file = await getAssetFile(this.asset);
+			if (this.disposed) return;
 			const url = URL.createObjectURL(file);
 
 			await new Promise<void>((resolve) => {

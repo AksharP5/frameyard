@@ -49,6 +49,7 @@ type PointerOptions = {
 export function createPointer(options: PointerOptions) {
   let position: MousePosition | null = null;
   let pressRegionID: string | null = null;
+  let hasDragged = false;
   let hitRegions: HitRegions = {
     prev: [],
     next: [],
@@ -69,6 +70,7 @@ export function createPointer(options: PointerOptions) {
     const rect = options.canvas?.getBoundingClientRect();
     if (!rect || event.button !== 0) return;
     hits = null;
+    hasDragged = false;
 
     const currentX = event.clientX - rect.left;
     const currentY = event.clientY - rect.top;
@@ -134,7 +136,6 @@ export function createPointer(options: PointerOptions) {
       deltaX: currentX - position.initialX,
       deltaY: currentY - position.initialY,
     };
-    pressRegionID = null;
     shiftPressed = event.shiftKey;
     altPressed = event.altKey;
   }
@@ -142,6 +143,7 @@ export function createPointer(options: PointerOptions) {
   function cancel() {
     if (position) position = { state: 'idle', currentX: position.currentX, currentY: position.currentY };
     pressRegionID = null;
+    hasDragged = false;
     lastClickPosition = null;
     hits = null;
   }
@@ -200,16 +202,18 @@ export function createPointer(options: PointerOptions) {
       pressRegionID = hits.primary;
     }
 
-    // Assign dragging state after a distance threshold has been passed
+    // Keep a captured drag through its release frame, even after returning
+    // to the press position. Its final delta still belongs to the gesture.
     let dragging = false;
-    if (position?.state == 'pressing' && pressRegionID == regionData.id) {
+    if ((position?.state === 'pressing' || position?.state === 'lifted') && pressRegionID === regionData.id) {
       const distance = Math.sqrt(position.deltaX ** 2 + position.deltaY ** 2);
-      dragging = distance >= cfg.CLICK_DISTANCE_THRESHOLD;
+      hasDragged ||= distance >= cfg.CLICK_DISTANCE_THRESHOLD;
+      dragging = hasDragged;
     }
 
     // Only consider click if pointer hasn't moved beyond the distance threshold
     let clicked = false;
-    if (position?.state == 'lifted') {
+    if (position?.state == 'lifted' && !hasDragged) {
       const distance = Math.sqrt(position.deltaX ** 2 + position.deltaY ** 2);
       clicked = distance < cfg.CLICK_DISTANCE_THRESHOLD && hovering;
     }
@@ -262,11 +266,13 @@ export function createPointer(options: PointerOptions) {
         ...position,
         state: 'idle',
       };
-      lastClickPosition = {
+      lastClickPosition = hasDragged ? null : {
         x: position.currentX,
         y: position.currentY,
         timestamp: performance.now(),
       };
+      pressRegionID = null;
+      hasDragged = false;
     }
 
     if (position?.state == 'pressed') {
