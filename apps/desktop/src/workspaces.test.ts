@@ -129,6 +129,18 @@ it("never evicts a hidden runtime with a pending job", async () => {
   expect(window.isDestroyed()).toBe(true);
 });
 
+it("keeps a hidden editor alive while its own export is busy", async () => {
+  const { manager, dirs } = await setup(100);
+  vi.useFakeTimers();
+  const window = await manager.open(dirs[0]!);
+  manager.setBusy(window, true);
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(window.isDestroyed()).toBe(false);
+  manager.setBusy(window, false);
+  await vi.advanceTimersByTimeAsync(100);
+  expect(window.isDestroyed()).toBe(true);
+});
+
 
 it("releases a failed bootstrap and retries the repaired project immediately", async () => {
   const { dirs } = await setup();

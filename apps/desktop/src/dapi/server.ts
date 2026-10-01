@@ -15,7 +15,7 @@ import { RendererCalls } from "./renderer-calls";
 import { serveCatalog } from "./tools-session";
 
 import type { AgentToolResult, LogEntry, ToolArgs, ToolOutput, GenericTool } from "@diffusionstudio/dapi";
-import type { MainContext, MainToolName } from "./handler";
+import type { AppWindow, MainContext, MainToolName } from "./handler";
 
 /**
  * The name the server introduces itself with, and so the namespace an agent
@@ -32,11 +32,12 @@ export type DapiServerDeps = {
   getDefaultProject?(): string | undefined;
   onOpenProject?(window: BrowserWindow, show: boolean): void;
   workspaceAction?(request: ToolArgs<"workspace">, signal: AbortSignal): Promise<ToolOutput<"workspace">>;
+  window?: AppWindow;
   version: string;
   /** The app's console buffer, for `logs` and `report`. */
   logs(): LogEntry[];
   /** Called once, on the first connection: an agent is driving, so the UI may step back. */
-  onFirstConnection(): void;
+  onFirstConnection?(): void;
   /** The staged docs: INSTRUCTIONS.md, their path, and the skill headers, all for every session. Null when not staged. */
   docsDir: string | null;
   /** Project-aware editing tools retained by Frameyard's native agent bridge. */
@@ -73,7 +74,7 @@ export class DapiServer {
       path: MCP_PATH,
       token: this.token,
       createSession: project => this.createSession(project),
-      onFirstConnection: () => deps.onFirstConnection(),
+      onFirstConnection: () => deps.onFirstConnection?.(),
     });
   }
 
@@ -156,6 +157,7 @@ export class DapiServer {
       signal,
       logs: this.deps.logs,
       version: this.deps.version,
+      window: this.deps.window,
       workspace: request => {
         if (!this.deps.workspaceAction) throw new Error("Project workspaces are unavailable");
         return this.deps.workspaceAction(request, signal);

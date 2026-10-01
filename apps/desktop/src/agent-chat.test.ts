@@ -7,7 +7,7 @@ vi.mock("electron", () => ({
 }));
 
 import { utilityProcess } from "electron";
-import { cancelProjectAgents, startAgentChat, stopAgentChat } from "./agent-chat";
+import { agentChatEndpoint, cancelProjectAgents, configureAgentChat, stopAgentChat } from "./agent-chat";
 
 class Process extends EventEmitter {
   postMessage = vi.fn();
@@ -23,7 +23,9 @@ afterEach(() => {
 function start(prepareTurn: (input: { cwd: string; text: string }) => Promise<() => void>) {
   child = new Process();
   vi.mocked(utilityProcess.fork).mockReturnValue(child as unknown as ReturnType<typeof utilityProcess.fork>);
-  startAgentChat({ dataDir: "/data", mcpUrl: null, version: "test", prepareTurn });
+  configureAgentChat({ dataDir: "/data", mcpUrl: null, version: "test", prepareTurn });
+  void agentChatEndpoint();
+  child.emit("message", { type: "listening", url: "http://localhost:1234/?token=test" });
   child.emit("message", { type: "prepare-turn", id: "turn", cwd: "/project", text: "Edit" });
   return child;
 }

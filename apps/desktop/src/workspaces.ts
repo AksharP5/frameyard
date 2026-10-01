@@ -33,6 +33,7 @@ export class Workspaces {
   private readonly projects = new Map<string, Workspace>();
   private readonly tracked = new WeakSet<BrowserWindow>();
   private readonly modelOwners = new WeakSet<BrowserWindow>();
+  private readonly uiBusy = new WeakSet<BrowserWindow>();
   private readonly changing = new Set<string>();
   private heavyTail: Promise<void> = Promise.resolve();
   private stopped = false;
@@ -66,6 +67,14 @@ export class Workspaces {
 
   getWindow(dir: string): BrowserWindow | null {
     return this.projects.get(dir)?.window ?? null;
+  }
+
+  /** Keep a hidden editor alive while its own export or capture is running. */
+  setBusy(window: BrowserWindow, busy: boolean): void {
+    if (busy) this.uiBusy.add(window);
+    else this.uiBusy.delete(window);
+    const project = this.owner(window);
+    if (project) this.idle(project);
   }
 
   async open(path: string, signal?: AbortSignal): Promise<BrowserWindow> {
@@ -362,7 +371,7 @@ export class Workspaces {
 
   private idle(project: Workspace): void {
     this.keep(project);
-    if (this.stopped || project.loading || this.changing.has(project.dir) || this.running(project) || !project.window || project.window.isVisible()) return;
+    if (this.stopped || project.loading || this.changing.has(project.dir) || this.running(project) || !project.window || project.window.isVisible() || this.uiBusy.has(project.window)) return;
     project.idleTimer = setTimeout(() => {
       this.releaseRuntime(project);
       this.publish();

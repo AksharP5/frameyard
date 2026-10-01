@@ -18,12 +18,12 @@ import { Workspaces } from "./workspaces";
 import { toolByName } from "@diffusionstudio/dapi";
 import type { ToolArgs, ToolOutput } from "@diffusionstudio/dapi";
 import type { CodexRequest } from "./codex-contracts";
-import { agentChatEndpoint, cancelProjectAgents, deleteProjectChats, startAgentChat, stopAgentChat } from "./agent-chat";
+import { agentChatEndpoint, cancelProjectAgents, configureAgentChat, deleteProjectChats, stopAgentChat } from "./agent-chat";
 import { cliStatus, installCli, uninstallCli } from "./cli-install";
 import { applyMcp, healMcpRegistrations, mcpStatus } from "./mcp-install";
-import { enableHeadless } from "./headless";
 import { trackEvent, trackInstall } from "./analytics";
 import { setupAppMenu } from "./menu";
+import { AppTray } from "./tray";
 import { transcribeLocal } from "./transcription";
 import { openOriginalVideo, readOriginalVideo, closeOriginalVideo, disposeOriginalVideos, prepareOriginalAudio, listMediaStreams } from "./media-original";
 import { createRecoveryCheckpoint } from "./checkpoints";
@@ -65,9 +65,15 @@ import type { DeepLinkChannel } from "./main-channels";
 import type { LogEntry } from "@diffusionstudio/dapi";
 
 const DEV_URL = process.env.FRAMEYARD_DEV_URL ?? "http://localhost:5173";
+const WINDOW_IDLE_MS = 10 * 60 * 1000;
 const AUTH_PROTOCOL = "diffusion";
 const MACOS_CORNER_RADIUS = 18;
 const MACOS_BACKDROP = { blur: 80, red: 0.07, green: 0.07, blue: 0.07, alpha: 0.9 };
+const WINDOWS_OVERLAY_HEIGHT = 40;
+const WINDOWS_OVERLAY_COLORS = {
+  dark: { color: "#121212", symbolColor: "#a1a1a1" },
+  light: { color: "#f7f7f7", symbolColor: "#737373" },
+};
 
 function editorUrl(): string {
   return app.isPackaged ? pathToFileURL(join(app.getAppPath(), "web", "index.html")).href : DEV_URL;
@@ -243,7 +249,9 @@ function createWindow(show = true, background = false): BrowserWindow {
           vibrancy: "sidebar" as const,
           backgroundColor: "#00000000",
         }
-      : { backgroundColor: "#1c1c1c", autoHideMenuBar: true }),
+      : process.platform === "win32"
+        ? { titleBarStyle: "hidden" as const, titleBarOverlay: { ...WINDOWS_OVERLAY_COLORS.dark, height: WINDOWS_OVERLAY_HEIGHT }, backgroundColor: WINDOWS_OVERLAY_COLORS.dark.color, autoHideMenuBar: true }
+        : { backgroundColor: "#1c1c1c", autoHideMenuBar: true }),
     webPreferences: {
       preload: join(app.getAppPath(), "dist", "preload.js"),
       // Keep the playback timer active when the compositor stops presenting frames.
@@ -318,6 +326,56 @@ if (process.defaultApp && process.argv.length >= 2) {
 }
 
 if (app.requestSingleInstanceLock()) {
+  let tray: AppTray | null = null;
+  let quitting = false;
+  let mainIdleTimer: ReturnType<typeof setTimeout> | null = null;
+  const busyWindows = new Set<BrowserWindow>();
+  const visible = () => [...editorWindows].some(window => !window.isDestroyed() && window.isVisible());
+  const refreshTray = () => tray?.refresh();
+  const scheduleMainIdle = () => {
+    if (mainIdleTimer) clearTimeout(mainIdleTimer);
+    mainIdleTimer = null;
+    const window = mainWindow;
+    if (!window || window.isDestroyed() || window.isVisible() || busyWindows.has(window) || workspaces.directory(window)) return;
+    mainIdleTimer = setTimeout(() => {
+      mainIdleTimer = null;
+      if (mainWindow === window && !window.isDestroyed() && !window.isVisible() && !busyWindows.has(window) && !workspaces.directory(window)) window.destroy();
+    }, WINDOW_IDLE_MS);
+    mainIdleTimer.unref();
+  };
+  const createTrackedWindow = (show = true, background = false) => {
+    const window = createWindow(show, background);
+    window.on("close", event => {
+      if (quitting) return;
+      event.preventDefault();
+      window.hide();
+    });
+    window.on("show", () => { void app.dock?.show(); refreshTray(); scheduleMainIdle(); });
+    window.on("hide", () => { if (!visible()) void app.dock?.hide(); refreshTray(); scheduleMainIdle(); });
+    window.on("closed", () => { busyWindows.delete(window); refreshTray(); scheduleMainIdle(); });
+    scheduleMainIdle();
+    return window;
+  };
+  const showMainWindow = async () => {
+    const window = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createTrackedWindow(false);
+    await app.dock?.show();
+    if (window.webContents.isLoadingMainFrame()) {
+      await new Promise<void>(resolve => {
+        const timer = setTimeout(resolve, 5000);
+        window.once("ready-to-show", () => { clearTimeout(timer); resolve(); });
+      });
+    }
+    if (window.isDestroyed()) return;
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
+    refreshTray();
+  };
+  const hideWindows = () => {
+    for (const window of editorWindows) if (!window.isDestroyed() && window.isVisible()) window.hide();
+    if (!visible()) void app.dock?.hide();
+    refreshTray();
+  };
   mainBridge.authorizeSender((event) =>
     [...editorWindows].some(window => event.sender === window.webContents) &&
     event.senderFrame === event.sender.mainFrame &&
@@ -326,12 +384,21 @@ if (app.requestSingleInstanceLock()) {
   let legacyAgentProject: string | undefined;
   const renderer = new RendererCalls();
   const workspaces = new Workspaces({
-    createWindow: () => createWindow(false, true),
+    createWindow: () => createTrackedWindow(false, true),
     open: async (window, dir) => toolByName("open").output.parse(await renderer.call("open", { dir }, new AbortController().signal, window)),
     changed: result => {
       for (const window of editorWindows) mainBridge.emit(window, MAIN_CHANNELS.WORKSPACES_CHANGED, result);
+      refreshTray();
+      scheduleMainIdle();
     },
     release: unwatchProject,
+  });
+  tray = new AppTray({
+    visible,
+    active: () => busyWindows.size > 0 || workspaces.list().workspaces.some(workspace => workspace.agentActive || workspace.jobs.length > 0),
+    project: () => legacyAgentProject ?? null,
+    show: () => { void showMainWindow(); },
+    hide: hideWindows,
   });
   const codex = registerAgentBridge(app.getPath("userData"), dir => dir ? workspaces.getWindow(dir) : mainWindow, {
     window: (dir, signal) => workspaces.open(dir, signal),
@@ -347,11 +414,12 @@ if (app.requestSingleInstanceLock()) {
       const dir = await realpath(request.input.dir);
       const window = await workspaces.open(dir);
       const context = toolByName("context").output.parse(await renderer.call("context", {}, new AbortController().signal, window));
+      if (!context.projectDir || await realpath(context.projectDir) !== dir) throw new Error("The editor context does not belong to the requested project");
       if (workspaces.list().workspaces.some(value => value.dir === dir && value.agentActive)) throw new Error("Another agent is already working in this project");
-      request = { ...request, input: { ...request.input, dir, context: { ...context, ...request.input.context as object } } };
-      workspaces.setAgent(context.projectDir!, true);
+      request = { ...request, input: { ...request.input, dir, context: { ...context, ...request.input.context as object, projectDir: dir } } };
+      workspaces.setAgent(dir, true);
       try { return await codex.request(request); }
-      catch (error) { workspaces.setAgent(context.projectDir!, false, error instanceof Error ? error.message : String(error)); throw error; }
+      catch (error) { workspaces.setAgent(dir, false, error instanceof Error ? error.message : String(error)); throw error; }
     }
     return codex.request(request);
   };
@@ -378,31 +446,25 @@ if (app.requestSingleInstanceLock()) {
   mainBridge.handle(MAIN_CHANNELS.WORKSPACES_ACTION, input => workspaceAction(input));
   const dapi = new DapiServer({
     version: app.getVersion(), logs: () => logBuffer, docsDir: docsDir(),
-    onFirstConnection: enableHeadless, runAgentTool: codex.runTool,
+    runAgentTool: codex.runTool,
+    window: { visible, show: showMainWindow, hide: hideWindows },
     renderer, workspaces, workspaceAction,
-    getWindow: () => legacyAgentWindow && !legacyAgentWindow.isDestroyed() ? legacyAgentWindow : mainWindow,
+    getWindow: () => legacyAgentWindow && !legacyAgentWindow.isDestroyed() ? legacyAgentWindow
+      : mainWindow && !mainWindow.isDestroyed() ? mainWindow : createTrackedWindow(false),
     getDefaultProject: () => legacyAgentProject,
-    onOpenProject: (window, show) => { legacyAgentWindow = window; legacyAgentProject = workspaces.directory(window); if (show) { window.show(); window.focus(); } },
+    onOpenProject: (window, show) => { legacyAgentWindow = window; legacyAgentProject = workspaces.directory(window); if (show) { window.show(); window.focus(); } refreshTray(); },
     port: process.env.FRAMEYARD_MCP_PORT === undefined ? undefined : Number(process.env.FRAMEYARD_MCP_PORT),
   });
   app.on("second-instance", (_event, argv) => {
     const url = findProtocolUrl(argv);
     if (url) deliverDeepLink(url);
-
-    const hidden = isHiddenLaunch(argv);
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      if (hidden) return;
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.show();
-      mainWindow.focus();
-    } else {
-      createWindow(!hidden);
-    }
+    if (!isHiddenLaunch(argv)) void showMainWindow();
   });
 
   app.on("open-url", (event, url) => {
     event.preventDefault();
     deliverDeepLink(url);
+    void showMainWindow();
   });
 
   mainBridge.handle(MAIN_CHANNELS.APP_OPEN_EXTERNAL, ({ url }) => {
@@ -437,6 +499,20 @@ if (app.requestSingleInstanceLock()) {
     takePendingDeepLink(MAIN_CHANNELS.CHECKOUT_CALLBACK),
   );
   mainBridge.handle(MAIN_CHANNELS.WINDOW_IS_FULLSCREEN, (_input, event) => BrowserWindow.fromWebContents(event.sender)?.isFullScreen() ?? false);
+  mainBridge.handle(MAIN_CHANNELS.WINDOW_SET_COLOR_MODE, ({ mode }, event) => {
+    if (process.platform !== "win32") return;
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (window && !window.isDestroyed()) window.setTitleBarOverlay({ ...WINDOWS_OVERLAY_COLORS[mode], height: WINDOWS_OVERLAY_HEIGHT });
+  });
+  mainBridge.handle(MAIN_CHANNELS.WINDOW_SET_BUSY, ({ busy }, event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window) return;
+    if (busy) busyWindows.add(window);
+    else busyWindows.delete(window);
+    workspaces.setBusy(window, busy);
+    scheduleMainIdle();
+    refreshTray();
+  });
   mainBridge.handle(MAIN_CHANNELS.WINDOW_CAPTURE, async (_input, event) => {
     const window = BrowserWindow.fromWebContents(event.sender);
     if (!window || window.isDestroyed()) throw new Error("No editor window");
@@ -561,19 +637,20 @@ if (app.requestSingleInstanceLock()) {
     if (url) deliverDeepLink(url);
 
     dapi.start();
-    // The chat's sessions get the MCP server by URL; `?client=chat` keeps the
-    // app from switching into remote-controlled mode for them (see dapi/http).
+    // Chat starts its host only when a user opens it.
     dapi.mcpUrl().then((url) =>
-      startAgentChat({
+      configureAgentChat({
         dataDir: join(app.getPath("userData"), "agent-chat"),
-        mcpUrl: url ? `${url}&client=chat` : null,
+        mcpUrl: url,
         version: app.getVersion(),
         prepareTurn: codex.prepareTurn,
       }),
     );
     healMcpRegistrations();
     trackInstall();
-    createWindow(!isHiddenLaunch(process.argv));
+    tray?.start();
+    if (isHiddenLaunch(process.argv)) void app.dock?.hide();
+    else void showMainWindow();
   });
 
   let shutdown: "running" | "stopping" | "ready" = "running";
@@ -583,37 +660,25 @@ if (app.requestSingleInstanceLock()) {
     if (shutdown === "stopping") return;
     shutdown = "stopping";
     workspaces.dispose();
+    if (mainIdleTimer) clearTimeout(mainIdleTimer);
     codex.dispose();
     unwatchAll();
     stopAgentChat();
     dapi.stop();
+    tray?.destroy();
     void Promise.allSettled([shutdownAnimations(), disposeOriginalVideos()]).then((results) => {
       for (const result of results) {
         if (result.status === "rejected") console.error("[shutdown] Cleanup failed:", result.reason);
       }
       shutdown = "ready";
+      quitting = true;
       app.quit();
     });
   });
 
-  app.on("window-all-closed", () => {
-    if (process.platform !== "darwin") {
-      app.quit();
-    }
-  });
+  app.on("window-all-closed", () => {});
 
-  app.on("activate", () => {
-    if (!mainWindow || mainWindow.isDestroyed()) {
-      createWindow();
-      return;
-    }
-
-    if (mainWindow.isMinimized()) {
-      mainWindow.restore();
-    }
-    mainWindow.show();
-    mainWindow.focus();
-  });
+  app.on("activate", () => { void showMainWindow(); });
 } else {
   app.quit();
 }

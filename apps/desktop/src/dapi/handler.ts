@@ -4,6 +4,12 @@
 
 import type { AgentToolResult, LogEntry, ToolArgs, ToolResult, ToolOutput } from "@diffusionstudio/dapi";
 
+export type AppWindow = {
+  visible(): boolean;
+  show(): Promise<void>;
+  hide(): void;
+};
+
 /** What a main-process handler gets besides its arguments. */
 export type MainContext = {
   /** Fires when the caller cancels or goes away. */
@@ -13,12 +19,14 @@ export type MainContext = {
   logs(): LogEntry[];
   /** The app's version. */
   version: string;
+  /** The editor windows controlled by the `window` tool. */
+  window?: AppWindow;
   /** Runs one of Frameyard's project-aware editor tools. */
   runAgentTool(name: string, args: Record<string, unknown>): Promise<AgentToolResult>;
 };
 
 /** The tools that need the file system or a child process, not a window. */
-export type MainToolName = "logs" | "fonts" | "report" | "agent_tool" | "workspace";
+export type MainToolName = "logs" | "fonts" | "report" | "agent_tool" | "workspace" | "window";
 
 export type MainHandler<N extends MainToolName> = (args: ToolArgs<N>, ctx: MainContext) => Promise<ToolResult<N>>;
 

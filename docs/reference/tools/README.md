@@ -38,6 +38,7 @@ editing, and export still work. See [local setup](../../linux.md).
 | Tool | CLI | Does |
 | --- | --- | --- |
 | [`open`](./open.md) | `dapi open` | Open project |
+| [`workspace`](../../agent-workspace.md#parallel-videos) | `dapi workspace` | Manage parallel projects and agents |
 | [`context`](./context.md) | `dapi context` | App context |
 | [`capture`](./capture.md) | `dapi capture` | Capture frames |
 | [`check`](./check.md) | `dapi check` | Check structure |
@@ -49,11 +50,13 @@ editing, and export still work. See [local setup](../../linux.md).
 | [`media_waveform`](./media/waveform.md) | `dapi media waveform` | Waveform preview |
 | [`media_listen`](./media/listen.md) | `dapi media listen` | Hosted audio analysis; unavailable in local mode |
 | [`media_segment`](./media/segment.md) | `dapi media segment` | Segment and track an object locally |
+| [`agent_tool`](../../skills/editor.md) | `dapi tool` | Use native editor tools |
 | [`models`](./models.md) | `dapi models` | Hosted generation models; empty in local mode |
 | [`voices`](./voices.md) | `dapi voices` | Hosted speech voices; empty in local mode |
 | [`whoami`](./whoami.md) | `dapi whoami` | Hosted account; null in local mode |
 | [`logs`](./logs.md) | `dapi logs` | App logs |
 | [`screenshot`](./screenshot.md) | `dapi screenshot` | Window screenshot |
+| [`window`](./window.md) | `dapi window` | Show or hide the app window |
 | [`fonts`](./fonts.md) | `dapi fonts` | Fonts |
 | [`report`](./report.md) | `dapi report` | Report a bug |
 
@@ -63,7 +66,7 @@ How the surface is divided:
 - **Media inspection** (`media_*`): a file by path, without adding it to the project. Absolute paths and URLs work with or without an open project; library paths (`b-roll/clip.mp4`) need one.
 - **Masks.** [`media_segment`](./media/segment.md) segments and tracks an object in footage and writes the mask file a `<mask src>` names.
 - **What a declaration may name.** [`fonts`](./fonts.md) lists installed fonts. In a hosted build, [`models`](./models.md) and [`voices`](./voices.md) list choices for [`generate.*`](../jsx/generate.md).
-- **The app and the machine.** [`whoami`](./whoami.md), [`logs`](./logs.md), [`screenshot`](./screenshot.md), [`report`](./report.md).
+- **The app and the machine.** [`whoami`](./whoami.md), [`logs`](./logs.md), [`screenshot`](./screenshot.md), [`window`](./window.md), [`report`](./report.md).
 
 ## Downloading footage
 
