@@ -7,7 +7,7 @@ import { Computed, resolveCaptionDecoder, secondsToFrames, store } from '@diffus
 import { CLIP_BREAKPOINTS, CLIP_CORNER_RADIUS, CLIP_FONT, CLIP_LABEL_HEIGHT } from '../config';
 import { getClipStyle } from '../style';
 import { truncateText } from '../text';
-import { framesToPixels, getFrameRate, getResolution } from '../view';
+import { framesToPixels, getFrameRate, getResolution, getViewport } from '../view';
 
 import type { Entity, World } from 'koota';
 import type { RowCursor } from '../layout';
@@ -37,6 +37,7 @@ export function renderCaption(
 	const computed = store(world, Computed);
 	const resolution = getResolution(world, scene);
 	const fps = getFrameRate(world);
+	const [viewportLeft, viewportRight] = getViewport(world, scene, surface.layout.width);
 
 	const eid = entity.id();
 	const start = computed.start[eid] ?? 0;
@@ -44,6 +45,7 @@ export function renderCaption(
 	// The transcript's times are its own; the origin is where they begin on
 	// the scene's timeline.
 	const origin = computed.origin[eid] ?? 0;
+	const playbackRate = computed.playbackRate[eid] || 1;
 
 	const left = framesToPixels(start, resolution);
 	const style = getClipStyle(entity, null);
@@ -69,14 +71,14 @@ export function renderCaption(
 	for (const group of groups) {
 		if (!group.length) continue;
 
-		const groupStart = origin + secondsToFrames(group[0]?.start, fps);
-		const groupEnd = origin + secondsToFrames(group[group.length - 1]?.end, fps);
+		const groupStart = origin + secondsToFrames(group[0]?.start, fps) / playbackRate;
+		const groupEnd = origin + secondsToFrames(group[group.length - 1]?.end, fps) / playbackRate;
 		// A group the clip has been trimmed past is not shown at all.
 		if (groupEnd < start || groupStart >= end) continue;
 
 		const x = framesToPixels(Math.max(groupStart, start), resolution);
 		const width = framesToPixels(Math.min(groupEnd, end), resolution) - x;
-		if (width < 2) continue;
+		if (width < 2 || x + width <= viewportLeft || x >= viewportRight) continue;
 
 		ctx.fillStyle = style.primary!;
 		ctx.beginPath();
