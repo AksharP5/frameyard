@@ -130,6 +130,8 @@ Preview quality can be Source, Half, or Quarter. Export decodes the original
 media, independent of the preview copy. The FPS and skipped-frame readout measures
 uninterrupted normal-speed playback; it resets after seeks, loops and buffering.
 The decoding warning applies only to visible video in the active scene.
+Audio files open when playback needs them. Preview warms the two nearest future
+audio sources up to 1.5 seconds ahead and buffers if an incoming cut is not ready.
 Rendering is 8-bit SDR. Preview may use a cached H.264 copy for a source the browser cannot decode, but export reads the original file. [Linux media limits](linux.md#media-limits) covers unsupported source formats.
 
 ## Saving and media
