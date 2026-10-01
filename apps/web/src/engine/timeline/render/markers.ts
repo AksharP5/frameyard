@@ -12,19 +12,24 @@ const dragOrigins = new WeakMap<World, { id: string; time: number }>();
 export function renderMarkers(world: World, scene: Entity, surface: TimelineSurfaceState): void {
 	const { ctx, pointer, canvas } = surface;
 	if (!ctx || !pointer || !canvas) return;
+	const resolution = getResolution(world, scene);
+	const position = pointer.position;
+	if (!position || position.state === 'idle' || position.state === 'pressed') dragOrigins.delete(world);
+	const origin = dragOrigins.get(world);
+	if (origin && position && position.state !== 'idle') {
+		// Apply the active drag before culling so it can return from offscreen.
+		editMarker(world, scene, origin.id, { time: origin.time + pixelsToFrames(position.deltaX, resolution) });
+	}
 	const markers = scene.get(Markers)?.value;
 	if (!markers?.length) return;
-	const resolution = getResolution(world, scene);
 	const scroll = getScrollX(world, scene) * resolution;
 	for (const marker of markers) {
 		const x = framesToPixels(marker.time, resolution) - scroll;
 		if (x < -8 || x > canvas.width) continue;
 		const hit = pointer.scope(`marker-${marker.id}`).region(x - 5, RULER_HEIGHT - 10, 10, 10);
-		if (hit.pressed) dragOrigins.set(world, { id: marker.id, time: marker.time });
-		const origin = dragOrigins.get(world);
-		const position = pointer.position;
-		if (hit.dragging && origin?.id === marker.id && position && position.state !== 'idle') {
-			editMarker(world, scene, marker.id, { time: origin.time + pixelsToFrames(position.deltaX, resolution) });
+		if (hit.dragging && !origin && position && position.state !== 'idle') {
+			dragOrigins.set(world, { id: marker.id, time: marker.time });
+			editMarker(world, scene, marker.id, { time: marker.time + pixelsToFrames(position.deltaX, resolution) });
 		}
 		if (hit.clicked) seekTimeline(world, marker.time);
 		if (hit.hovering || hit.dragging) surface.cursor = 'ew-resize';
