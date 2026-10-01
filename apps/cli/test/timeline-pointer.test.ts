@@ -43,7 +43,16 @@ test('pointer hits follow stacking, passthrough, mouse events and changed frame 
   pointer.move(event(120, 25));
   assert.deepEqual(draw().map(r => r.dragging), [false, true, false]);
   pointer.up(event(75, 25));
-  assert.deepEqual(draw().map(r => r.clicked), [false, true, true]);
+  const released = draw();
+  assert.deepEqual(released.map(r => r.dragging), [false, true, false], 'returning to the press position remains a drag');
+  assert.deepEqual(released.map(r => r.clicked), [false, false, false]);
+  pointer.reset();
+  pointer.down(event(75, 25));
+  draw(); pointer.reset();
+  pointer.up(event(75, 25));
+  const clicked = draw();
+  assert.deepEqual(clicked.map(r => r.clicked), [false, true, true]);
+  assert.deepEqual(clicked.map(r => r.doubleClicked), [false, false, false], 'a preceding drag does not count as a click');
   pointer.reset();
   transform.e = 200;
   draw(); pointer.reset();

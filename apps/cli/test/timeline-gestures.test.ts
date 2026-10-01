@@ -145,7 +145,7 @@ function fixture() {
     draw();
   }
   function move(x: number, y: number, shiftKey = false) { event(body, "pointermove", x, y, { shiftKey }); draw(); }
-  function up(x: number, y: number) { event(body, "pointerup", x, y, { buttons: 0 }); draw(); }
+  function up(x: number, y: number, shiftKey = false) { event(body, "pointerup", x, y, { buttons: 0, shiftKey }); draw(); }
   function close() { controller.detachCanvas(); controller.unmount(); world.destroy(); }
   return { ...api, world, scene, clip, surface, controller, canvas, parent, layers, body, window, resizeCallbacks, mutationCallbacks, edits, reports, down, move, up, close };
 }
@@ -229,6 +229,33 @@ test("workarea handles snap to cuts and the playhead, and moving the bar preserv
   f.move(80, 30);
   assert.equal(f.scene.get(f.Workarea)?.end, 120);
   f.close();
+});
+
+test("ruler scrubbing and workarea creation consume the release position", () => {
+  const f = fixture();
+  try {
+    f.down(180, 12);
+    f.move(200, 12);
+    f.up(280, 12);
+    assert.equal(f.scene.get(f.Computed)?.localTime, 140);
+    f.down(180, 12, true);
+    f.move(200, 12, true);
+    f.up(270, 12, true);
+    assert.deepEqual(f.scene.get(f.Workarea), { start: 90, end: 135 });
+  } finally { f.close(); }
+});
+
+test("workarea clicks do not move it and a double click still removes it", () => {
+  const f = fixture();
+  try {
+    f.scene.add(f.Workarea({ start: 60, end: 120 }));
+    f.down(180, 29);
+    f.up(180, 29);
+    assert.deepEqual(f.scene.get(f.Workarea), { start: 60, end: 120 });
+    f.down(180, 29);
+    f.up(180, 29);
+    assert.equal(f.scene.has(f.Workarea), false);
+  } finally { f.close(); }
 });
 
 test("middle drag pans without changing clips or playhead, clamps at zero, and ends on cancellation", () => {
