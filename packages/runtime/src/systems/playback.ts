@@ -92,8 +92,8 @@ function prepareAudio(world: World, scene: Entity, entity: Entity, source: Entit
 	return false;
 }
 
-/** Prime the opening playback window, including cuts within it. */
-function preparePlayback(world: World, scene: Entity, entity: Entity = scene, parentMuted = false, starting = true): boolean {
+/** Prime opening media, or protect incoming audio cuts during playback. */
+function preparePlayback(world: World, scene: Entity, starting = true, entity: Entity = scene, parentMuted = false): boolean {
 	if (entity.has(Hidden)) return true;
 	const computed = entity.get(Computed);
 	const frame = scene.get(Computed)!.localTime;
@@ -145,7 +145,7 @@ function preparePlayback(world: World, scene: Entity, entity: Entity = scene, pa
 	}
 
 	for (const child of getNodeChildren(world, entity)) {
-		if (!preparePlayback(world, scene, child, muted, starting)) ready = false;
+		if (!preparePlayback(world, scene, starting, child, muted)) ready = false;
 	}
 	return ready;
 }
@@ -198,7 +198,7 @@ function advancePlayhead(world: World, entity: Entity): void {
 		audioPlayback.wasPlaying[eid] = true;
 		return;
 	}
-	if (speed === 1 && !preparePlayback(world, entity, entity, false, false)) {
+	if (speed === 1 && !preparePlayback(world, entity, false)) {
 		resetDecoders(world, entity);
 		audioPlayback.wasPlaying[eid] = false;
 		if (!playback.buffering[eid]) entity.set(Playback, { buffering: true });
@@ -658,10 +658,13 @@ export function playbackSystem(world: World): void {
 	}
 	if (world.get(Mode)?.value === 'realtime') {
 		for (const source of world.query(AudioDecoderHandle)) {
-			if (audio.active.has(source) || collectAncestors(source).some(parent => parent.get(Playback)?.buffering)) continue;
+			if (audio.active.has(source)) continue;
+			const ancestors = collectAncestors(source);
+			const hidden = ancestors.some(parent => parent.has(Hidden));
+			if (!hidden && ancestors.some(parent => parent.get(Playback)?.buffering)) continue;
 			// Eviction releases prepared PCM, while an outgoing cut's queued
-			// sound can finish. Pause/seek still stop every scheduled buffer.
-			source.get(AudioDecoderHandle)?.reset({ stopScheduled: false });
+			// sound can finish. Hidden layers stop their queued sound immediately.
+			source.get(AudioDecoderHandle)?.reset({ stopScheduled: hidden });
 		}
 	}
 	images.warmup.sort((a, b) => a.distance - b.distance);

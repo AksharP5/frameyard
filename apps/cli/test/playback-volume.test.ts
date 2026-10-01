@@ -8,7 +8,7 @@ const built = await build({
   stdin: {
     contents: `
       export { createWorld } from 'koota';
-      export { AudioEngine, Computed, Volume, Playback, Workarea, FrameRate, AudioPlayback, AudioBusHandle, AudioDecoderHandle, AssetId, Audio, Group, Geometry, ChildOf, Root, Mode, Time, Soloed, Muted } from './traits';
+      export { AudioEngine, Computed, Volume, Playback, Workarea, FrameRate, AudioPlayback, AudioBusHandle, AudioDecoderHandle, AssetId, Audio, Group, Geometry, ChildOf, Root, Mode, Time, Soloed, Muted, Hidden } from './traits';
       export { resolveAudioBus, playbackSystem } from './systems/playback';
       export { setPlayhead, togglePlayback } from './actions/playback';
     `,
@@ -19,12 +19,12 @@ const built = await build({
 });
 const module = { exports: {} as
   Pick<typeof import("koota"), "createWorld">
-  & Pick<typeof import("../../../packages/runtime/src/traits"), "AudioEngine" | "Computed" | "Volume" | "Playback" | "Workarea" | "FrameRate" | "AudioPlayback" | "AudioBusHandle" | "AudioDecoderHandle" | "AssetId" | "Audio" | "Group" | "Geometry" | "ChildOf" | "Root" | "Mode" | "Time" | "Soloed" | "Muted">
+  & Pick<typeof import("../../../packages/runtime/src/traits"), "AudioEngine" | "Computed" | "Volume" | "Playback" | "Workarea" | "FrameRate" | "AudioPlayback" | "AudioBusHandle" | "AudioDecoderHandle" | "AssetId" | "Audio" | "Group" | "Geometry" | "ChildOf" | "Root" | "Mode" | "Time" | "Soloed" | "Muted" | "Hidden">
   & Pick<typeof import("../../../packages/runtime/src/systems/playback"), "resolveAudioBus" | "playbackSystem">
   & Pick<typeof import("../../../packages/runtime/src/actions/playback"), "setPlayhead" | "togglePlayback">
 };
 runInThisContext(`(function(module,exports,AudioContext){"use strict";${built.outputFiles[0].text}\n})`)(module, module.exports, class AudioContext {});
-const { createWorld, AudioEngine, Computed, Volume, resolveAudioBus, Playback, Workarea, FrameRate, setPlayhead, togglePlayback, playbackSystem, AudioPlayback, AudioBusHandle, AudioDecoderHandle, AssetId, Audio, Group, Geometry, ChildOf, Root, Mode, Time, Soloed, Muted } = module.exports;
+const { createWorld, AudioEngine, Computed, Volume, resolveAudioBus, Playback, Workarea, FrameRate, setPlayhead, togglePlayback, playbackSystem, AudioPlayback, AudioBusHandle, AudioDecoderHandle, AssetId, Audio, Group, Geometry, ChildOf, Root, Mode, Time, Soloed, Muted, Hidden } = module.exports;
 
 class GainParam {
   private current = 1;
@@ -162,6 +162,40 @@ test("one buffering scene preserves its preparation while other scenes release o
     assert.equal(loadingResets, 0, 'startup preparation survives cleanup');
     assert.deepEqual(outgoingResets, [{ stopScheduled: false }], 'another scene still releases PCM without stopping scheduled sound');
   } finally { world.destroy(); }
+});
+
+test("hiding a playing clip or group stops its queued sound while ordinary cuts preserve outgoing sound", () => {
+  for (const hiddenTarget of ['clip', 'group']) {
+    const context = Object.assign(audioContext(), { currentTime: 0 });
+    const world = createWorld(FrameRate({ value: 30 }), AudioEngine({ context }), Mode({ value: 'realtime' }));
+    const root = world.spawn(); world.add(Root); world.set(Root, root);
+    const scene = world.spawn(Group, Playback({ playing: true }), Computed({ duration: 600 }), ChildOf(root));
+    const group = world.spawn(Group, Computed({ start: 0, end: 600, duration: 600 }), ChildOf(scene));
+    const queued = new Set<string>();
+    const resets = new Map<string, { stopScheduled?: boolean }>();
+    const clips = ['hidden', 'outgoing'].map(id => {
+      const decoder = {
+        assetId: id, stream: 0, ready: true, isPrepared: () => true,
+        playTo: async () => { queued.add(id); },
+        reset: (options: { stopScheduled?: boolean } = {}) => {
+          resets.set(id, options);
+          if (options.stopScheduled !== false) queued.delete(id);
+        },
+      };
+      const duration = id === 'hidden' ? 600 : 30;
+      return world.spawn(Geometry, Audio, AssetId({ value: id }), AudioDecoderHandle(decoder as never), Computed({ start: 0, end: duration, duration }), ChildOf(id === 'hidden' ? group : scene));
+    });
+    try {
+      playbackSystem(world);
+      assert.deepEqual(queued, new Set(['hidden', 'outgoing']));
+      (hiddenTarget === 'clip' ? clips[0] : group).add(Hidden);
+      context.currentTime = 1.5;
+      playbackSystem(world);
+      assert.deepEqual(resets.get('hidden'), { stopScheduled: true }, `${hiddenTarget}: hiding cancels already queued sound`);
+      assert.deepEqual(resets.get('outgoing'), { stopScheduled: false });
+      assert.deepEqual(queued, new Set(['outgoing']), 'the rendered tail of an ordinary cut may finish');
+    } finally { world.destroy(); }
+  }
 });
 
 test("stable volume and mute state do not write AudioParam on every playback tick", () => {
