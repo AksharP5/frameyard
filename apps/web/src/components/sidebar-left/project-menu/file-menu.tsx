@@ -17,7 +17,7 @@ import { For, Show, createMemo } from "solid-js";
 import { toast } from "somoto";
 import { forgetProjectBundle, generateProjectName } from "@/lib/db";
 import { createProject, deleteProject, duplicateProject, ensureProjectsRoot } from "@/projects";
-import { AssetId, ChildOf, Name, Root, Scene, Workarea, getActiveEntity, sortByItemIndex } from "@diffusionstudio/runtime";
+import { AssetId, ChildOf, Library, Name, Root, Scene, Workarea, getActiveEntity, sortByItemIndex } from "@diffusionstudio/runtime";
 import { assetName } from "@diffusionstudio/assets";
 import { useQuery, useTrait, useWorld } from "@diffusionstudio/koota-solid";
 import { useActiveScene } from "@/engine/hooks/use-active-scene";
@@ -29,6 +29,9 @@ import { useLayout } from "@/context/layout";
 import { useExport } from "@/context/export";
 import { mimeTypeToExtension } from "@/utils";
 import { openMediaPortability } from '@/components/media-portability';
+import { editorSession } from '@/dapi/session';
+import { ProjectConfig } from '@/engine/traits';
+import { flushProjectEdits } from '@/projects/edits';
 
 import type { Entity } from "koota";
 
@@ -62,7 +65,15 @@ export function FileMenu() {
 
   const handleDeleteProject = async () => {
     try {
-      await deleteProject(project.dir());
+      const dir = project.dir();
+      const session = editorSession();
+      if (session?.project.dir() === dir) {
+        await flushProjectEdits(session.world);
+        await Promise.all([session.world.get(Library)?.settle(), session.world.get(ProjectConfig)?.settle()]);
+        await flushProjectEdits(session.world);
+        if (editorSession() !== session || project.dir() !== dir) throw new Error("The project changed before it could be deleted");
+      }
+      await deleteProject(dir);
       forgetProjectBundle(project.id());
       navigate("/?dashboard=projects");
     } catch (e) {

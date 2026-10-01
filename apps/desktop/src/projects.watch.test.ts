@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { mkdir, mkdtemp, open, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { shell } from "electron";
 
 import { MAIN_CHANNELS, MAIN_WIRE } from "./main-channels";
 import { TEMP_PREFIX, tempPathFor, writeFileAtomic } from "./atomic";
@@ -17,11 +18,11 @@ import { TEMP_PREFIX, tempPathFor, writeFileAtomic } from "./atomic";
 vi.mock("electron", () => ({
   app: { isPackaged: false, getPath: () => tmpdir() },
   dialog: {},
-  shell: {},
+  shell: { trashItem: vi.fn() },
   ipcMain: { on: () => { } },
 }));
 
-const { noteContent, noteRenamed, unwatchProject, watchProject, writeManifest } = await import("./projects");
+const { deleteProject, noteContent, noteRenamed, unwatchProject, watchProject, writeManifest } = await import("./projects");
 
 let dir: string;
 let changed: string[] = [];
@@ -65,6 +66,13 @@ afterEach(async () => {
 });
 
 describe("watchProject", () => {
+  it("keeps reporting source edits after moving the project to Trash fails", async () => {
+    vi.mocked(shell.trashItem).mockRejectedValueOnce(new Error("Trash unavailable"));
+    await expect(deleteProject(dir)).rejects.toThrow("Trash unavailable");
+    await writeFile(join(dir, "index.tsx"), "export const stage = 1;\n", "utf8");
+    await waitFor("index.tsx");
+  });
+
   it("reports a file someone else writes", async () => {
     await writeFile(join(dir, "index.tsx"), "export const stage = 1;\n", "utf8");
     await waitFor("index.tsx");
