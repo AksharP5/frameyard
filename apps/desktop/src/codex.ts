@@ -25,6 +25,7 @@ type ActiveTurn = {
   turnId?: string;
   cancelled: boolean;
   finished: boolean;
+  controller: AbortController;
   started: PromiseWithResolvers<void>;
   interrupt?: Promise<void>;
   generated: Promise<void>[];
@@ -137,6 +138,7 @@ export class CodexService {
       const turn = this.active.get(dir);
       if (turn) {
         turn.cancelled = true;
+        turn.controller.abort(new Error("Codex turn was cancelled"));
         this.declineApprovals(turn);
         this.requests.cancel(turn.threadId);
         await this.interrupt(turn);
@@ -412,7 +414,7 @@ export class CodexService {
   }
 
   private async send(dir: string, threadId: string, checkpointId: string, text: string, context: string, settings: { model?: string; effort?: string }, imageUrl?: string, videoFrames: VideoFrames = [], skills: Awaited<ReturnType<typeof validateSkills>> = [], images: CodexImage[] = []) {
-    const turn: ActiveTurn = { dir, threadId, checkpointId, cancelled: false, finished: false, started: Promise.withResolvers<void>(), generated: [] };
+    const turn: ActiveTurn = { dir, threadId, checkpointId, cancelled: false, finished: false, controller: new AbortController(), started: Promise.withResolvers<void>(), generated: [] };
     this.active.set(dir, turn);
     try {
       const result = object(await this.server.request("turn/start", {
@@ -556,6 +558,7 @@ export class CodexService {
   private async finish(turn: ActiveTurn, status: "completed" | "interrupted" | "failed", error?: string): Promise<void> {
     if (turn.finished) return;
     turn.finished = true;
+    if (status !== "completed") turn.controller.abort(new Error(error ?? "Codex turn was interrupted"));
     turn.started.resolve();
     this.declineApprovals(turn);
     this.requests.cancel(turn.threadId);
@@ -585,7 +588,7 @@ export class CodexService {
       const name = string(params.tool, "tool name");
       const supported = (this.options.tools ?? defaultTools).some((tool) => tool.name === name);
       if (params.namespace || !supported) throw new Error("Unknown editor tool");
-      return this.options.runTool(turn.dir, name, params.arguments).catch((error: unknown) => ({
+      return this.options.runTool(turn.dir, name, params.arguments, turn.controller.signal).catch((error: unknown) => ({
         contentItems: [{ type: "inputText", text: error instanceof Error ? error.message : "Editor tool failed" }], success: false,
       }));
     }
