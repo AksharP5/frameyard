@@ -26,6 +26,7 @@ import { mediaSegment } from "./tools/media-segment";
 import { fonts } from "./tools/fonts";
 import { report } from "./tools/report";
 import { agentTool } from "./tools/agent-tool";
+import { appWindow } from "./tools/window";
 
 /**
  * Every tool, in the order a listing shows them: the project loop first
@@ -52,6 +53,7 @@ export const catalog = [
   whoami,
   logs,
   screenshot,
+  appWindow,
   fonts,
   report,
 ] as const;

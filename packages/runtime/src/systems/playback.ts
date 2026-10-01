@@ -496,7 +496,7 @@ function forwardDecoders(world: World, scene: Entity, entity: Entity, videos: Vi
 			}
 		}
 
-		if (visualsEnabled && entity.has(Geometry)) {
+		if (visualsEnabled) {
 			forwardMaskDecoders(world, scene, entity, videos);
 		}
 	}

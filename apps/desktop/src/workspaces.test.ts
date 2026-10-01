@@ -13,11 +13,12 @@ const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); vi.useRealTimers(); });
 
 function windowFor() {
-  let destroyed = false, visible = false;
+  let destroyed = false, visible = false, minimized = false;
   const window = Object.assign(new EventEmitter(), {
-    isDestroyed: () => destroyed, isVisible: () => visible, isMinimized: () => false,
-    focus: vi.fn(), restore: vi.fn(), webContents: new EventEmitter(),
-    show: () => { visible = true; window.emit("show"); },
+    isDestroyed: () => destroyed, isVisible: () => visible, isMinimized: () => minimized,
+    focus: vi.fn(), restore: vi.fn(() => { minimized = false; visible = true; window.emit("show"); }), webContents: new EventEmitter(),
+    show: () => { visible = true; minimized = false; window.emit("show"); },
+    minimize: () => { minimized = true; visible = false; window.emit("hide"); },
     hide: () => { visible = false; window.emit("hide"); },
     destroy: () => { destroyed = true; window.emit("closed"); },
   });
@@ -127,6 +128,33 @@ it("never evicts a hidden runtime with a pending job", async () => {
   await job;
   await vi.advanceTimersByTimeAsync(100);
   expect(window.isDestroyed()).toBe(true);
+});
+
+it("keeps a hidden editor alive while its own export is busy", async () => {
+  const { manager, dirs } = await setup(100);
+  vi.useFakeTimers();
+  const window = await manager.open(dirs[0]!);
+  manager.setBusy(window, true);
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(window.isDestroyed()).toBe(false);
+  manager.setBusy(window, false);
+  await vi.advanceTimersByTimeAsync(100);
+  expect(window.isDestroyed()).toBe(true);
+});
+
+it("keeps a minimized project window until it is explicitly hidden", async () => {
+  const { manager, dirs } = await setup(100);
+  vi.useFakeTimers();
+  const window = await manager.show(dirs[0]!).then(() => manager.getWindow(dirs[0]!));
+  expect(window).not.toBeNull();
+  window!.minimize();
+  expect(manager.list().workspaces[0]?.visible).toBe(true);
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(window!.isDestroyed()).toBe(false);
+  window!.restore();
+  window!.hide();
+  await vi.advanceTimersByTimeAsync(100);
+  expect(window!.isDestroyed()).toBe(true);
 });
 
 

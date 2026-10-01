@@ -196,6 +196,7 @@ test("a timed-out native capture destroys its renderer before the next project's
       const window = Object.assign(new EventEmitter(), {
         isDestroyed: () => destroyed,
         isVisible: () => false,
+        isMinimized: () => false,
         webContents: Object.assign(new EventEmitter(), { isLoadingMainFrame: () => false }),
         destroy: () => {
           destroyed = true;
