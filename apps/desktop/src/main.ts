@@ -560,7 +560,7 @@ if (app.requestSingleInstanceLock()) {
         if (legacyAgentProject === dir) { legacyAgentProject = undefined; legacyAgentWindow = null; }
         return id;
       }));
-    deleteProjectChats(id);
+    await deleteProjectChats(id);
   });
   mainBridge.handle(MAIN_CHANNELS.PROJECTS_COMPILE, ({ dir }) => compileProject(dir));
   mainBridge.handle(MAIN_CHANNELS.PROJECTS_WRITE, ({ dir, edits }) => writeProject(dir, edits));
