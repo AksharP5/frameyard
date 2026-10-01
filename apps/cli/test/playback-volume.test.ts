@@ -164,8 +164,8 @@ test("one buffering scene preserves its preparation while other scenes release o
   } finally { world.destroy(); }
 });
 
-test("hiding a playing clip or group stops its queued sound while ordinary cuts preserve outgoing sound", () => {
-  for (const hiddenTarget of ['clip', 'group']) {
+test("hiding or muting a playing clip or group stops its queued sound while ordinary cuts preserve outgoing sound", () => {
+  for (const [control, target] of [[Hidden, 'clip'], [Hidden, 'group'], [Muted, 'clip'], [Muted, 'group']] as const) {
     const context = Object.assign(audioContext(), { currentTime: 0 });
     const world = createWorld(FrameRate({ value: 30 }), AudioEngine({ context }), Mode({ value: 'realtime' }));
     const root = world.spawn(); world.add(Root); world.set(Root, root);
@@ -173,7 +173,7 @@ test("hiding a playing clip or group stops its queued sound while ordinary cuts 
     const group = world.spawn(Group, Computed({ start: 0, end: 600, duration: 600 }), ChildOf(scene));
     const queued = new Set<string>();
     const resets = new Map<string, { stopScheduled?: boolean }>();
-    const clips = ['hidden', 'outgoing'].map(id => {
+    const clips = ['controlled', 'outgoing'].map(id => {
       const decoder = {
         assetId: id, stream: 0, ready: true, isPrepared: () => true,
         playTo: async () => { queued.add(id); },
@@ -182,16 +182,16 @@ test("hiding a playing clip or group stops its queued sound while ordinary cuts 
           if (options.stopScheduled !== false) queued.delete(id);
         },
       };
-      const duration = id === 'hidden' ? 600 : 30;
-      return world.spawn(Geometry, Audio, AssetId({ value: id }), AudioDecoderHandle(decoder as never), Computed({ start: 0, end: duration, duration }), ChildOf(id === 'hidden' ? group : scene));
+      const duration = id === 'controlled' ? 600 : 30;
+      return world.spawn(Geometry, Audio, AssetId({ value: id }), AudioDecoderHandle(decoder as never), Computed({ start: 0, end: duration, duration }), ChildOf(id === 'controlled' ? group : scene));
     });
     try {
       playbackSystem(world);
-      assert.deepEqual(queued, new Set(['hidden', 'outgoing']));
-      (hiddenTarget === 'clip' ? clips[0] : group).add(Hidden);
+      assert.deepEqual(queued, new Set(['controlled', 'outgoing']));
+      (target === 'clip' ? clips[0] : group).add(control);
       context.currentTime = 1.5;
       playbackSystem(world);
-      assert.deepEqual(resets.get('hidden'), { stopScheduled: true }, `${hiddenTarget}: hiding cancels already queued sound`);
+      assert.deepEqual(resets.get('controlled'), { stopScheduled: true }, `${target}: disabling audio cancels already queued sound`);
       assert.deepEqual(resets.get('outgoing'), { stopScheduled: false });
       assert.deepEqual(queued, new Set(['outgoing']), 'the rendered tail of an ordinary cut may finish');
     } finally { world.destroy(); }

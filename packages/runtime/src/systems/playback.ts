@@ -660,11 +660,11 @@ export function playbackSystem(world: World): void {
 		for (const source of world.query(AudioDecoderHandle)) {
 			if (audio.active.has(source)) continue;
 			const ancestors = collectAncestors(source);
-			const hidden = ancestors.some(parent => parent.has(Hidden));
-			if (!hidden && ancestors.some(parent => parent.get(Playback)?.buffering)) continue;
+			const excluded = world.has(Silent) || ancestors.some(parent => parent.has(Hidden) || parent.has(Muted));
+			if (!excluded && ancestors.some(parent => parent.get(Playback)?.buffering)) continue;
 			// Eviction releases prepared PCM, while an outgoing cut's queued
-			// sound can finish. Hidden layers stop their queued sound immediately.
-			source.get(AudioDecoderHandle)?.reset({ stopScheduled: hidden });
+			// sound can finish. Hidden or muted layers stop queued sound immediately.
+			source.get(AudioDecoderHandle)?.reset({ stopScheduled: excluded });
 		}
 	}
 	images.warmup.sort((a, b) => a.distance - b.distance);
