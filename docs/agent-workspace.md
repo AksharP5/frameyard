@@ -136,8 +136,8 @@ This also replaces later manual edits; the confirmation explains that scope.
 Current files are saved in **Checkpoints** first, so you can recover them.
 The timeline reloads without clearing your chat draft or attachments. Undo is
 available for the latest Frameyard turn in that conversation, including a stopped
-or failed turn, and survives reopening Frameyard. Finish the active turn before
-undoing it. Native chat history is retained.
+or failed turn, and survives reopening Frameyard. Finish or cancel the project's
+agent turn and tool jobs before undoing it. Native chat history is retained.
 
 You can prepare attachments while a turn runs. Use **Attach images**, paste an
 image, drop image files into the composer, or choose **Attach selected image**
@@ -310,7 +310,9 @@ Checkpoints live in `.diffusion/checkpoints/` inside the project and reuse uncha
 media. Only regular project files are captured. Symlinked or external media,
 `.git`, dependencies, virtual environments, caches, temporary animation output,
 and private `.diffusion` state are excluded. Empty directories are not retained.
-Checkpoints cannot run during an active Frameyard agent turn, render, or asset import. Finish edits or renders
+Checkpoints cannot run during an active Frameyard agent turn, render, or asset import.
+Finish or cancel that project's queued or running CLI/MCP jobs before restoring.
+Other projects can continue working. Finish edits or renders
 in other programs before saving or restoring. Checkpoints do not save changes
 made by terminal agents automatically; save one before handing off to a terminal.
 Keep a separate backup if you need protection against losing the project folder.

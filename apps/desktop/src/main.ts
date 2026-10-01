@@ -336,6 +336,7 @@ if (app.requestSingleInstanceLock()) {
   const codex = registerAgentBridge(app.getPath("userData"), dir => dir ? workspaces.getWindow(dir) : mainWindow, {
     window: (dir, signal) => workspaces.open(dir, signal),
     run: (dir, name, signal, operation, heavy) => workspaces.run(dir, name, signal, operation, heavy),
+    withProjectIdle: (dir, operation) => workspaces.withProjectIdle(dir, operation),
     externalTurn: (dir, active) => workspaces.setAgent(dir, active),
     event: event => {
       if (event.type === "turn") workspaces.setAgent(event.dir, event.status === "started", event.error);

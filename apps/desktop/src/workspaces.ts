@@ -78,7 +78,7 @@ export class Workspaces {
     if (!isAbsolute(path)) throw new Error("The project directory must be absolute");
     const dir = await realpath(path);
     signal?.throwIfAborted();
-    if (this.changing.has(dir)) throw new DapiError("busy", "Wait for this project's folder change to finish.");
+    if (this.changing.has(dir)) throw new DapiError("busy", "Wait for this project's file change to finish.");
     let project = this.projects.get(dir);
     if (!project) {
       project = { dir, name: basename(dir), id: "", window: null, ready: Promise.resolve(), loading: false, agentActive: false, jobs: new Map() };
@@ -90,7 +90,7 @@ export class Workspaces {
   private async openRuntime(project: Workspace, signal?: AbortSignal): Promise<BrowserWindow> {
     if (this.stopped) throw new Error("Frameyard is shutting down");
     signal?.throwIfAborted();
-    if (this.changing.has(project.dir)) throw new DapiError("busy", "Wait for this project's folder change to finish.");
+    if (this.changing.has(project.dir)) throw new DapiError("busy", "Wait for this project's file change to finish.");
     if (!project.window || project.window.isDestroyed()) this.mount(project);
     this.keep(project);
     await this.waitReady(project, signal);
@@ -102,7 +102,7 @@ export class Workspaces {
   /** Register a project already opened through the user's editor. */
   async adopt(window: BrowserWindow, path: string): Promise<void> {
     const dir = await realpath(path);
-    if (this.changing.has(dir)) throw new DapiError("busy", "Wait for this project's folder change to finish.");
+    if (this.changing.has(dir)) throw new DapiError("busy", "Wait for this project's file change to finish.");
     const existing = this.projects.get(dir);
     if (existing?.window && existing.window !== window && !existing.window.isDestroyed()) {
       throw new Error("This project is already open in another workspace. Review it from Projects.");
@@ -136,7 +136,7 @@ export class Workspaces {
   }
 
   setAgent(dir: string, active: boolean, error?: string): void {
-    if (active && this.changing.has(dir)) throw new DapiError("busy", "Wait for this project's folder change to finish.");
+    if (active && this.changing.has(dir)) throw new DapiError("busy", "Wait for this project's file change to finish.");
     const project = this.projects.get(dir);
     if (!project) return;
     project.agentActive = active;
@@ -243,21 +243,29 @@ export class Workspaces {
     });
   }
 
-  private async change<T>(path: string, window: BrowserWindow | null, action: "renaming" | "deleting", operation: (dir: string, project?: Workspace) => Promise<T>): Promise<T> {
+  private change<T>(path: string, window: BrowserWindow | null, action: "renaming" | "deleting", operation: (dir: string, project?: Workspace) => Promise<T>): Promise<T> {
+    return this.withProjectIdle(path, dir => {
+      const project = this.projects.get(dir);
+      if (project?.window && !project.window.isDestroyed() && project.window !== window) {
+        throw new DapiError("busy", `${action === "renaming" ? "Rename" : "Delete"} this open project from its editor. Review it from Projects first.`);
+      }
+      return operation(dir, project);
+    });
+  }
+
+  /** File replacement must not overlap editor jobs, even those waiting for the GPU. */
+  async withProjectIdle<T>(path: string, operation: (dir: string) => Promise<T>): Promise<T> {
     if (this.stopped) throw new Error("Frameyard is shutting down");
     const dir = await realpath(path);
     const project = this.projects.get(dir);
     if (this.changing.has(dir) || project?.agentActive || project?.loading || project?.jobs.size) {
-      throw new DapiError("busy", `Finish or cancel this project's work before ${action} it.`);
-    }
-    if (project?.window && !project.window.isDestroyed() && project.window !== window) {
-      throw new DapiError("busy", `${action === "renaming" ? "Rename" : "Delete"} this open project from its editor. Review it from Projects first.`);
+      throw new DapiError("busy", "Finish or cancel this project's work before changing its files.");
     }
     this.changing.add(dir);
     if (project) this.keep(project);
     this.publish();
     try {
-      return await operation(dir, project);
+      return await operation(dir);
     } finally {
       this.changing.delete(dir);
       this.publish();
