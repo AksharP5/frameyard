@@ -224,6 +224,7 @@ test("a timed-out native capture destroys its renderer before the next project's
   const bridge = app.registerAgentBridge(directory, dir => dir ? manager.getWindow(dir) : null, {
     window: (dir, signal) => manager.open(dir, signal),
     run: (dir, name, signal, operation, heavy) => manager.run(dir, name, signal, operation, heavy),
+    withProjectIdle: (dir, operation) => manager.withProjectIdle(dir, operation),
     event: () => {},
   });
   const first = bridge.runTool(firstDir, "editor_capture", {});

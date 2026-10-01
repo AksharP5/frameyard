@@ -33,6 +33,7 @@ const descriptions = {
 type WorkspaceBridge = {
   window(dir: string, signal?: AbortSignal): Promise<BrowserWindow>;
   run<T>(dir: string, name: string, signal: AbortSignal | undefined, operation: (window: BrowserWindow, signal: AbortSignal) => Promise<T>, heavy?: boolean): Promise<T>;
+  withProjectIdle<T>(dir: string, operation: (dir: string) => Promise<T>): Promise<T>;
   event(event: import("./codex-contracts").CodexEvent): void;
   externalTurn?(dir: string, active: boolean): void;
 };
@@ -127,17 +128,20 @@ export function registerAgentBridge(dataDir: string, getWindow: (dir?: string) =
     return workspaces.run(dir, name, signal, (window, signal) => dispatchTool(dir, name, args, signal, window), heavy);
   };
 
-  const restoreProject = async (dir: string, id: string) => {
-    unwatchProject(dir);
-    try {
-      return await restoreCheckpoint(dir, id);
-    } finally {
-      // A refresh failure must not make a completed restore retryable.
-      try { watchProject(getWindow(dir), dir); }
-      catch (error) { console.error("[projects] Could not restart watching after restore", error); }
-      try { mainBridge.emit(getWindow(dir), MAIN_CHANNELS.PROJECTS_CHANGED, { dir, path: "package.json" }); }
-      catch (error) { console.error("[projects] Could not refresh editor after restore", error); }
-    }
+  const restoreProject = (dir: string, id: string) => {
+    const restore = async (path: string) => {
+      unwatchProject(path);
+      try {
+        return await restoreCheckpoint(path, id);
+      } finally {
+        // A refresh failure must not make a completed restore retryable.
+        try { watchProject(getWindow(path), path); }
+        catch (error) { console.error("[projects] Could not restart watching after restore", error); }
+        try { mainBridge.emit(getWindow(path), MAIN_CHANNELS.PROJECTS_CHANGED, { dir: path, path: "package.json" }); }
+        catch (error) { console.error("[projects] Could not refresh editor after restore", error); }
+      }
+    };
+    return workspaces ? workspaces.withProjectIdle(dir, restore) : restore(dir);
   };
 
   const codex = new CodexService({

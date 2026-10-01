@@ -345,7 +345,7 @@ it("reserves only the renaming project and releases the reservation after a fail
   try {
     await expect(manager.open(dirs[0]!)).rejects.toMatchObject({ code: "busy" });
     await expect(manager.run(dirs[0]!, "context", undefined, async () => undefined)).rejects.toMatchObject({ code: "busy" });
-    expect(() => manager.setAgent(dirs[0]!, true)).toThrow("folder change to finish");
+    expect(() => manager.setAgent(dirs[0]!, true)).toThrow("file change to finish");
     expect(await manager.run(dirs[1]!, "context", undefined, async () => "independent")).toBe("independent");
   } finally { finish.resolve(); await failure; }
   expect(await manager.open(dirs[0]!)).toBe(window);
@@ -427,4 +427,23 @@ it("reserves a deleting project and restores its ownership when trash fails", as
   expect(release).not.toHaveBeenCalledWith(dirs[0]);
   expect(await manager.open(dirs[0]!)).toBe(window);
   expect(await manager.delete(dirs[0]!, window, deleteProject)).toBe("");
+});
+
+it("waits for an opening editor before replacing files and leaves closed projects unmounted", async () => {
+  const { dirs } = await setup();
+  const ready = Promise.withResolvers<{ name: string }>();
+  const window = windowFor();
+  const createWindow = vi.fn(() => window);
+  const manager = new Workspaces({ createWindow, open: () => ready.promise, changed() {}, release() {} });
+  cleanups.push(() => { manager.dispose(); window.destroy(); });
+  const opening = manager.open(dirs[0]!);
+  await vi.waitFor(() => expect(manager.list().workspaces[0]?.status).toBe("loading"));
+  const replace = vi.fn(async () => "restored");
+  try {
+    await expect(manager.withProjectIdle(dirs[0]!, replace)).rejects.toMatchObject({ code: "busy" });
+    expect(replace).not.toHaveBeenCalled();
+  } finally { ready.resolve({ name: "Ready" }); await opening; }
+  expect(await manager.withProjectIdle(dirs[1]!, replace)).toBe("restored");
+  expect(createWindow).toHaveBeenCalledTimes(1);
+  expect(manager.list().workspaces.map(row => row.dir)).toEqual([dirs[0]]);
 });

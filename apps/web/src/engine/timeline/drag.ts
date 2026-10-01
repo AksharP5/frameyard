@@ -22,6 +22,8 @@ import {
 	KeyframeDragOrigin,
 	Sequential,
 	TrimDragOrigin,
+	findClosestParentGeometry,
+	framesToSeconds,
 	getParentEntity,
 	getEntityTree,
 	store,
@@ -29,11 +31,12 @@ import {
 import { Or } from 'koota';
 
 import { resolveSequentialOverlaps } from '../overlap';
+import { getDocumentEditor } from '../editor';
 import { authoredTime, moveEntityTo } from '../timing';
 import { editableClipTargets, isClipLocked, selectedClips, trimLinkedClips } from '../clip-links';
 import { findSnapDelta, findSnapFrame } from './snapping';
 import { timelineEditing, slipClips, rippleTrim, rollOrSlide, type EditMode } from '../timeline-editing';
-import { framesToPixels, getResolution, getTimelineScene, pixelsToFrames } from './view';
+import { framesToPixels, getFrameRate, getResolution, getTimelineScene, pixelsToFrames } from './view';
 
 import type { Entity, World } from 'koota';
 import type { TimelineSurfaceState } from './surface';
@@ -67,7 +70,22 @@ export function updateDragGestures(world: World, surface: TimelineSurfaceState):
 
 	// Apply the whole move before drawing. Offscreen linked clips still travel.
 	const scene = getTimelineScene(world);
-	if (scene && world.query(NODES, ClipDragOrigin).length) applyClipDrag(world, surface, getResolution(world, scene));
+	if (!scene) return;
+	const resolution = getResolution(world, scene);
+	if (world.query(NODES, ClipDragOrigin).length) applyClipDrag(world, surface, resolution);
+	for (const keyframe of world.query(KeyframeDragOrigin)) applyKeyframeDrag(world, surface, keyframe, resolution);
+}
+
+/** Active keyframes keep moving even when their diamonds leave the viewport. */
+export function applyKeyframeDrag(world: World, surface: TimelineSurfaceState, keyframe: Entity, resolution: number): void {
+	const origin = keyframe.get(KeyframeDragOrigin);
+	const computed = findClosestParentGeometry(keyframe)?.get(Computed);
+	const position = surface.pointer?.position;
+	if (!origin || !computed || !position || position.state === 'idle') return;
+
+	// The pointer moves in scene frames; the keyframe lives in its clip's time.
+	const moved = pixelsToFrames(position.deltaX, resolution) * (computed.playbackRate || 1);
+	getDocumentEditor(world).editProperty(keyframe, 'time', framesToSeconds(Math.max(0, origin.time + moved), getFrameRate(world)));
 }
 
 /**

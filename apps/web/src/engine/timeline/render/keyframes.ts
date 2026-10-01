@@ -10,14 +10,14 @@ import {
 	KeyframeDragOrigin,
 	Selected,
 	findClosestParentGeometry,
-	framesToSeconds,
 	store,
 } from '@diffusionstudio/runtime';
 
 import { getDocumentEditor } from '../../editor';
 import { KEYFRAME_TRACK_HEIGHT } from '../config';
+import { applyKeyframeDrag } from '../drag';
 import { getRowTransform } from '../layout';
-import { framesToPixels, getFrameRate, getResolution, getViewport, pixelsToFrames } from '../view';
+import { framesToPixels, getResolution, getViewport } from '../view';
 
 import type { Entity, World } from 'koota';
 import type { RowCursor } from '../layout';
@@ -104,7 +104,7 @@ export function renderKeyframeTrack(
 
 		if (x + HITBOX_HALF < viewportLeft || x - HITBOX_HALF > viewportRight) continue;
 
-		handleKeyframe(world, surface, keyframe, time, x, centerY, rate, resolution);
+		handleKeyframe(world, surface, keyframe, time, x, centerY, resolution);
 
 		const selected = keyframe.has(Selected);
 		ctx.strokeStyle = selected ? surface.colors.border.ring : COLOR;
@@ -145,7 +145,6 @@ function handleKeyframe(
 	time: number,
 	x: number,
 	centerY: number,
-	rate: number,
 	resolution: number,
 ): void {
 	const pointer = surface.pointer!;
@@ -171,16 +170,8 @@ function handleKeyframe(
 	if (dragging && !keyframe.has(KeyframeDragOrigin)) {
 		keyframe.add(KeyframeDragOrigin);
 		keyframe.set(KeyframeDragOrigin, { time });
+		applyKeyframeDrag(world, surface, keyframe, resolution);
 	}
-
-	const origin = keyframe.get(KeyframeDragOrigin);
-	const position = pointer.position;
-	if (!origin || !position || position.state === 'idle') return;
-
-	// The pointer moves in scene frames; the keyframe lives in the clip's,
-	// which run `rate` times as fast.
-	const moved = pixelsToFrames(position.deltaX, resolution) * rate;
-	editor.editProperty(keyframe, 'time', framesToSeconds(Math.max(0, origin.time + moved), getFrameRate(world)));
 }
 
 function diamond(ctx: CanvasRenderingContext2D, x: number, y: number): void {
