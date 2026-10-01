@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { runInThisContext } from 'node:vm';
+import { setImmediate } from 'node:timers/promises';
 import { build } from 'esbuild';
 import type { AudioAsset } from '../../../packages/assets/src/types.ts';
 import type { AudioBus } from '../../../packages/runtime/src/media/audio-bus.ts';
@@ -44,7 +45,7 @@ const module = { exports: {} as
   & Pick<typeof import('../../../packages/runtime/src/actions/playback.ts'), 'setPlayhead'>
 };
 runInThisContext(`(function(module,exports,AudioBuffer){"use strict";${built.outputFiles[0].text}\n})`)(module, module.exports, BufferData);
-const { AudioDecoder, AudioBufferSink, createWorld, AudioEngine, AudioPlayback, AudioDecoderHandle, AudioBusHandle, Audio, AssetId, ChildOf, Computed, FrameRate, Geometry, Group, Mode, Playback, Root, Time, Trim, playbackSystem, setPlayhead } = module.exports;
+const { AudioDecoder, AudioBufferSink, createWorld, AudioEngine, AudioPlayback, AudioDecoderHandle, AudioBusHandle, Audio, AssetId, ChildOf, Computed, FramePromises, FrameRate, Geometry, Group, Hidden, Library, Mode, Muted, Playback, Root, Silent, Time, Trim, Workarea, playbackSystem, setPlayhead } = module.exports;
 
 function recording(): AudioAsset {
   const pcm = Buffer.alloc(44 + 48000 * 2 * 4);
@@ -272,6 +273,7 @@ test('upcoming audio uses the same time lookahead at every FPS and source playba
         await decoder.init();
         playbackSystem(world);
         assert.equal(scheduled.length, 0);
+        await decoder.prepare(2, 2 + 0.5 * rate, 2 + rate);
         context.currentTime = scene.get(AudioPlayback)!.contextOffsetInSeconds + 0.6;
         playbackSystem(world);
         assert.equal(scheduled.length, 1, `${fps} FPS, ${rate}x: the incoming clip schedules before its cut`);
@@ -352,6 +354,7 @@ test('high output latency preserves audio lookahead across cuts and stops at the
   for (const [start, end, sourceStart] of [[0, 72, 0], [72, 120, 120], [120, 180, 0]]) {
     const decoder = new AudioDecoder(recording()), scheduled: Parameters<InstanceType<typeof AudioDecoder>['playTo']>[1][] = [], stopped: { stopScheduled?: boolean }[] = [];
     await decoder.init();
+    await decoder.prepare(sourceStart / 60, sourceStart / 60 + 0.5, (sourceStart + Math.min(end, 90) - start) / 60);
     decoder.playTo = async (_bus, options) => { scheduled.push(options); };
     const reset = decoder.reset.bind(decoder);
     decoder.reset = (options = {}) => { stopped.push(options); reset(options); };
@@ -373,5 +376,107 @@ test('high output latency preserves audio lookahead across cuts and stops at the
     playbackSystem(world);
     assert.equal(resets[1].at(-1)?.stopScheduled, false, 'audio ends while the visual playhead catches up to the audible endpoint');
     assert.equal(calls[2].length, 0);
+    playbackSystem(world);
+    assert.equal(scene.get(Playback)?.buffering, false, 'already rendered audio must not be re-prepared while the picture catches up');
   } finally { decoders.forEach(d => d.reset()); world.destroy(); }
+});
+
+test('paused, silent, hidden, muted and shuttle playback do not open audio sources', async () => {
+  for (const state of ['paused', 'silent', 'hidden', 'muted', 'shuttle']) {
+    const { bus, context } = output();
+    const world = createWorld(FrameRate({ value: 30 }), Mode({ value: 'realtime' }), AudioEngine({ context: context as unknown as AudioContext }));
+    const root = world.spawn(); world.add(Root); world.set(Root, root);
+    const scene = world.spawn(Group, Playback({ playing: state !== 'paused', speed: state === 'shuttle' ? -1 : 1 }), Computed({ duration: 3000 }), ChildOf(root));
+    const group = world.spawn(Group, Computed({ start: 0, end: 3000, duration: 3000 }), ChildOf(scene));
+    if (state === 'silent') world.add(Silent);
+    if (state === 'hidden') group.add(Hidden);
+    if (state === 'muted') group.add(Muted);
+    let reads = 0;
+    const assets = new Map<string, AudioAsset>();
+    for (let index = 0; index < 64; index++) {
+      const asset = recording(); asset.id = `tone-${index}`;
+      const read = asset.handle.getFile.bind(asset.handle);
+      asset.handle.getFile = async () => { reads++; return read(); };
+      assets.set(asset.id, asset);
+      world.spawn(Geometry, Audio, AssetId({ value: asset.id }), AudioBusHandle(bus), Computed({ start: 0, end: 120, duration: 120 }), ChildOf(group));
+    }
+    world.add(Library({ get: id => assets.get(id) }));
+    try {
+      for (let tick = 0; tick < 5; tick++) { playbackSystem(world); await setImmediate(); }
+      assert.equal(reads, 0, state);
+      assert.equal(world.query(AudioDecoderHandle).length, 0, `${state}: no dormant decoder is created`);
+    } finally { world.destroy(); }
+  }
+});
+
+test('audio prewarming retains only the nearest two future sources and respects the workarea', async () => {
+  for (const rangeEnd of [20, 3000]) {
+    const { bus, context } = output();
+    const world = createWorld(FrameRate({ value: 30 }), Mode({ value: 'realtime' }), AudioEngine({ context: context as unknown as AudioContext }));
+    const root = world.spawn(); world.add(Root); world.set(Root, root);
+    const scene = world.spawn(Group, Playback({ playing: true }), Workarea({ start: 0, end: rangeEnd }), Computed({ duration: 3000 }), ChildOf(root));
+    const reads: string[] = [], assets = new Map<string, AudioAsset>();
+    for (let index = 0; index < 64; index++) {
+      const asset = recording(); asset.id = `tone-${index}`;
+      const read = asset.handle.getFile.bind(asset.handle);
+      asset.handle.getFile = async () => { reads.push(asset.id); return read(); };
+      assets.set(asset.id, asset);
+      world.spawn(Geometry, Audio, AssetId({ value: asset.id }), AudioBusHandle(bus), Computed({ start: 30 + index, end: 150 + index, origin: 30 + index, duration: 120 }), ChildOf(scene));
+    }
+    world.add(Library({ get: id => assets.get(id) }));
+    try {
+      for (let tick = 0; tick < 20; tick++) { playbackSystem(world); await setImmediate(); }
+      assert.deepEqual(reads, rangeEnd === 20 ? [] : ['tone-0', 'tone-1'], 'a stationary playhead cannot eventually warm every dense future clip');
+      for (const source of world.query(AudioDecoderHandle)) assert.equal(source.get(AudioDecoderHandle)?.isPrepared(0), true);
+    } finally { for (const source of world.query(AudioDecoderHandle)) source.get(AudioDecoderHandle)?.reset(); world.destroy(); }
+  }
+});
+
+test('a slow incoming source buffers before the cut and preserves its trimmed opening samples', async () => {
+  for (const fps of [30, 60, 120]) {
+    for (const rate of [1, 2]) {
+      const { bus, nodes, context } = output();
+      const world = createWorld(FrameRate({ value: fps }), Mode({ value: 'realtime' }), AudioEngine({ context: context as unknown as AudioContext }));
+      const root = world.spawn(); world.add(Root); world.set(Root, root);
+      const scene = world.spawn(Group, Playback({ playing: true }), Computed({ duration: 20 * fps }), ChildOf(root));
+      const pending = Promise.withResolvers<File>();
+      const asset = recording(), read = asset.handle.getFile.bind(asset.handle);
+      asset.handle.getFile = () => pending.promise;
+      world.add(Library({ get: () => asset }));
+      const clip = world.spawn(Geometry, Audio, AssetId({ value: asset.id }), AudioBusHandle(bus), Trim({ start: fps }), Computed({ start: 10 * fps, end: 11 * fps, origin: 10 * fps - fps / rate, duration: fps, playbackRate: rate }), ChildOf(scene));
+      try {
+        playbackSystem(world);
+        const initialOrigin = scene.get(AudioPlayback)!.contextOffsetInSeconds;
+        context.currentTime = initialOrigin + 8.6;
+        playbackSystem(world);
+        assert.ok(clip.get(AudioDecoderHandle), 'prewarming begins before the scheduling deadline');
+        assert.equal(scene.get(Playback)?.buffering, false);
+        context.currentTime = initialOrigin + 9.5;
+        playbackSystem(world);
+        const heldFrame = scene.get(Computed)!.localTime;
+        assert.equal(scene.get(Playback)?.buffering, true);
+        context.currentTime = initialOrigin + 10.5;
+        playbackSystem(world);
+        assert.equal(scene.get(Computed)?.localTime, heldFrame, 'file loading cannot advance past the incoming cut');
+        assert.equal(nodes.length, 0);
+        pending.resolve(await read());
+        const decoder = clip.get(AudioDecoderHandle)!;
+        await decoder.prepare(1, 1 + 0.5 * rate, 1 + rate);
+        const calls: Parameters<typeof decoder.playTo>[1][] = [];
+        const playTo = decoder.playTo.bind(decoder);
+        decoder.playTo = async (bus, options) => { calls.push(options); await playTo(bus, options); };
+        world.add(FramePromises({ list: [] }));
+        playbackSystem(world);
+        assert.equal(scene.get(Playback)?.buffering, false);
+        const resumedOrigin = scene.get(AudioPlayback)!.contextOffsetInSeconds;
+        context.currentTime = resumedOrigin + (9.6 - heldFrame / fps);
+        playbackSystem(world);
+        const cutTime = resumedOrigin + 10 - heldFrame / fps;
+        await Promise.all(world.get(FramePromises)!.list!);
+        assert.equal(calls[0].relativeFrom, 1, 'runtime scheduling begins at the source trim');
+        assert.ok(nodes.some(node => Math.abs(node.when - cutTime) < 1 / 48000), `${fps} FPS, ${rate}x: the first trimmed sample still lands on the cut`);
+        assert.equal(scene.get(Playback)?.buffering, false);
+      } finally { pending.resolve(await read()); clip.get(AudioDecoderHandle)?.reset(); world.destroy(); }
+    }
+  }
 });

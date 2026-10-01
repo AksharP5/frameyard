@@ -41,6 +41,12 @@ const MAX_IMAGE_PREVIEW_BYTES = 256 * 1024 * 1024;
 const MAX_WARMUP_IMAGES = 32;
 const AUDIO_LOOKAHEAD_SECONDS = 0.5;
 const AUDIO_START_LEAD_SECONDS = 0.05;
+const MAX_WARMUP_AUDIO = 2;
+
+type AudioForwarding = {
+	active: Set<Entity>;
+	warmup: { scene: Entity; entity: Entity; source: Entity; distance: number }[];
+};
 
 type VideoForwarding = {
 	active: Set<Entity>;
@@ -56,13 +62,45 @@ function framePromises(world: World) {
 	return world.get(FramePromises)?.list ?? null;
 }
 
+function audioRenderFrame(world: World, scene: Entity): number {
+	const frame = scene.get(Computed)!.localTime;
+	const context = world.get(AudioEngine)?.context;
+	const clock = scene.get(AudioPlayback);
+	if (world.get(Mode)?.value !== 'realtime' || !context || !clock?.wasPlaying) return frame;
+	const delay = clock.contextOffsetInSeconds - clock.timelineOffsetInSeconds;
+	return Math.max(frame, (context.currentTime - delay) * (world.get(FrameRate)?.value ?? 30));
+}
+
+function prepareAudio(world: World, scene: Entity, entity: Entity, source: Entity, frame: number): boolean {
+	const { decoder } = resolveAudioDecoder(world, source, entity.get(AudioStream)?.value ?? source.get(AudioStream)?.value ?? 0) ?? {};
+	if (!decoder || decoder.error) return true;
+	resolveAudioBus(world, entity);
+	const busesReady = !collectAncestors(entity).some(parent => parent.get(AudioBusHandle)?.isReady === false);
+	const computed = entity.get(Computed)!;
+	const fps = world.get(FrameRate)?.value ?? 30;
+	const window = getSourceWindow(entity);
+	const rate = computed.playbackRate || 1;
+	const from = clamp(Math.round((frame - computed.origin) * rate), window.in, window.out) / fps;
+	const end = Math.min(computed.end, scene.get(Workarea)?.end ?? scene.get(Computed)!.duration);
+	const trimEnd = Math.min(window.out, (end - computed.origin) * rate) / fps;
+	if (decoder.isPrepared(from)) return busesReady;
+	void decoder.prepare(from, from + AUDIO_LOOKAHEAD_SECONDS * rate, trimEnd).catch((error: unknown) => {
+		if (decoder.error) return;
+		decoder.error = error instanceof Error ? error.message : String(error);
+		console.error(decoder.error);
+	});
+	return false;
+}
+
 /** Prime the opening playback window, including cuts within it. */
-function preparePlayback(world: World, scene: Entity, entity: Entity = scene, parentMuted = false): boolean {
+function preparePlayback(world: World, scene: Entity, entity: Entity = scene, parentMuted = false, starting = true): boolean {
 	if (entity.has(Hidden)) return true;
 	const computed = entity.get(Computed);
 	const frame = scene.get(Computed)!.localTime;
+	const renderFrame = starting ? frame : audioRenderFrame(world, scene);
 	const fps = world.get(FrameRate)?.value ?? 30;
-	if (entity !== scene && computed && (frame + AUDIO_LOOKAHEAD_SECONDS * fps < computed.start || frame >= computed.end)) return true;
+	const end = scene.get(Workarea)?.end ?? scene.get(Computed)!.duration;
+	if (entity !== scene && computed && (renderFrame + AUDIO_LOOKAHEAD_SECONDS * fps < computed.start || computed.start >= end || renderFrame >= Math.min(computed.end, end))) return true;
 
 	const muted = parentMuted || entity.has(Muted);
 	const intrinsic = getIntrinsicPaint(entity);
@@ -81,7 +119,7 @@ function preparePlayback(world: World, scene: Entity, entity: Entity = scene, pa
 	}
 
 	let ready = true;
-	if (computed && frame >= computed.start && !entity.has(Culled)) {
+	if (starting && computed && frame >= computed.start && !entity.has(Culled)) {
 		for (const image of images) {
 			const decoder = resolveImageDecoder(world, image)?.decoder;
 			if (decoder && !decoder.ready && !decoder.failed) ready = false;
@@ -98,28 +136,16 @@ function preparePlayback(world: World, scene: Entity, entity: Entity = scene, pa
 			if (!prepared) ready = false;
 		}
 	}
-	if (source && computed && !muted) {
-		const { decoder } = resolveAudioDecoder(world, source, entity.get(AudioStream)?.value ?? source.get(AudioStream)?.value ?? 0) ?? {};
-		if (decoder && !decoder.error) {
-			resolveAudioBus(world, entity);
-			if (collectAncestors(entity).some(parent => parent.get(AudioBusHandle)?.isReady === false)) ready = false;
-			const window = getSourceWindow(entity);
-			const rate = computed.playbackRate || 1;
-			const localFrame = Math.round((frame - computed.origin) * rate);
-			const from = clamp(localFrame, window.in, window.out) / fps;
-			if (!decoder.isPrepared(from)) {
-				ready = false;
-				void decoder.prepare(from, localFrame / fps + AUDIO_LOOKAHEAD_SECONDS * rate, window.out / fps).catch((error: unknown) => {
-					if (decoder.error) return;
-					decoder.error = error instanceof Error ? error.message : String(error);
-					console.error(decoder.error);
-				});
-			}
+	if (source && computed && !muted && !world.has(Silent)) {
+		// Keep a future cut's preparation anchored at its trim-in even when
+		// the device render clock has passed it but the audible picture has not.
+		if (starting || computed.start > frame) {
+			if (!prepareAudio(world, scene, entity, source, starting ? frame : computed.start)) ready = false;
 		}
 	}
 
 	for (const child of getNodeChildren(world, entity)) {
-		if (!preparePlayback(world, scene, child, muted)) ready = false;
+		if (!preparePlayback(world, scene, child, muted, starting)) ready = false;
 	}
 	return ready;
 }
@@ -170,6 +196,12 @@ function advancePlayhead(world: World, entity: Entity): void {
 		audioPlayback.timelineOffsetInSeconds[eid] = computed.localTimeInSeconds[eid]!;
 		audioPlayback.previousSpeed[eid] = speed;
 		audioPlayback.wasPlaying[eid] = true;
+		return;
+	}
+	if (speed === 1 && !preparePlayback(world, entity, entity, false, false)) {
+		resetDecoders(world, entity);
+		audioPlayback.wasPlaying[eid] = false;
+		if (!playback.buffering[eid]) entity.set(Playback, { buffering: true });
 		return;
 	}
 
@@ -267,14 +299,9 @@ function forwardCaptionDecoder(world: World, _scene: Entity, entity: Entity): vo
  * points at the sub-entity carrying the audio (a video fill), while the
  * timing still comes from the clip entity itself.
  */
-function forwardAudioDecoder(world: World, scene: Entity, entity: Entity, audioSource?: Entity): void {
-	if (world.has(Silent) || entity.has(Muted)
+function forwardAudioDecoder(world: World, scene: Entity, entity: Entity, audio: AudioForwarding, muted: boolean, audioSource?: Entity): void {
+	if (world.has(Silent) || muted
 		|| (world.get(Mode)?.value === 'realtime' && (scene.get(Playback)?.speed !== 1 || scene.get(Playback)?.buffering))) return;
-
-	const resolvedDecoder = resolveAudioDecoder(world, audioSource ?? entity, entity.get(AudioStream)?.value ?? audioSource?.get(AudioStream)?.value ?? 0);
-	if (!resolvedDecoder) return;
-
-	const { decoder, initPromise } = resolvedDecoder;
 
 	const computed = store(world, Computed);
 	const audioPlayback = store(world, AudioPlayback);
@@ -282,6 +309,22 @@ function forwardAudioDecoder(world: World, scene: Entity, entity: Entity, audioS
 	const eid = entity.id();
 	const sid = scene.id();
 	const fps = world.get(FrameRate)?.value ?? 30;
+	const realtime = world.get(Mode)?.value === 'realtime';
+	const currentTime = audioRenderFrame(world, scene);
+	const end = realtime ? Math.min(computed.end[eid]!, scene.get(Workarea)?.end ?? computed.duration[sid]!) : computed.end[eid]!;
+	const holder = audioSource ?? entity;
+	if (realtime) {
+		if (!playback.playing[sid] || computed.start[eid]! >= end || currentTime >= end) return;
+		const distance = computed.start[eid]! - currentTime;
+		if (distance > AUDIO_LOOKAHEAD_SECONDS * fps) {
+			if (distance <= WARMUP_SECONDS * fps) audio.warmup.push({ scene, entity, source: holder, distance });
+			return;
+		}
+	}
+	audio.active.add(holder);
+	const resolvedDecoder = resolveAudioDecoder(world, holder, entity.get(AudioStream)?.value ?? holder.get(AudioStream)?.value ?? 0);
+	if (!resolvedDecoder) return;
+	const { decoder, initPromise } = resolvedDecoder;
 
 	const source = getSourceWindow(entity);
 
@@ -294,15 +337,9 @@ function forwardAudioDecoder(world: World, scene: Entity, entity: Entity, audioS
 	// to the workarea start, so this term shifts scheduled audio back into the
 	// encoded window (and resolves to 0 when there is no workarea).
 	const audioDelay = audioOffset - playbackOffset;
-	const realtime = world.get(Mode)?.value === 'realtime';
-	const context = world.get(AudioEngine)?.context;
 	// Schedule from the render clock, independently of the output latency used
 	// by the visual playhead, so every device keeps the full decode lookahead.
-	const currentTime = realtime && context
-		? Math.max(computed.localTime[sid]!, (context.currentTime - audioDelay) * fps)
-		: computed.localTime[sid]!;
 	const localFrame = realtime ? Math.round((currentTime - origin) * playbackRate) : computed.localTime[eid]!;
-	const end = realtime ? Math.min(computed.end[eid]!, scene.get(Workarea)?.end ?? computed.duration[sid]!) : computed.end[eid]!;
 	const bus = resolveAudioBus(world, entity);
 
 	if (!decoder.ready) {
@@ -410,9 +447,10 @@ function forwardMaskDecoders(world: World, scene: Entity, entity: Entity, videos
 /**
  * Forward decoders for a child entity and its node descendants.
  */
-function forwardDecoders(world: World, scene: Entity, entity: Entity, videos: VideoForwarding, images: ImageForwarding): void {
+function forwardDecoders(world: World, scene: Entity, entity: Entity, videos: VideoForwarding, images: ImageForwarding, audio: AudioForwarding, parentMuted = false): void {
 	if (entity.has(Hidden)) return;
 	const paintStore = store(world, Paint);
+	const muted = parentMuted || entity.has(Muted);
 
 	const culled = entity.has(Culled);
 	const visualsEnabled = !culled && world.get(Mode)?.value !== 'offline-audio';
@@ -468,11 +506,11 @@ function forwardDecoders(world: World, scene: Entity, entity: Entity, videos: Vi
 	}
 
 	if (intrinsicVideo || entity.has(Audio) || paintAudioSource) {
-		forwardAudioDecoder(world, scene, entity, paintAudioSource);
+		forwardAudioDecoder(world, scene, entity, audio, muted, paintAudioSource);
 	}
 
 	for (const child of getNodeChildren(world, entity)) {
-		forwardDecoders(world, scene, child, videos, images);
+		forwardDecoders(world, scene, child, videos, images, audio, muted);
 	}
 }
 
@@ -609,8 +647,22 @@ export function playbackSystem(world: World): void {
 
 	const videos: VideoForwarding = { active: new Set(), warmup: [] };
 	const images: ImageForwarding = { active: new Set(), warmup: [] };
+	const audio: AudioForwarding = { active: new Set(), warmup: [] };
 	for (const entity of world.query(Or(Geometry, Group, AdjustmentLayer), ChildOf(world.get(Root)!))) {
-		forwardDecoders(world, entity, entity, videos, images);
+		forwardDecoders(world, entity, entity, videos, images, audio);
+	}
+	audio.warmup.sort((a, b) => a.distance - b.distance);
+	for (const { scene, entity, source } of audio.warmup.slice(0, MAX_WARMUP_AUDIO)) {
+		audio.active.add(source);
+		prepareAudio(world, scene, entity, source, entity.get(Computed)!.start);
+	}
+	if (world.get(Mode)?.value === 'realtime') {
+		for (const source of world.query(AudioDecoderHandle)) {
+			if (audio.active.has(source) || collectAncestors(source).some(parent => parent.get(Playback)?.buffering)) continue;
+			// Eviction releases prepared PCM, while an outgoing cut's queued
+			// sound can finish. Pause/seek still stop every scheduled buffer.
+			source.get(AudioDecoderHandle)?.reset({ stopScheduled: false });
+		}
 	}
 	images.warmup.sort((a, b) => a.distance - b.distance);
 	const imageAssets = new Set<string>();
@@ -660,9 +712,7 @@ export function playbackSystem(world: World): void {
 	// Sync audio buses
 	let soloed: Set<Entity> | null = null;
 	const buses = world.query(AudioBusHandle);
-	for (const entity of buses) {
-		if (!entity.has(Soloed)) continue;
-
+	for (const entity of world.query(Soloed)) {
 		if (soloed === null) {
 			soloed = new Set();
 		}
@@ -673,7 +723,7 @@ export function playbackSystem(world: World): void {
 		const descendants = [entity];
 		for (const descendant of descendants) {
 			soloed.add(descendant);
-			descendants.push(...world.query(ChildOf(descendant), AudioBusHandle));
+			descendants.push(...world.query(ChildOf(descendant)));
 		}
 	}
 
