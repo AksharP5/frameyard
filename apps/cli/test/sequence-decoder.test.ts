@@ -16,6 +16,7 @@ type Bitmap = { name: string; width: number; height: number; close(): void };
 function fixture(options: {
   read?: (name: string) => Promise<File>;
   decode?: (file: File) => Promise<Bitmap>;
+  draw?: (name: string | undefined) => void;
   listError?: Error;
   listReady?: Promise<void>;
   frameCount?: number;
@@ -25,7 +26,7 @@ function fixture(options: {
     height: number;
     constructor(width: number, height: number) { this.width = width; this.height = height; }
     getContext() {
-      return { clearRect() {}, drawImage() {}, resetTransform() {}, translate() {}, rotate() {} };
+      return { clearRect() {}, drawImage(image: { name?: string }) { options.draw?.(image.name); }, resetTransform() {}, translate() {}, rotate() {} };
     }
   }
   const read = options.read ?? (async (name: string) => new File([name], name));
@@ -251,4 +252,101 @@ test("sequence preparation waits for directory initialization and the first deco
     assert.equal(decoder.prepareForPlayback(0, 30, 2), true);
     assert.ok(decoder.toBitmap());
   } finally { listed.resolve(); read.resolve(); decoder.dispose(); }
+});
+
+test("cold sequence seeks hold the last picture through a higher-rate project's final tick", async () => {
+  for (const cached of [false, true]) {
+    const listed = Promise.withResolvers<void>();
+    const reads: string[] = [];
+    const decoder = fixture({ frameCount: 30, listReady: listed.promise, read: async (name) => {
+      reads.push(name);
+      return new File([], name);
+    } })(cached);
+    try {
+      // Export can request a frame before the directory has finished loading.
+      if (cached) { listed.resolve(); await decoder.initialized; }
+      const seek = decoder.seekTo(59, 60);
+      listed.resolve();
+      await seek;
+      await setImmediate();
+      assert.ok(decoder.toBitmap(), '0.983 seconds is inside the one-second sequence');
+      assert.deepEqual(reads, ['frame000030.png']);
+      await decoder.seekTo(60, 60);
+      await setImmediate();
+      assert.ok(decoder.toBitmap(), 'a transition extending past the source holds its last picture');
+      assert.deepEqual(reads, ['frame000030.png']);
+    } finally { listed.resolve(); decoder.dispose(); }
+  }
+});
+
+test("higher-rate sequence exports decode each held source picture only once", async () => {
+  const reads: string[] = [];
+  const decoder = fixture({ frameCount: 30, read: async (name) => {
+    reads.push(name);
+    return new File([], name);
+  } })();
+  try {
+    for (let frame = 0; frame < 60; frame++) await decoder.seekTo(frame, 60);
+    assert.equal(reads.length, 30, '60 output frames require only 30 PNG reads and decodes');
+    assert.equal(new Set(reads).size, 30);
+    assert.ok(decoder.toBitmap());
+  } finally { decoder.dispose(); }
+});
+
+test("export reuse preserves full resolution when switching to and from cached preview", async () => {
+  let decoded = 0;
+  const decoder = fixture({ decode: async (file) => {
+    decoded++;
+    return { name: file.name, width: 1920, height: 1080, close() {} };
+  } })(true);
+  try {
+    await decoder.initialized;
+    await decoder.seekTo(0, 30);
+    await setImmediate();
+    assert.equal(decoder.toBitmap()?.width, 960);
+    for (const frame of [0, 1]) {
+      decoder.hasCache = false;
+      await decoder.seekTo(frame, 30);
+      assert.equal(decoder.toBitmap()?.width, 1920, 'export must decode beyond the preview resolution');
+      const before = decoded;
+      await decoder.seekTo(frame, 30);
+      assert.equal(decoded, before, 'an unchanged full-resolution picture needs no second decode');
+      decoder.hasCache = true;
+      await decoder.seekTo(1, 30);
+    }
+  } finally { decoder.dispose(); }
+});
+
+test("returning to a displayed sequence picture cancels an older pending export seek", async () => {
+  for (const cached of [false, true]) {
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const drawn: (string | undefined)[] = [];
+    let block = false;
+    let closed = 0;
+    const decoder = fixture({
+      draw: (name) => drawn.push(name),
+      decode: async (file) => {
+        if (block && file.name === 'frame000002.png') { started.resolve(); await release.promise; }
+        return { name: file.name, width: 2, height: 2, close() { closed++; } };
+      },
+    })(cached);
+    try {
+      await decoder.initialized;
+      await decoder.seekTo(0, 30);
+      await setImmediate();
+      block = true;
+      decoder.hasCache = false;
+      const pending = decoder.seekTo(1, 30);
+      await started.promise;
+      decoder.hasCache = cached;
+      await decoder.seekTo(0, 30);
+      const before = drawn.length;
+      const closedBefore = closed;
+      release.resolve();
+      await pending;
+      assert.equal(drawn.length, before, 'the obsolete frame cannot replace the requested picture');
+      assert.equal(closed, closedBefore + 1, 'the canceled decoded bitmap is released');
+    } finally { release.resolve(); decoder.dispose(); }
+  }
 });

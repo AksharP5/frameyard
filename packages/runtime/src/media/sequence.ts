@@ -31,6 +31,7 @@ export class SequenceDecoder {
 	private frames: { name: string; getFile: () => Promise<File> }[] = [];
 	private error: Error | undefined;
 	private lastRenderedFrame: number = -1;
+	private fullResolution = false;
 	private seekGeneration = 0;
 	private filling: { generation: number; range: [number, number] } | null = null;
 	private idleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -95,6 +96,7 @@ export class SequenceDecoder {
 		);
 
 		this.lastRenderedFrame = frameIndex;
+		this.fullResolution = false;
 	}
 
 	public toBitmap() {
@@ -149,10 +151,13 @@ export class SequenceDecoder {
 		}
 	}
 
-	private async updateBitmapAsync(frame: number, generation: number) {
+	private async updateBitmapAsync(requestedFrame: number, generation: number) {
 		await this.initialized;
 		if (this.disposed || generation !== this.seekGeneration) return;
 		if (this.error) throw this.error;
+		const frame = Math.max(0, Math.min(this.frames.length - 1, requestedFrame));
+		this.currentFrame = frame;
+		if (frame === this.lastRenderedFrame && this.fullResolution) return;
 		const bitmap = await this.decodeFrame(frame, generation);
 		if (!bitmap) return;
 
@@ -166,6 +171,8 @@ export class SequenceDecoder {
 
 			this.ctx.clearRect(0, 0, bitmap.width, bitmap.height);
 			this.ctx.drawImage(bitmap, 0, 0, bitmap.width, bitmap.height);
+			this.lastRenderedFrame = frame;
+			this.fullResolution = true;
 		} finally {
 			bitmap.close();
 		}
@@ -173,13 +180,15 @@ export class SequenceDecoder {
 
 	public async seekTo(frame: number, frameRate: number) {
 		if (this.disposed) return;
-		const targetFrame = Math.round((frame / frameRate) * this.frameRate);
+		const requestedFrame = Math.round((frame / frameRate) * this.frameRate);
 
 		// Path without cache
 		if (!this.hasCache) {
-			return this.updateBitmapAsync(targetFrame, ++this.seekGeneration);
+			this.currentFrame = requestedFrame;
+			return this.updateBitmapAsync(requestedFrame, ++this.seekGeneration);
 		}
 
+		const targetFrame = Math.max(0, Math.min(this.frames.length - 1, requestedFrame));
 		this.updateBitmap(targetFrame);
 
 		const isCurrentFrame = targetFrame === this.currentFrame;
