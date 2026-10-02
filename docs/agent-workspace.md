@@ -78,6 +78,8 @@ dapi workspace close /absolute/projects/video-b
 `workspace send` returns after starting the turn. `workspace list` reports agent
 activity, queued and running jobs, and errors. `show` opens a workspace for review;
 `cancel` stops its agent and cancellable jobs; `close` releases an idle project's editor resources.
+Exports started in the editor also appear as rendering activity.
+Finish them before closing the workspace, returning to the dashboard, or restoring a checkpoint.
 Heavy rendering jobs queue across workspaces to limit RAM and GPU use without
 reducing output quality. Waiting jobs load their editors when they start.
 Idle background workspaces do not continuously play.

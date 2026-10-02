@@ -804,8 +804,8 @@ async function renameFolder(dir: string, displayName: string): Promise<string> {
     const target = join(root, await freeFolder(root, base));
     // The watcher holds the old path, and the renderer re-watches the new one
     // as soon as it hears where the project went.
-    unwatchProject(dir);
     await rename(dir, target);
+    unwatchProject(dir);
     return target;
   } catch {
     return dir;
@@ -1246,8 +1246,9 @@ export function watchProject(window: BrowserWindow | null, dir: string): void {
     project.queue = project.queue
       .then(async () => {
         await new Promise((resolve) => setTimeout(resolve, 10));
+        if (watchers.get(dir) !== project) return;
         const current = await digestOf(file);
-        if (known.get(file) === current) return;
+        if (watchers.get(dir) !== project || known.get(file) === current) return;
         known.set(file, current);
         mainBridge.emit(project.window, MAIN_CHANNELS.PROJECTS_CHANGED, { dir, path });
       })

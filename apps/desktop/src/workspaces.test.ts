@@ -142,6 +142,43 @@ it("keeps a hidden editor alive while its own export is busy", async () => {
   expect(window.isDestroyed()).toBe(true);
 });
 
+it("protects an editor's export from workspace closure, departure and file replacement", async () => {
+  const { manager, dirs, changed, release } = await setup();
+  const window = await manager.open(dirs[0]!);
+  const replace = vi.fn(async () => "restored");
+  manager.setBusy(window, true);
+  expect(changed).toHaveBeenLastCalledWith({ workspaces: [expect.objectContaining({ status: "rendering" })] });
+  await expect(manager.close(dirs[0]!)).rejects.toMatchObject({ code: "busy" });
+  await expect(manager.detach(window, dirs[0]!)).rejects.toMatchObject({ code: "busy" });
+  await expect(manager.adopt(window, dirs[1]!)).rejects.toThrow("Finish or cancel");
+  await expect(manager.withProjectIdle(dirs[0]!, replace)).rejects.toMatchObject({ code: "busy" });
+  expect(replace).not.toHaveBeenCalled();
+  expect(release).not.toHaveBeenCalled();
+  expect(window.isDestroyed()).toBe(false);
+  expect(manager.getWindow(dirs[0]!)).toBe(window);
+  expect(await manager.withProjectIdle(dirs[1]!, replace)).toBe("restored");
+  manager.setBusy(window, false);
+  expect(await manager.withProjectIdle(dirs[0]!, replace)).toBe("restored");
+  await manager.close(dirs[0]!);
+  expect(window.isDestroyed()).toBe(true);
+});
+
+it("does not release a hidden segmentation model while its editor is exporting", async () => {
+  const { manager, dirs } = await setup(100);
+  vi.useFakeTimers();
+  await manager.show(dirs[0]!);
+  const window = manager.getWindow(dirs[0]!)!;
+  await manager.run(dirs[0]!, "media_segment", undefined, async () => undefined, true);
+  window.hide();
+  manager.setBusy(window, true);
+  await manager.run(dirs[0]!, "context", undefined, async () => undefined);
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(window.isDestroyed()).toBe(false);
+  manager.setBusy(window, false);
+  await vi.advanceTimersByTimeAsync(100);
+  expect(window.isDestroyed()).toBe(true);
+});
+
 it("keeps a minimized project window until it is explicitly hidden", async () => {
   const { manager, dirs } = await setup(100);
   vi.useFakeTimers();

@@ -7,7 +7,7 @@
 // content (see `noteContent`), which is what these pin down.
 
 import { tmpdir } from "node:os";
-import { mkdir, mkdtemp, open, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { shell } from "electron";
@@ -22,7 +22,12 @@ vi.mock("electron", () => ({
   ipcMain: { on: () => { } },
 }));
 
-const { deleteProject, noteContent, noteRenamed, unwatchProject, watchProject, writeManifest } = await import("./projects");
+vi.mock("node:fs/promises", async importOriginal => {
+  const fs = await importOriginal<typeof import("node:fs/promises")>();
+  return { ...fs, readFile: vi.fn(fs.readFile), rename: vi.fn(fs.rename) };
+});
+const { readFile: readFileOnDisk, rename: renameOnDisk } = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+const { deleteProject, noteContent, noteRenamed, renameProject, unwatchProject, watchProject, writeManifest } = await import("./projects");
 
 let dir: string;
 let changed: string[] = [];
@@ -61,11 +66,52 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.mocked(readFile).mockImplementation(readFileOnDisk);
+  vi.mocked(rename).mockImplementation(renameOnDisk);
   unwatchProject(dir);
   await rm(dir, { recursive: true, force: true });
 });
 
 describe("watchProject", () => {
+  it("does not publish an old file read after its watcher is replaced", async () => {
+    const file = join(dir, "index.tsx");
+    const reading = Promise.withResolvers<void>(), finish = Promise.withResolvers<void>();
+    let blocked = false;
+    vi.mocked(readFile).mockImplementation(async (path, options) => {
+      const content = await readFileOnDisk(path, options);
+      if (path === file && !blocked) {
+        blocked = true;
+        reading.resolve();
+        await finish.promise;
+      }
+      return content;
+    });
+    try {
+      await writeFile(file, "old\n", "utf8");
+      await reading.promise;
+      unwatchProject(dir);
+      watchProject(window, dir);
+      finish.resolve();
+      await settle();
+      expect(changed).toEqual([]);
+      await writeFile(file, "new\n", "utf8");
+      await waitFor("index.tsx");
+    } finally { finish.resolve(); }
+  });
+
+  it("keeps reporting source edits when the project folder cannot be renamed", async () => {
+    await writeFile(join(dir, "index.tsx"), "export const stage = 1;\n", "utf8");
+    await waitFor("index.tsx");
+    changed = [];
+    vi.mocked(rename).mockImplementation((from, to) => {
+      if (from === dir) return Promise.reject(Object.assign(new Error("Permission denied"), { code: "EACCES" }));
+      return renameOnDisk(from, to);
+    });
+    expect(await renameProject(dir, "Renamed")).toMatchObject({ dir, displayName: "Renamed" });
+    await writeFile(join(dir, "index.tsx"), "export const stage = 2;\n", "utf8");
+    await waitFor("index.tsx");
+  });
+
   it("keeps reporting source edits after moving the project to Trash fails", async () => {
     vi.mocked(shell.trashItem).mockRejectedValueOnce(new Error("Trash unavailable"));
     await expect(deleteProject(dir)).rejects.toThrow("Trash unavailable");
