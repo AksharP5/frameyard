@@ -4,7 +4,7 @@
 
 import { Computed, Muted, Playback, getSourceWindow, store } from '@diffusionstudio/runtime';
 
-import { CLIP_BREAKPOINTS, CLIP_LABEL_HEIGHT } from '../config';
+import { CLIP_BREAKPOINTS, CLIP_LABEL_HEIGHT, STILL_WIDTHS } from '../config';
 import { pickFrame, requestFrames, resolveStill } from '../media';
 import { framesToPixels, getFrameRate, getResolution, getViewport, pixelsToFrames } from '../view';
 import { renderWaveform } from './waveform';
@@ -13,13 +13,6 @@ import type { Asset, VideoAsset } from '@diffusionstudio/assets';
 import type { Entity, World } from 'koota';
 import type { RowCursor } from '../layout';
 import type { TimelineSurfaceState } from '../surface';
-
-/**
- * Tile widths, chosen by row height. Three fixed sizes rather than one
- * derived from the height, so dragging a row taller does not slide every
- * tile along as it goes.
- */
-const STILL_WIDTHS = [80, 100, 120] as const;
 
 /** Where a still's tiles start, and where the strip they sit in does. */
 const STILL_TOP = 18;
@@ -68,7 +61,7 @@ export function renderStillThumbnails(
 	const clipWidth = framesToPixels(computed.end[eid] ?? 0, resolution) - clipLeft;
 
 	const tileWidth = stillWidth(row.height);
-	const still = resolveStill(asset, tileWidth);
+	const still = resolveStill(asset);
 	if (!still) return;
 
 	const maskHeight = row.height - CLIP_LABEL_HEIGHT;

@@ -294,6 +294,17 @@ function renderTokens(ctx: Ctx, world: World, entity: Entity): void {
 	const paintStore = store(world, Paint);
 
 	const savedAlpha = ctx.globalAlpha;
+	// Gradients share the text's transform and bounds; reuse only within this draw.
+	let gradients: Map<Entity, CanvasGradient> | undefined;
+	const gradientFor = (paint: Entity, type: PaintType.LINEAR_GRADIENT | PaintType.RADIAL_GRADIENT): CanvasGradient => {
+		const cached = gradients?.get(paint);
+		if (cached) return cached;
+		const gradient = type === PaintType.LINEAR_GRADIENT
+			? createLinearGradient(world, paint, ctx, computed.width[eid]!, computed.height[eid]!)
+			: createRadialGradient(world, paint, ctx, computed.width[eid]!, computed.height[eid]!);
+		(gradients ??= new Map()).set(paint, gradient);
+		return gradient;
+	};
 
 	// Draw all text shadows
 	{
@@ -308,9 +319,9 @@ function renderTokens(ctx: Ctx, world: World, entity: Entity): void {
 		const shadowScale = Math.hypot(transform.a, transform.b);
 
 		for (const word of words) {
-			applyFont(ctx, world, entity, word.ranges);
-
 			const shadows = getShadows(world, entity, word.ranges);
+			if (!shadows.length) continue;
+			applyFont(ctx, world, entity, word.ranges);
 
 			// A stroked word's shadow is the widest stroke's silhouette.
 			const widest = findWidestStroke(world, getStrokes(world, entity, word.ranges));
@@ -338,11 +349,8 @@ function renderTokens(ctx: Ctx, world: World, entity: Entity): void {
 				}
 			}
 
-			// Reset shadow properties if any shadows are applied
-			if (shadows.length) {
-				ctx.globalAlpha = savedAlpha;
-				ctx.shadowColor = 'transparent';
-			}
+			ctx.globalAlpha = savedAlpha;
+			ctx.shadowColor = 'transparent';
 		}
 		ctx.restore();
 	}
@@ -359,9 +367,6 @@ function renderTokens(ctx: Ctx, world: World, entity: Entity): void {
 
 			applyFont(ctx, world, entity, word.ranges);
 
-			const w = computed.width[eid]!;
-			const h = computed.height[eid]!;
-
 			// Draw strokes (if any)
 			for (const stroke of strokes) {
 				if (stroke.has(Hidden)) continue;
@@ -377,10 +382,8 @@ function renderTokens(ctx: Ctx, world: World, entity: Entity): void {
 				applyStrokeStyle(ctx, world, stroke);
 
 				const paintType = paintStore.value[sid];
-				if (paintType === PaintType.LINEAR_GRADIENT) {
-					ctx.strokeStyle = createLinearGradient(world, stroke, ctx, w, h);
-				} else if (paintType === PaintType.RADIAL_GRADIENT) {
-					ctx.strokeStyle = createRadialGradient(world, stroke, ctx, w, h);
+				if (paintType === PaintType.LINEAR_GRADIENT || paintType === PaintType.RADIAL_GRADIENT) {
+					ctx.strokeStyle = gradientFor(stroke, paintType);
 				} else {
 					ctx.strokeStyle = colorToHex(computed.color[sid] ?? 0x000000);
 				}
@@ -406,9 +409,6 @@ function renderTokens(ctx: Ctx, world: World, entity: Entity): void {
 
 			applyFont(ctx, world, entity, word.ranges);
 
-			const w = computed.width[eid]!;
-			const h = computed.height[eid]!;
-
 			if (intrinsicFill !== null) {
 				ctx.globalAlpha = savedAlpha;
 				ctx.fillStyle = intrinsicFill;
@@ -429,10 +429,8 @@ function renderTokens(ctx: Ctx, world: World, entity: Entity): void {
 				ctx.globalAlpha = savedAlpha * (computed.opacity[fid] ?? 1);
 
 				const paintType = paintStore.value[fid];
-				if (paintType === PaintType.LINEAR_GRADIENT) {
-					ctx.fillStyle = createLinearGradient(world, fill, ctx, w, h);
-				} else if (paintType === PaintType.RADIAL_GRADIENT) {
-					ctx.fillStyle = createRadialGradient(world, fill, ctx, w, h);
+				if (paintType === PaintType.LINEAR_GRADIENT || paintType === PaintType.RADIAL_GRADIENT) {
+					ctx.fillStyle = gradientFor(fill, paintType);
 				} else {
 					ctx.fillStyle = colorToHex(computed.color[fid] ?? 0x000000);
 				}

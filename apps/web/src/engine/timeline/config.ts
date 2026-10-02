@@ -4,6 +4,8 @@
 
 export const MIN_CLIP_HEIGHT = 28;
 export const MAX_CLIP_HEIGHT = 116;
+/** Tile widths selected by still-image row height. */
+export const STILL_WIDTHS = [80, 100, 120] as const;
 export const KEYFRAME_TRACK_HEIGHT = 32;
 export const TARGET_MAJOR_TICK_DISTANCE = 160;
 
