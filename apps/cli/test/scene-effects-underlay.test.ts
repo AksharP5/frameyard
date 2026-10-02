@@ -42,7 +42,9 @@ class Canvas {
   constructor(width = 1, height = 1) { this.width = width; this.height = height; canvases.push(this); }
   getContext() { return this.ctx; }
 }
-runInThisContext(`(function(module,exports,OffscreenCanvas,DOMMatrix){"use strict";${bundle.outputFiles[0].text}\n})`)(module, module.exports, Canvas, Matrix);
+runInThisContext(`(function(module,exports,OffscreenCanvas,DOMMatrix,document){"use strict";${bundle.outputFiles[0].text}\n})`)(
+  module, module.exports, Canvas, Matrix, { createElement: () => new Canvas(300, 150) },
+);
 const { createWorld, Scene, Geometry, Computed, ColorGrade, LocalTransform, Mode, RenderSurface,
   prepareSceneEffects, renderWithSceneEffects, snapshotScene } = module.exports;
 

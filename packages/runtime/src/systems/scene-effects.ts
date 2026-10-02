@@ -20,6 +20,7 @@ const states = new WeakMap<World, RenderState>();
 
 function makeBuffer(): Buffer {
   const canvas = typeof document === 'undefined' ? new OffscreenCanvas(1, 1) : document.createElement('canvas');
+  canvas.width = canvas.height = 1;
   const ctx = canvas.getContext('2d') as Context | null;
   if (!ctx) throw new Error('Scene effects require a 2D canvas');
   return { canvas, ctx };
