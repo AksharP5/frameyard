@@ -2,6 +2,7 @@ import type { Entity, World } from 'koota';
 import { aabbFromTransformedRect, multiply2D, scale2D, translate2D, type Mat2D } from '../math';
 import { Cache, Computed, Hidden, Mode, RenderSurface, Root, Stage, StrokeStyle } from '../traits';
 import { StrokeJoin } from '../constants';
+import { drawOnto, getSurfaceContext } from '../utils/surface';
 
 type Context = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 type Canvas = HTMLCanvasElement | OffscreenCanvas;
@@ -79,7 +80,7 @@ function createRenderer(): PlaneRenderer {
 /** Rasterize native paints once, then project their plane on the GPU. The authored objects remain native. */
 export function drawSpatialLayer(world: World, entity: Entity, plane: Mat2D, scene: Entity, draw: () => void): void {
   const surface = world.get(RenderSurface)!;
-  const output = surface.ctx!;
+  const output = getSurfaceContext(world)!;
   const frame = entity.get(Computed)!;
   const sceneFrame = scene.get(Computed)!;
   if (frame.width <= 0 || frame.height <= 0) return;
@@ -144,7 +145,7 @@ export function drawSpatialLayer(world: World, entity: Entity, plane: Mat2D, sce
   source.globalCompositeOperation = 'source-over';
   source.filter = 'none';
   world.set(RenderSurface, { canvas: renderer.source, ctx: source, resolution });
-  try { draw(); } finally { world.set(RenderSurface, surface); }
+  try { drawOnto(source, draw); } finally { world.set(RenderSurface, surface); }
 
   const outWidth = Math.max(1, Math.ceil((right - left) * resolution));
   const outHeight = Math.max(1, Math.ceil((bottom - top) * resolution));

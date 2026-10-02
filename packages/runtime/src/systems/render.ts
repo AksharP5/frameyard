@@ -851,26 +851,38 @@ function renderSpatialChildren(world: World, parent: Entity, scene: Entity): voi
 		ctx.globalAlpha *= values.opacity;
 		const mode = entity.get(BlendMode)?.value ?? 0;
 		if (mode) ctx.globalCompositeOperation = COMPOSITE_OPERATIONS[mode]!;
-		const effects = buildEffects(world, entity);
+		const passes = effectPasses(world, entity);
+		const effects = passes ? null : buildEffects(world, entity);
 		if (effects) ctx.filter = effects;
 		const camera = scene.get(Computed)!;
 		if (camera.aperture > 0) {
 			const radius = Math.min(100, camera.aperture * Math.abs(spatial.distance - camera.focusDistance) / Math.max(1, spatial.distance));
 			if (radius > .01) ctx.filter = `${effects ?? ''} blur(${radius * world.get(RenderSurface)!.resolution}px)`.trim();
 		}
-		if (values.backdropBlur || values.refraction) {
-			ctx.save();
-			clipSpatialGeometry(world, entity, spatial.plane);
-			renderGlass(world, entity, multiply2D(ctx.getTransform(), spatial.plane));
-			ctx.restore();
-		}
-		if (entity.has(Geometry) || entity.has(Preset) || entity.has(Highlight)) {
-			drawSpatialLayer(world, entity, spatial.plane, scene, () => entity.has(Scene3D)
-        ? drawScene3D(world, entity, (child, projected) => renderSceneVisual(world, child, projected))
-        : renderVisual(world, entity));
-		}
-		if (entity.has(ClipsContent)) clipSpatialGeometry(world, entity, spatial.plane);
-		if (!entity.has(Scene3D)) renderSpatialChildren(world, entity, scene);
+		const render = () => {
+			const target = getCtx(world);
+			if (values.backdropBlur || values.refraction) {
+				target.save();
+				clipSpatialGeometry(world, entity, spatial.plane);
+				renderGlass(world, entity, multiply2D(target.getTransform(), spatial.plane));
+				target.restore();
+			}
+			if (entity.has(Geometry) || entity.has(Preset) || entity.has(Highlight)) {
+				drawSpatialLayer(world, entity, spatial.plane, scene, () => entity.has(Scene3D)
+          ? drawScene3D(world, entity, (child, projected) => renderSceneVisual(world, child, projected))
+          : renderVisual(world, entity));
+			}
+			const clipsContent = entity.has(ClipsContent);
+			if (clipsContent) target.save();
+			try {
+				if (clipsContent) clipSpatialGeometry(world, entity, spatial.plane);
+				if (!entity.has(Scene3D)) renderSpatialChildren(world, entity, scene);
+			} finally {
+				if (clipsContent) target.restore();
+			}
+		};
+		if (passes) renderLayered(world, entity, passes, render, { plane: spatial.plane, scene });
+		else render();
 		ctx.restore();
 	};
 	const transitioned = new Set<Entity>();
@@ -912,7 +924,8 @@ function renderVisual(world: World, entity: Entity): void {
 function renderSceneVisual(world: World, entity: Entity, projected?: ProjectedVisual): void {
   const ctx = getCtx(world);
   ctx.save();
-  const effects = buildEffects(world, entity);
+  const passes = effectPasses(world, entity);
+  const effects = passes ? null : buildEffects(world, entity);
   if (effects) ctx.filter = effects;
   const spatial = spatialNode(world, entity);
   if (spatial) {
@@ -929,9 +942,13 @@ function renderSceneVisual(world: World, entity: Entity, projected?: ProjectedVi
   }
   if (!projected) {
     try {
-      if (entity.has(Scene3D)) drawScene3D(world, entity, (child, override) => renderSceneVisual(world, child, override));
-      else if (entity.get(Geometry)?.value === GeometryType.MESH) renderShapeNode(world, entity);
-      else renderVisual(world, entity);
+      const render = () => {
+        if (entity.has(Scene3D)) drawScene3D(world, entity, (child, override) => renderSceneVisual(world, child, override));
+        else if (entity.get(Geometry)?.value === GeometryType.MESH) renderShapeNode(world, entity);
+        else renderVisual(world, entity);
+      };
+      if (passes) renderLayered(world, entity, passes, render);
+      else render();
     } finally { ctx.restore(); }
     return;
   }
@@ -939,7 +956,10 @@ function renderSceneVisual(world: World, entity: Entity, projected?: ProjectedVi
   const previous = { type: geometry.value[id]!, path: computed.pathData[id]!, width: computed.width[id]!, height: computed.height[id]! };
   geometry.value[id] = GeometryType.PATH;
   computed.pathData[id] = projected.d; computed.width[id] = projected.width; computed.height[id] = projected.height;
-  try { renderVisual(world, entity); } finally {
+  try {
+    if (passes) renderLayered(world, entity, passes, () => renderVisual(world, entity));
+    else renderVisual(world, entity);
+  } finally {
     geometry.value[id] = previous.type; computed.pathData[id] = previous.path;
     computed.width[id] = previous.width; computed.height[id] = previous.height;
     ctx.restore();
@@ -1131,6 +1151,8 @@ function activeMasks(world: World, effect: Entity): Entity[] {
 // ── Layers ───────────────────────────────────────────────────
 
 type Layer = { canvas: OffscreenCanvas; ctx: OffscreenCanvasRenderingContext2D };
+/** Spatial subtrees already occupy scene coordinates; their mask coverage must land there too. */
+type MaskProjection = { plane: Mat2D; scene: Entity };
 
 // Layers for nodes drawn through masked effects, the size of the surface: a
 // pool by depth, since a masked node's children may be too.
@@ -1163,7 +1185,7 @@ function resetLayer(layer: Layer, transform: DOMMatrix): void {
 }
 
 /** Draws `source` onto `target` pixel for pixel, composited with `operation`, through `filter`, at `alpha`. */
-function blit(target: Layer, source: OffscreenCanvas, operation: GlobalCompositeOperation = 'source-over', filter = 'none', alpha = 1): void {
+function blit(target: { ctx: Ctx2D }, source: OffscreenCanvas, operation: GlobalCompositeOperation = 'source-over', filter = 'none', alpha = 1): void {
 	const { ctx } = target;
 	ctx.save();
 	ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1181,7 +1203,7 @@ function blit(target: Layer, source: OffscreenCanvas, operation: GlobalComposite
  * its masks' coverage), and the layer lands on the surface under the
  * node's opacity and blend mode, which the caller has already set.
  */
-function renderLayered(world: World, entity: Entity, passes: EffectPass[]): void {
+function renderLayered(world: World, entity: Entity, passes: EffectPass[], render = () => renderContent(world, entity, null), projection?: MaskProjection): void {
 	const ctx = getCtx(world);
 	const surface = world.get(RenderSurface)!.canvas!;
 	const base = layerDepth;
@@ -1190,7 +1212,7 @@ function renderLayered(world: World, entity: Entity, passes: EffectPass[]): void
 	try {
 		let front = acquireLayer(surface.width, surface.height);
 		resetLayer(front, local);
-		drawOnto(front.ctx, () => renderContent(world, entity, null));
+		drawOnto(front.ctx, render);
 
 		let back = acquireLayer(surface.width, surface.height);
 		for (const pass of passes) {
@@ -1198,7 +1220,7 @@ function renderLayered(world: World, entity: Entity, passes: EffectPass[]): void
 				resetLayer(back, new DOMMatrix());
 				blit(back, front.canvas, 'source-over', pass.filter);
 			} else {
-				applyMaskedEffect(world, entity, pass, front, back, local);
+				applyMaskedEffect(world, entity, pass, front, back, local, projection);
 			}
 			[front, back] = [back, front];
 		}
@@ -1220,22 +1242,35 @@ function renderLayered(world: World, entity: Entity, passes: EffectPass[]): void
  * effect keeps only what K covers — filtered·K — so what is outside its
  * mask goes transparent, which is what a mask on Opacity means in Premiere.
  */
-function applyMaskedEffect(world: World, entity: Entity, pass: Extract<EffectPass, { kind: 'masked' }>, front: Layer, back: Layer, local: DOMMatrix): void {
+function applyMaskedEffect(world: World, entity: Entity, pass: Extract<EffectPass, { kind: 'masked' }>, front: Layer, back: Layer, local: DOMMatrix, projection?: MaskProjection): void {
 	const { width, height } = front.canvas;
 	const coverage = acquireLayer(width, height);
-	const scratch = acquireLayer(width, height);
 	const opacities = store(world, Computed).opacity;
 
 	try {
 		resetLayer(coverage, local);
-		drawOnto(coverage.ctx, () => drawRectPath(world, entity));
-		coverage.ctx.fillStyle = '#000000';
-		coverage.ctx.fill();
-		for (const mask of pass.masks) {
-			const strength = Math.min(1, Math.max(0, opacities[mask.id()] ?? 1));
-			if (strength <= EPSILON || !drawMaskRemoval(world, entity, mask, scratch, local)) continue;
-			blit(coverage, scratch.canvas, 'destination-out', 'none', strength);
-		}
+		const drawCoverage = () => {
+			drawRectPath(world, entity);
+			const target = getCtx(world);
+			target.fillStyle = '#000000';
+			target.fill();
+			const surface = world.get(RenderSurface)!.canvas!;
+			const scratch = acquireLayer(surface.width, surface.height);
+			try {
+				for (const mask of pass.masks) {
+					const strength = Math.min(1, Math.max(0, opacities[mask.id()] ?? 1));
+					if (strength <= EPSILON || !drawMaskRemoval(world, entity, mask, scratch, target.getTransform())) continue;
+					blit({ ctx: target }, scratch.canvas, 'destination-out', 'none', strength);
+				}
+			} finally {
+				layerDepth--;
+			}
+		};
+		drawOnto(coverage.ctx, () => {
+			// Combine before projection so antialiased outer edges cannot leave mask residue.
+			if (projection) drawSpatialLayer(world, entity, projection.plane, projection.scene, drawCoverage);
+			else drawCoverage();
+		});
 
 		resetLayer(back, new DOMMatrix());
 		blit(back, front.canvas, 'source-over', pass.filter ?? 'none');
@@ -1246,7 +1281,7 @@ function applyMaskedEffect(world: World, entity: Entity, pass: Extract<EffectPas
 			blit(back, front.canvas, 'lighter');
 		}
 	} finally {
-		layerDepth -= 2;
+		layerDepth--;
 	}
 }
 
@@ -1278,29 +1313,32 @@ function drawMaskRemoval(world: World, entity: Entity, mask: Entity, layer: Laye
 	const mode = (source && store(world, ScaleMode).value[source.id()]) ?? ScaleModeType.COVER;
 	const [dx, dy, sw, sh] = getScaledImageProps(mode, picture.width, picture.height, w, h);
 
-	const { ctx } = layer;
 	resetLayer(layer, local);
-	ctx.save();
-	drawOnto(ctx, () => drawRectPath(world, entity));
-	if (!inverted) {
-		ctx.fillStyle = '#000000';
-		ctx.fill();
-	}
-	ctx.clip();
-	ctx.globalCompositeOperation = inverted ? 'source-over' : 'destination-out';
-	if (feather > EPSILON) ctx.filter = `blur(${feather}px)`;
-	if (outline) {
-		// The path is placed in the box rather than the context scaled, so the
-		// feather's blur is measured as it is for any other picture.
-		const placed = new Path2D();
-		placed.addPath(outline.path, new DOMMatrix([sw / outline.width, 0, 0, sh / outline.height, dx, dy]));
-		ctx.fillStyle = '#000000';
-		ctx.fill(placed);
-	} else if (frame) {
-		ctx.imageSmoothingEnabled = true;
-		ctx.drawImage(frame, dx, dy, sw, sh);
-	}
-	ctx.restore();
+	const draw = () => {
+		const ctx = getCtx(world);
+		ctx.save();
+		drawRectPath(world, entity);
+		if (!inverted) {
+			ctx.fillStyle = '#000000';
+			ctx.fill();
+		}
+		ctx.clip();
+		ctx.globalCompositeOperation = inverted ? 'source-over' : 'destination-out';
+		if (feather > EPSILON) ctx.filter = `blur(${feather}px)`;
+		if (outline) {
+			// The path is placed in the box rather than the context scaled, so the
+			// feather's blur is measured as it is for any other picture.
+			const placed = new Path2D();
+			placed.addPath(outline.path, new DOMMatrix([sw / outline.width, 0, 0, sh / outline.height, dx, dy]));
+			ctx.fillStyle = '#000000';
+			ctx.fill(placed);
+		} else if (frame) {
+			ctx.imageSmoothingEnabled = true;
+			ctx.drawImage(frame, dx, dy, sw, sh);
+		}
+		ctx.restore();
+	};
+	drawOnto(layer.ctx, draw);
 	return true;
 }
 
