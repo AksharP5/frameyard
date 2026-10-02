@@ -8,8 +8,8 @@
  *
  * A still — an image, a frames directory shown by its first frame, or a mask
  * shown by its first matte — is one picture tiled along the clip, so it is
- * decoded once per asset at whatever size the row is currently drawn at, and
- * kept until the row changes size.
+ * decoded once per asset, large enough for every supported row size, and
+ * kept until the source or display resolution changes.
  *
  * A video is a strip of its own frames, which is a decode per tile, so it
  * comes in two layers like the peaks do. The asset layer decodes a handful of
@@ -27,7 +27,7 @@ import { CanvasSink } from 'mediabunny';
 import { getAssetFile, getVideoTrack, secondsToFrames } from '@diffusionstudio/runtime';
 import { deriveThumbnail } from '@diffusionstudio/assets';
 
-import { MAX_CLIP_HEIGHT } from './config';
+import { MAX_CLIP_HEIGHT, STILL_WIDTHS } from './config';
 
 import type { InputVideoTrack } from 'mediabunny';
 import type { Asset, VideoAsset } from '@diffusionstudio/assets';
@@ -40,12 +40,12 @@ export type Frame = {
 	stale?: boolean;
 };
 
-/** A still, decoded at the size the row it is drawn in asked for. */
+/** One still shared by all rows displaying an asset. */
 export type Still = {
 	canvas: OffscreenCanvas;
 	width: number;
 	height: number;
-	hash: string;
+	resolution: number;
 };
 
 /** What a video clip needs this frame: the tiles of the stretch on screen. */
@@ -198,19 +198,16 @@ function decodeFrame(sink: CanvasSink, timestamp: number, isCurrent: () => boole
 // Stills
 
 /**
- * The picture an image or sequence clip is tiled with, at the size a row
- * `width` wide draws it, or null until it has decoded (the decode is started
- * here). Re-decoded when the row changes to a different tile size, which is
- * one of three (see `../render/thumbnails`), so a drag of the row height
- * costs at most two decodes.
+ * The picture an image or sequence clip is tiled with, sized for the widest
+ * tile and tallest row. Different row heights reuse it without decoding.
  */
-export function resolveStill(asset: Asset, width: number): Still | null {
+export function resolveStill(asset: Asset): Still | null {
 	activeAssets.add(asset.id);
-	const hash = `${width}@${window.devicePixelRatio}`;
+	const resolution = window.devicePixelRatio;
 	const existing = stills.get(asset.id);
-	if (existing?.hash === hash) return existing;
+	if (existing?.resolution === resolution) return existing;
 
-	if (!stillsFailed.has(asset.id)) void decodeStill(asset, width, hash);
+	if (!stillsFailed.has(asset.id)) void decodeStill(asset, resolution);
 
 	// Whatever is there at the wrong size still beats nothing at all: it is
 	// the same picture, and it is replaced the moment the right one lands.
@@ -221,22 +218,22 @@ export function resolveStill(asset: Asset, width: number): Still | null {
  * What a still is decoded from: the file itself, or for a mask — a file of
  * logits, not a picture — its matte rendered as one.
  */
-async function stillSource(asset: Asset, width: number): Promise<Blob> {
+async function stillSource(asset: Asset, resolution: number): Promise<Blob> {
 	const file = await getAssetFile(asset);
 	if (asset.type !== 'MASK') return file;
 
-	const thumbnail = await deriveThumbnail(file, asset.mimeType, Math.ceil(width * window.devicePixelRatio));
+	const thumbnail = await deriveThumbnail(file, asset.mimeType, Math.ceil(STILL_WIDTHS[2] * resolution));
 	if (!thumbnail) throw new Error('Could not render the mask');
 	return thumbnail;
 }
 
-async function decodeStill(asset: Asset, width: number, hash: string): Promise<void> {
+async function decodeStill(asset: Asset, resolution: number): Promise<void> {
 	if (stillsDecoding.has(asset.id)) return;
 	const token = {};
 	stillsDecoding.set(asset.id, token);
 
 	try {
-		const source = await stillSource(asset, width);
+		const source = await stillSource(asset, resolution);
 		if (stillsDecoding.get(asset.id) !== token) return;
 		const bitmap = await createImageBitmap(source);
 
@@ -244,15 +241,14 @@ async function decodeStill(asset: Asset, width: number, hash: string): Promise<v
 			if (stillsDecoding.get(asset.id) !== token) return;
 			// Big enough for the widest tile and the tallest row it could be
 			// drawn in, and never larger than the picture itself.
-			const dpr = window.devicePixelRatio;
-			const scale = Math.min(1, Math.max((width * dpr) / bitmap.width, (MAX_CLIP_HEIGHT * dpr) / bitmap.height));
+			const scale = Math.min(1, Math.max((STILL_WIDTHS[2] * resolution) / bitmap.width, (MAX_CLIP_HEIGHT * resolution) / bitmap.height));
 			const canvasWidth = Math.max(1, Math.round(bitmap.width * scale));
 			const canvasHeight = Math.max(1, Math.round(bitmap.height * scale));
 
 			const canvas = new OffscreenCanvas(canvasWidth, canvasHeight);
 			canvas.getContext('2d')!.drawImage(bitmap, 0, 0, canvasWidth, canvasHeight);
 
-			stills.set(asset.id, { canvas, width: canvasWidth, height: canvasHeight, hash });
+			stills.set(asset.id, { canvas, width: canvasWidth, height: canvasHeight, resolution });
 			mediaDirty = true;
 		} finally {
 			bitmap.close();

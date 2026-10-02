@@ -5,7 +5,7 @@
 import { Cache, Computed, store } from '@diffusionstudio/runtime';
 
 import { CLIP_CORNER_RADIUS } from '../config';
-import { framesToPixels, getResolution } from '../view';
+import { framesToPixels, getResolution, getViewport } from '../view';
 
 import type { Entity, World } from 'koota';
 import type { RowCursor } from '../layout';
@@ -39,6 +39,7 @@ export function renderGroup(
 
 	const computed = store(world, Computed);
 	const resolution = getResolution(world, scene);
+	const [viewportLeft, viewportRight] = getViewport(world, scene, surface.layout.width);
 
 	const start = computed.start[entity.id()] ?? 0;
 	const end = computed.end[entity.id()] ?? 0;
@@ -55,7 +56,7 @@ export function renderGroup(
 	for (const child of children) {
 		const childLeft = framesToPixels(Math.max(start, computed.start[child.id()] ?? 0), resolution);
 		const childWidth = framesToPixels(Math.min(end, computed.end[child.id()] ?? 0), resolution) - childLeft;
-		if (childWidth < 2) continue;
+		if (childWidth < 2 || childLeft + childWidth <= viewportLeft || childLeft >= viewportRight) continue;
 
 		ctx.beginPath();
 		ctx.roundRect(childLeft, CHILD_TOP, childWidth, height, CLIP_CORNER_RADIUS);

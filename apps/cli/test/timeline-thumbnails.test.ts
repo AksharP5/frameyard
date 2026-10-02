@@ -11,8 +11,10 @@ const built = await build({
   external: ['mediabunny', '@diffusionstudio/runtime'],
 });
 
-function fixture() {
+function fixture(imageSize = { width: 128, height: 128 }) {
   let active = 0, peak = 0;
+  let imageDecodes = 0;
+  const display = { devicePixelRatio: 1 };
   const calls: number[] = [];
   const sourceCalls: string[] = [];
   const releases: (() => void)[] = [];
@@ -45,8 +47,11 @@ function fixture() {
     getContext() { return { drawImage: (bitmap: { tag: string }) => { this.tag = bitmap.tag; } }; }
   }
   runInThisContext(`(function(require,module,exports,window,OffscreenCanvas,createImageBitmap){${built.outputFiles[0].text}\n})`)(
-    (name: keyof typeof dependencies) => dependencies[name], module, module.exports, { devicePixelRatio: 1 }, Canvas,
-    () => new Promise((resolve) => imageReleases.push((tag) => resolve({ width: 128, height: 128, tag, close() {} }))),
+    (name: keyof typeof dependencies) => dependencies[name], module, module.exports, display, Canvas,
+    () => {
+      imageDecodes++;
+      return new Promise((resolve) => imageReleases.push((tag) => resolve({ ...imageSize, tag, close() {} })));
+    },
   );
   const request: FrameRequest = {
     clip: 1,
@@ -63,7 +68,7 @@ function fixture() {
     }
     assert.fail('thumbnail requests did not settle');
   }
-  return { ...module.exports, request, calls, sourceCalls, tick, drain, imageReleases, peak: () => peak };
+  return { ...module.exports, request, calls, sourceCalls, tick, drain, imageReleases, display, imageDecodes: () => imageDecodes, peak: () => peak };
 }
 
 test('zooming out over many cuts keeps thumbnail decoding bounded and fills every clip', async () => {
@@ -156,12 +161,12 @@ test('thumbnail cache releases scrolled-away clips but keeps the visible strip',
 test('an obsolete still decode cannot replace a newer asset thumbnail', async () => {
   const f = fixture();
   const asset = { ...f.request.asset, type: 'IMAGE' as const, mimeType: 'image/png' };
-  f.resolveStill(asset, 100);
+  f.resolveStill(asset);
   await f.tick();
   assert.equal(f.imageReleases.length, 1);
 
   f.forgetAssetMedia(asset.id);
-  f.resolveStill(asset, 100);
+  f.resolveStill(asset);
   await f.tick();
   assert.equal(f.imageReleases.length, 2);
 
@@ -169,7 +174,53 @@ test('an obsolete still decode cannot replace a newer asset thumbnail', async ()
   await f.tick();
   f.imageReleases.shift()!('new');
   await f.tick();
-  assert.equal((f.resolveStill(asset, 100)?.canvas as unknown as { tag: string })?.tag, 'new');
+  assert.equal((f.resolveStill(asset)?.canvas as unknown as { tag: string })?.tag, 'new');
+});
+
+test('clips share one still per display resolution, including when the display changes during decoding', async () => {
+  const f = fixture({ width: 1920, height: 1080 });
+  const asset = { ...f.request.asset, type: 'IMAGE' as const, mimeType: 'image/png' };
+  assert.equal(f.resolveStill(asset), null);
+  assert.equal(f.resolveStill(asset), null);
+  await f.tick();
+  assert.equal(f.imageDecodes(), 1);
+  f.display.devicePixelRatio = 2;
+  f.imageReleases.shift()!('first');
+  await f.tick();
+
+  const fallback = f.resolveStill(asset)!;
+  assert.equal(fallback.resolution, 1);
+  assert.deepEqual([fallback.width, fallback.height], [206, 116], 'the pending decode uses its original display resolution');
+  await f.tick();
+  assert.equal(f.imageDecodes(), 2);
+  f.imageReleases.shift()!('second');
+  await f.tick();
+  const current = f.resolveStill(asset)!;
+  assert.equal(current.resolution, 2);
+  assert.deepEqual([current.width, current.height], [412, 232]);
+
+  for (let frame = 0; frame < 60; frame++) {
+    assert.equal(f.resolveStill(asset), current);
+    assert.equal(f.resolveStill(asset), current);
+    f.pruneMedia();
+    await f.tick();
+  }
+  assert.equal(f.imageDecodes(), 2, 'repeated clips and row drawing do not restart bitmap decoding');
+});
+
+test('portrait stills retain enough pixels for the widest supported tile', async () => {
+  const f = fixture({ width: 1080, height: 1920 });
+  const asset = { ...f.request.asset, type: 'IMAGE' as const, mimeType: 'image/png' };
+  for (const resolution of [1, 2]) {
+    f.display.devicePixelRatio = resolution;
+    f.resolveStill(asset);
+    await f.tick();
+    f.imageReleases.shift()!('portrait');
+    await f.tick();
+    const still = f.resolveStill(asset)!;
+    assert.equal(still.width, 120 * resolution);
+    assert.equal(still.height, Math.round(1920 / 1080 * 120 * resolution));
+  }
 });
 
 test('replacing a clip source discards its old thumbnails and pending strip without redoing unchanged sources', async () => {
