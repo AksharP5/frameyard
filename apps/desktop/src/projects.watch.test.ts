@@ -22,7 +22,12 @@ vi.mock("electron", () => ({
   ipcMain: { on: () => { } },
 }));
 
-const { deleteProject, noteContent, noteRenamed, unwatchProject, watchProject, writeManifest } = await import("./projects");
+vi.mock("node:fs/promises", async importOriginal => {
+  const fs = await importOriginal<typeof import("node:fs/promises")>();
+  return { ...fs, rename: vi.fn(fs.rename) };
+});
+const { rename: renameOnDisk } = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+const { deleteProject, noteContent, noteRenamed, renameProject, unwatchProject, watchProject, writeManifest } = await import("./projects");
 
 let dir: string;
 let changed: string[] = [];
@@ -61,11 +66,25 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.mocked(rename).mockImplementation(renameOnDisk);
   unwatchProject(dir);
   await rm(dir, { recursive: true, force: true });
 });
 
 describe("watchProject", () => {
+  it("keeps reporting source edits when the project folder cannot be renamed", async () => {
+    await writeFile(join(dir, "index.tsx"), "export const stage = 1;\n", "utf8");
+    await waitFor("index.tsx");
+    changed = [];
+    vi.mocked(rename).mockImplementation((from, to) => {
+      if (from === dir) return Promise.reject(Object.assign(new Error("Permission denied"), { code: "EACCES" }));
+      return renameOnDisk(from, to);
+    });
+    expect(await renameProject(dir, "Renamed")).toMatchObject({ dir, displayName: "Renamed" });
+    await writeFile(join(dir, "index.tsx"), "export const stage = 2;\n", "utf8");
+    await waitFor("index.tsx");
+  });
+
   it("keeps reporting source edits after moving the project to Trash fails", async () => {
     vi.mocked(shell.trashItem).mockRejectedValueOnce(new Error("Trash unavailable"));
     await expect(deleteProject(dir)).rejects.toThrow("Trash unavailable");

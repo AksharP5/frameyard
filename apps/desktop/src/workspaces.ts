@@ -49,7 +49,7 @@ export class Workspaces {
       return {
         dir: value.dir, name: value.name, visible: value.window ? value.window.isVisible() || value.window.isMinimized() : false,
         agentActive: value.agentActive, jobs,
-        status: value.loading ? "loading" : value.error ? "error" : [...value.jobs.values()].some(job => job.state === "running" && job.heavy) ? "rendering" : jobs.some(job => job.state === "running") || value.agentActive || this.changing.has(value.dir) ? "working" : jobs.length ? "queued" : "idle",
+        status: value.loading ? "loading" : value.error ? "error" : (value.window && this.uiBusy.has(value.window)) || [...value.jobs.values()].some(job => job.state === "running" && job.heavy) ? "rendering" : jobs.some(job => job.state === "running") || value.agentActive || this.changing.has(value.dir) ? "working" : jobs.length ? "queued" : "idle",
         ...(value.error ? { error: value.error } : {}),
       };
     }) };
@@ -74,7 +74,10 @@ export class Workspaces {
     if (busy) this.uiBusy.add(window);
     else this.uiBusy.delete(window);
     const project = this.owner(window);
-    if (project) this.idle(project);
+    if (project) {
+      this.idle(project);
+      this.publish();
+    }
   }
 
   async open(path: string, signal?: AbortSignal): Promise<BrowserWindow> {
@@ -118,7 +121,7 @@ export class Workspaces {
     }
     for (const value of this.projects.values()) {
       if (value.window !== window || value.dir === dir) continue;
-      if (value.agentActive || value.loading || value.jobs.size || this.changing.has(value.dir)) throw new Error("Finish or cancel this project's work before changing projects");
+      if (this.busy(value)) throw new Error("Finish or cancel this project's work before changing projects");
       value.window = null;
       this.keep(value);
       this.deps.release(value.dir);
@@ -137,7 +140,7 @@ export class Workspaces {
   async detach(window: BrowserWindow, path: string): Promise<void> {
     const project = this.owner(window);
     if (!project || (project.dir !== path && project.dir !== await realpath(path))) return;
-    if (project.agentActive || project.loading || project.jobs.size || this.changing.has(project.dir)) throw new DapiError("busy", "Finish or cancel this project's work before leaving it.");
+    if (this.busy(project)) throw new DapiError("busy", "Finish or cancel this project's work before leaving it.");
     this.keep(project);
     project.window = null;
     this.deps.release(project.dir);
@@ -197,7 +200,7 @@ export class Workspaces {
       signal?.removeEventListener("abort", abort);
       project.jobs.delete(job.id);
       // SAM retains its model per renderer; release hidden model owners before the next GPU job.
-      if (project.window && this.modelOwners.has(project.window) && !this.running(project) && !project.window.isVisible() && !project.window.isMinimized()) this.releaseRuntime(project);
+      if (project.window && this.modelOwners.has(project.window) && !this.running(project) && !this.uiBusy.has(project.window) && !project.window.isVisible() && !project.window.isMinimized()) this.releaseRuntime(project);
       job.finish();
       this.publish();
       this.idle(project);
@@ -216,7 +219,7 @@ export class Workspaces {
     const dir = await realpath(path);
     const project = this.projects.get(dir);
     if (!project) return;
-    if (project.agentActive || project.loading || project.jobs.size || this.changing.has(dir)) throw new DapiError("busy", "Cancel or finish this project's work before closing it.");
+    if (this.busy(project)) throw new DapiError("busy", "Cancel or finish this project's work before closing it.");
     this.keep(project);
     this.projects.delete(dir);
     this.deps.release(dir);
@@ -267,7 +270,7 @@ export class Workspaces {
     if (this.stopped) throw new Error("Frameyard is shutting down");
     const dir = await realpath(path);
     const project = this.projects.get(dir);
-    if (this.changing.has(dir) || project?.agentActive || project?.loading || project?.jobs.size) {
+    if (this.changing.has(dir) || (project && this.busy(project))) {
       throw new DapiError("busy", "Finish or cancel this project's work before changing its files.");
     }
     this.changing.add(dir);
@@ -328,7 +331,7 @@ export class Workspaces {
     window.on("close", event => {
       const project = this.owner(window);
       if (!project) return;
-      if (!project.agentActive && !project.jobs.size && !this.changing.has(project.dir)) return;
+      if (!this.busy(project)) return;
       event.preventDefault();
       window.hide();
     });
@@ -363,6 +366,10 @@ export class Workspaces {
   private keep(project: Workspace): void {
     clearTimeout(project.idleTimer);
     project.idleTimer = undefined;
+  }
+
+  private busy(project: Workspace): boolean {
+    return project.agentActive || project.loading || project.jobs.size > 0 || this.changing.has(project.dir) || !!(project.window && this.uiBusy.has(project.window));
   }
 
   private running(project: Workspace): boolean {

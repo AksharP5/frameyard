@@ -804,8 +804,8 @@ async function renameFolder(dir: string, displayName: string): Promise<string> {
     const target = join(root, await freeFolder(root, base));
     // The watcher holds the old path, and the renderer re-watches the new one
     // as soon as it hears where the project went.
-    unwatchProject(dir);
     await rename(dir, target);
+    unwatchProject(dir);
     return target;
   } catch {
     return dir;
