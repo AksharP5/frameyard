@@ -63,10 +63,6 @@ export function renderClip(
 	// place on two rows are told apart by the pointer.
 	pointer.scope(String(entity.id()));
 
-	const asset = getClipAsset(world, entity);
-	const error = getSourceFailure(entity);
-	const style = getClipStyle(entity, asset, !!error?.length);
-
 	handleBody(world, surface, entity, left, width, row, resolution);
 
 	// A drag that has just moved the clip has moved where it is drawn, so the
@@ -74,6 +70,16 @@ export function renderClip(
 	if (entity.has(ClipDragOrigin)) {
 		left = framesToPixels(computed.start[entity.id()] ?? 0, resolution);
 	}
+	// Offscreen clips still handle gestures, but do not draw or request media.
+	// Check after the body gesture in case it just moved this clip into view.
+	if (left + width < viewportLeft - VIEWPORT_PADDING || left > viewportRight + VIEWPORT_PADDING) {
+		handleTrim(world, surface, entity, left, width, row, resolution);
+		return;
+	}
+
+	const asset = getClipAsset(world, entity);
+	const error = getSourceFailure(entity);
+	const style = getClipStyle(entity, asset, !!error?.length);
 
 	const generating = isGenerating(entity);
 

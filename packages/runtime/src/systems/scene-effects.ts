@@ -39,23 +39,25 @@ export function prepareSceneEffects(world: World): void {
     state = { scenes: new Map(), active: null };
     states.set(world, state);
   }
+  const computed = store(world, Computed);
   const needed = new Set<Entity>();
   for (const scene of world.query(Scene)) {
-    const values = scene.get(Computed)!;
-    if (scene.has(Hidden) || values.visibility === 0) continue;
-    if (scene.has(ColorGrade) || scene.has(SceneEffects) || values.bloom || values.vignette || values.grain || values.colorSplit) needed.add(scene);
+    const id = scene.id();
+    if (scene.has(Hidden) || computed.visibility[id] === 0) continue;
+    if (scene.has(ColorGrade) || scene.has(SceneEffects) || computed.bloom[id] || computed.vignette[id] || computed.grain[id] || computed.colorSplit[id]) needed.add(scene);
   }
   const scopeTarget = colorScopesTarget(world);
-  if (scopeTarget && isScene(scopeTarget) && !scopeTarget.has(Hidden) && scopeTarget.get(Computed)?.visibility !== 0) needed.add(scopeTarget);
+  if (scopeTarget && isScene(scopeTarget) && !scopeTarget.has(Hidden)
+    && (!scopeTarget.has(Computed) || computed.visibility[scopeTarget.id()] !== 0)) needed.add(scopeTarget);
   for (const highlight of world.query(Or(Geometry, Group))) {
-    const values = highlight.get(Computed)!;
-    if (!highlight.has(Highlight) && !highlight.has(Preset) && !highlight.has(LayerMaterial) && !values.backdropBlur && !values.refraction) continue;
-    if (highlight.has(Hidden) || highlight.get(Computed)?.visibility === 0) continue;
+    const id = highlight.id();
+    if (!highlight.has(Highlight) && !highlight.has(Preset) && !highlight.has(LayerMaterial) && !computed.backdropBlur[id] && !computed.refraction[id]) continue;
+    if (highlight.has(Hidden) || computed.visibility[id] === 0) continue;
     let root = highlight;
     let parent = getParentNode(root);
     let visible = true;
     while (parent) {
-      if (parent.has(Hidden) || parent.get(Computed)?.visibility === 0) visible = false;
+      if (parent.has(Hidden) || (parent.has(Computed) && computed.visibility[parent.id()] === 0)) visible = false;
       root = parent;
       parent = getParentNode(root);
     }
