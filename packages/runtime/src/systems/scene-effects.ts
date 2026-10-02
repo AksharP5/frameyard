@@ -20,6 +20,7 @@ const states = new WeakMap<World, RenderState>();
 
 function makeBuffer(): Buffer {
   const canvas = typeof document === 'undefined' ? new OffscreenCanvas(1, 1) : document.createElement('canvas');
+  canvas.width = canvas.height = 1;
   const ctx = canvas.getContext('2d') as Context | null;
   if (!ctx) throw new Error('Scene effects require a 2D canvas');
   return { canvas, ctx };
@@ -99,7 +100,9 @@ export function renderWithSceneEffects(world: World, scene: Entity, render: () =
   if (width <= 0 || height <= 0) return;
 
   resize(buffers.scene, width, height);
-  resize(buffers.source, width, height);
+  // Keep a reused underlay no larger than the current scene.
+  if (buffers.source.canvas.width > width) buffers.source.canvas.width = width;
+  if (buffers.source.canvas.height > height) buffers.source.canvas.height = height;
   const inverse = matrix.inverse();
   const ctx = buffers.scene.ctx;
   ctx.setTransform(resolution, 0, 0, resolution, 0, 0);
@@ -129,7 +132,7 @@ export function snapshotScene(world: World): Buffer | undefined {
   const buffers = states.get(world)?.active;
   if (!buffers) return;
   const source = buffers.source;
-  source.ctx.clearRect(0, 0, source.canvas.width, source.canvas.height);
+  resize(source, buffers.scene.canvas.width, buffers.scene.canvas.height);
   source.ctx.drawImage(buffers.scene.canvas, 0, 0);
   return source;
 }
