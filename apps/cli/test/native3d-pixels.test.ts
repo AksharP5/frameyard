@@ -203,15 +203,19 @@ test('native 3D pixels preserve depth, editable paints, focus and volume occlusi
     assert.deepEqual(at(first, 180, 100), [255, 34, 0, 255], 'foreground solid blocks smoke');
     assert.ok(at(first, 110, 100)[2]! > 80, 'smoke contributes visible color');
   });
-  await t.test('paused preparation keeps future and nested 3D clips ready without exposing them', async () => {
+  await t.test('paused preparation defers invisible geometry until its first visible frame', async () => {
+    const vertices = Array.from({ length: 1024 }, () => [40, 10, 0, 120, 10, 0, 80, 40, 0]).flat();
     const tree = node('scene', { width: 320, height: 200, active: true, end: 5 }, [
       node('rect', { width: 320, height: 200, fill: '#101820' }),
       node('scene3d', { name: 'left', width: 160, height: 200, end: 5 }, [
         node('mesh', { start: 1, end: 5, x: 40, y: 60, width: 80, height: 80, fill: '#ff2200', lit: false }),
+        node('group', { name: 'transparent', opacity: 0, end: 5 }, [
+          node('mesh', { shape: 'custom', vertices, normals: vertices.map((_, index) => index % 3 === 2 ? 1 : 0), fill: '#22ff88', lit: false }),
+        ]),
       ]),
       node('scene3d', { name: 'right', start: 1, end: 5, x: 160, width: 160, height: 200 }, [
         node('scene3d', { x: 20, y: 25, width: 120, height: 150, end: 5 }, [
-          node('mesh', { start: 1, end: 5, x: 20, y: 30, width: 80, height: 90, fill: '#2288ff' }),
+          node('mesh', { end: 5, x: 20, y: 30, width: 80, height: 90, fill: '#2288ff' }),
         ]),
       ]),
     ]);
@@ -219,8 +223,9 @@ test('native 3D pixels preserve depth, editable paints, focus and volume occlusi
       const r = await import(runtimeUrl) as typeof import('../../../packages/runtime/src/index.ts');
       const d = await import(reconcilerUrl) as typeof import('../../../packages/reconciler/src/index.ts');
       const getContext = OffscreenCanvas.prototype.getContext, createProgram = WebGL2RenderingContext.prototype.createProgram;
+      const bufferData = WebGL2RenderingContext.prototype.bufferData;
       const contexts = new Set<WebGL2RenderingContext>();
-      let programs = 0;
+      let programs = 0, uploadedBytes = 0;
       OffscreenCanvas.prototype.getContext = new Proxy(getContext, { apply(target, receiver, args) {
         const context = Reflect.apply(target, receiver, args);
         if (context instanceof WebGL2RenderingContext) contexts.add(context);
@@ -228,6 +233,10 @@ test('native 3D pixels preserve depth, editable paints, focus and volume occlusi
       } });
       WebGL2RenderingContext.prototype.createProgram = new Proxy(createProgram, { apply(target, receiver, args) {
         programs++; return Reflect.apply(target, receiver, args);
+      } });
+      WebGL2RenderingContext.prototype.bufferData = new Proxy(bufferData, { apply(target, receiver, args) {
+        if (ArrayBuffer.isView(args[1])) uploadedBytes += args[1].byteLength;
+        return Reflect.apply(target, receiver, args);
       } });
       const world = r.createRuntimeWorld('native-3d-preparation'), document = d.createRuntimeDocument(world);
       const canvas = new OffscreenCanvas(320, 200), ctx = canvas.getContext('2d')!;
@@ -241,13 +250,16 @@ test('native 3D pixels preserve depth, editable paints, focus and volume occlusi
           r.setPlayhead(world, active, frame); r.playbackSystem(world); r.motionSystem(world); r.transformSystem(world); r.renderSystem(world);
           return Array.from(ctx.getImageData(0, 0, 320, 200).data);
         };
-        const paused = renderAt(0), preparedPrograms = programs;
+        const paused = renderAt(0), preparedPrograms = programs, preparedBytes = uploadedBytes;
         const futureHits = world.get(r.HitRegions)!.list.filter(region => region.target.kind === 'entity'
           && world.query(r.SpatialGeometry).some(entity => entity === region.target.id)).length;
         const timeAfterPreparation = active.get(r.Computed)!.localTime;
         active.set(r.Playback, { playing: true });
-        const playing = renderAt(90), playbackPrograms = programs;
+        const playing = renderAt(90), playbackPrograms = programs, playbackBytes = uploadedBytes;
         active.set(r.Playback, { playing: false });
+        const transparent = world.query(r.Group, r.Name).find(entity => entity.get(r.Name)?.value === 'transparent')!;
+        document.setProperty(document.node(transparent), 'opacity', 1);
+        const revealed = renderAt(90), revealedBytes = uploadedBytes;
         world.set(r.Mode, { value: 'offline-video' });
         const offline = renderAt(90);
         const left = world.query(r.Scene3D, r.Name).find(entity => entity.get(r.Name)?.value === 'left')!;
@@ -255,23 +267,30 @@ test('native 3D pixels preserve depth, editable paints, focus and volume occlusi
         const afterRemoval = renderAt(90);
         const aliveAfterRemoval = [...contexts].every(context => !context.isContextLost());
         document.dispose(); world.destroy(); disposed = true;
-        return { paused, playing, offline, afterRemoval, timeAfterPreparation, futureHits, preparedPrograms, playbackPrograms,
+        return { paused, playing, revealed, offline, afterRemoval, timeAfterPreparation, futureHits, preparedPrograms, playbackPrograms,
+          preparedBytes, playbackBytes, revealedBytes,
           contexts: contexts.size, aliveAfterRemoval, lostAfterDisposal: [...contexts].every(context => context.isContextLost()) };
       } finally {
         if (!disposed) { document.dispose(); world.destroy(); }
         OffscreenCanvas.prototype.getContext = getContext; WebGL2RenderingContext.prototype.createProgram = createProgram;
+        WebGL2RenderingContext.prototype.bufferData = bufferData;
       }
     }, { tree, runtimeUrl, reconcilerUrl });
     assert.equal(result.contexts, 1, 'all nested and sibling viewports share one GPU context');
-    assert.ok(result.preparedPrograms > 0, 'shaders compile while paused');
-    assert.equal(result.playbackPrograms, result.preparedPrograms, 'future clips reuse shaders when playback reaches them');
+    assert.equal(result.preparedPrograms, 0, 'invisible meshes do not compile shaders at startup');
+    assert.equal(result.preparedBytes, 0, 'invisible meshes do not allocate GPU buffers at startup');
+    assert.ok(result.playbackPrograms > 0, 'future clips compile when first visible');
+    assert.ok(result.playbackBytes > 0, 'future clips upload when first visible');
+    assert.ok(result.revealedBytes - result.playbackBytes >= vertices.length * 4, 'zero-opacity payload uploads only after an edit reveals it');
     assert.equal(result.timeAfterPreparation, 0);
     assert.equal(result.futureHits, 0, 'future geometry cannot be selected');
     assert.deepEqual(at(result.paused, 80, 100), [16, 24, 32, 255]);
     assert.deepEqual(at(result.paused, 240, 100), [16, 24, 32, 255]);
     assert.deepEqual(at(result.playing, 80, 100), [255, 34, 0, 255]);
     assert.ok(at(result.playing, 240, 100)[2]! > 100, 'nested viewport draws at the correct size');
-    assert.deepEqual(result.playing, result.offline, 'preview and export pixels agree');
+    assert.deepEqual(at(result.playing, 80, 20), [16, 24, 32, 255]);
+    assert.deepEqual(at(result.revealed, 80, 20), [34, 255, 136, 255]);
+    assert.ok(result.revealed.every((channel, index) => channel === result.offline[index]), 'first-visible preview and export pixels agree');
     assert.deepEqual(at(result.afterRemoval, 240, 100), at(result.playing, 240, 100));
     assert.ok(result.aliveAfterRemoval, 'removing one scene leaves the others usable');
     assert.ok(result.lostAfterDisposal, 'document disposal releases the shared context');

@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import { isNumericBuffer } from './spatial';
+import { isNumericBuffer } from './spatial.ts';
 
 /**
  * How the compile step, the host and the editor agree to name the elements of
