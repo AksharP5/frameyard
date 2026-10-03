@@ -7,6 +7,7 @@
 // content (see `noteContent`), which is what these pin down.
 
 import { tmpdir } from "node:os";
+import { watch } from "node:fs";
 import { mkdir, mkdtemp, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -21,6 +22,11 @@ vi.mock("electron", () => ({
   shell: { trashItem: vi.fn() },
   ipcMain: { on: () => { } },
 }));
+
+vi.mock("node:fs", async importOriginal => {
+  const fs = await importOriginal<typeof import("node:fs")>();
+  return { ...fs, watch: vi.fn(fs.watch) };
+});
 
 vi.mock("node:fs/promises", async importOriginal => {
   const fs = await importOriginal<typeof import("node:fs/promises")>();
@@ -73,6 +79,67 @@ afterEach(async () => {
 });
 
 describe("watchProject", () => {
+  it("coalesces duplicate events without delaying a source edit behind a file burst", async () => {
+    const files = Array.from({ length: 120 }, (_, index) => `asset-${index}.txt`);
+    for (const file of [...files, "index.tsx"]) noteContent(join(dir, file), "same\n");
+    await Promise.all([...files, "index.tsx"].map(file => writeFile(join(dir, file), "same\n")));
+    await settle();
+    vi.mocked(readFile).mockClear();
+
+    const args: readonly unknown[] | undefined = vi.mocked(watch).mock.calls.findLast(args => args[0] === dir);
+    const listener = args?.find(value => typeof value === "function");
+    if (typeof listener !== "function") throw new Error("The project directory has no watcher");
+    for (let index = 0; index < 1000; index++) listener("change", files[0]);
+    for (const file of files) listener("change", file);
+    await writeFile(join(dir, "index.tsx"), "changed\n");
+    listener("change", "index.tsx");
+
+    await waitFor("index.tsx", 1000);
+    expect(vi.mocked(readFile).mock.calls.filter(([path]) => path === join(dir, files[0]!))).toHaveLength(1);
+    expect(changed).toEqual(["index.tsx"]);
+  });
+
+  it("ignores native media caches and Git metadata while watching authored lookalikes", async () => {
+    unwatchProject(dir);
+    const ignored = [".cache/playback", ".cache/original-audio", ".git"];
+    await Promise.all([...ignored, "assets/.cache"].map(path => mkdir(join(dir, path), { recursive: true })));
+    vi.mocked(watch).mockClear();
+    vi.mocked(readFile).mockClear();
+    watchProject(window, dir);
+    await Promise.all(ignored.map(path => writeFile(join(dir, path, "generated.bin"), "generated\n")));
+    await settle();
+    expect(changed).toEqual([]);
+    expect(vi.mocked(watch).mock.calls.some(([path]) => String(path).startsWith(join(dir, ".cache")) || String(path).startsWith(join(dir, ".git")))).toBe(false);
+    expect(vi.mocked(readFile).mock.calls).toEqual([]);
+
+    await writeFile(join(dir, ".gitignore"), "ignore patterns\n");
+    await writeFile(join(dir, "assets/.cache", "authored.tsx"), "authored component\n");
+    await waitFor(".gitignore");
+    await waitFor("assets/.cache/authored.tsx");
+  });
+
+  it("reads an outside edit that arrives while an earlier digest is pending", async () => {
+    const file = join(dir, "index.tsx");
+    const reading = Promise.withResolvers<void>(), finish = Promise.withResolvers<void>();
+    let blocked = false;
+    vi.mocked(readFile).mockImplementation(async (path, options) => {
+      const content = await readFileOnDisk(path, options);
+      if (path === file && !blocked) {
+        blocked = true;
+        reading.resolve();
+        await finish.promise;
+      }
+      return content;
+    });
+    try {
+      await writeFile(file, "old\n");
+      await reading.promise;
+      await writeFile(file, "new\n");
+      finish.resolve();
+      await vi.waitFor(() => expect(changed.filter(path => path === "index.tsx")).toHaveLength(2));
+    } finally { finish.resolve(); }
+  });
+
   it("does not publish an old file read after its watcher is replaced", async () => {
     const file = join(dir, "index.tsx");
     const reading = Promise.withResolvers<void>(), finish = Promise.withResolvers<void>();

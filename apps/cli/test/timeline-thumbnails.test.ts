@@ -22,18 +22,19 @@ function fixture(imageSize = { width: 128, height: 128 }) {
   const dependencies = {
     mediabunny: { CanvasSink: class {
       readonly assetId: string;
-      constructor(track: { assetId: string }) { this.assetId = track.assetId; }
+      readonly size: { width: number; height: number };
+      constructor(track: { assetId: string }, size: { width: number; height: number }) { this.assetId = track.assetId; this.size = size; }
       async getCanvas(timestamp: number) {
         calls.push(timestamp);
         sourceCalls.push(this.assetId);
         peak = Math.max(peak, ++active);
         await new Promise<void>((resolve) => releases.push(resolve));
         active--;
-        return { timestamp, canvas: { timestamp, width: 512, height: 512, assetId: this.assetId } };
+        return { timestamp, canvas: { timestamp, width: 512, height: 512, assetId: this.assetId, decodedWidth: this.size.width, decodedHeight: this.size.height } };
       }
     } },
     '@diffusionstudio/runtime': {
-      getVideoTrack: async (asset: { id: string }) => ({ assetId: asset.id, getFirstTimestamp: async () => 0, computeDuration: async () => 600 }),
+      getVideoTrack: async (asset: { id: string; duration: number }) => ({ assetId: asset.id, getFirstTimestamp: async () => 0, computeDuration: async () => asset.duration }),
       getAssetFile: async () => new File([], 'image.png'),
       secondsToFrames: (seconds: number, fps: number) => seconds * fps,
     },
@@ -82,6 +83,55 @@ test('zooming out over many cuts keeps thumbnail decoding bounded and fills ever
   for (const request of clips) assert.ok(f.pickFrame(request.clip, request.asset.id, request.firstFrame, request.interval));
 });
 
+test('video strips refresh at the new display resolution and reuse completed tiles', async () => {
+  const f = fixture();
+  f.requestFrames(f.request);
+  await f.drain();
+  f.requestFrames(f.request);
+  await f.drain();
+  const size = () => {
+    const canvas = f.pickFrame(f.request.clip, f.request.asset.id, 300, f.request.interval)?.canvas as unknown as { decodedWidth: number; decodedHeight: number };
+    return [canvas.decodedWidth, canvas.decodedHeight];
+  };
+  assert.deepEqual(size(), [56, 46]);
+  f.display.devicePixelRatio = 2;
+  f.requestFrames(f.request);
+  await f.drain();
+  assert.deepEqual(size(), [112, 92]);
+  f.calls.length = 0;
+  for (let frame = 0; frame < 60; frame++) f.requestFrames(f.request);
+  await f.drain();
+  assert.equal(f.calls.length, 0, 'unchanged tiles remain decoded after the display change');
+});
+
+test('a newer display resolution supersedes in-flight video tiles', async () => {
+  const f = fixture();
+  f.requestFrames(f.request);
+  await f.drain();
+  f.requestFrames(f.request);
+  await f.tick();
+  f.display.devicePixelRatio = 2;
+  f.requestFrames(f.request);
+  await f.drain();
+  const canvas = f.pickFrame(f.request.clip, f.request.asset.id, 300, f.request.interval)?.canvas as unknown as { decodedWidth: number; decodedHeight: number };
+  assert.deepEqual([canvas.decodedWidth, canvas.decodedHeight], [112, 92]);
+});
+
+test('short video strips decode their final partial tile without seeking past the source', async () => {
+  for (const interval of [100, 300]) {
+    const f = fixture();
+    const request = { ...f.request, asset: { ...f.request.asset, duration: 5 }, interval, lastFrame: 149 };
+    f.requestFrames(request);
+    await f.drain();
+    f.calls.length = 0;
+    f.requestFrames(request);
+    await f.drain();
+    assert.deepEqual(f.calls, interval === 100 ? [0, 100 / 30] : [0]);
+    assert.ok(f.pickFrame(request.clip, request.asset.id, 100, interval), 'a strip shorter than one tile must still show its picture');
+    assert.ok(f.calls.every(timestamp => timestamp < request.asset.duration));
+  }
+});
+
 test('a newer zoom supersedes queued tiles, and clearing media cancels pending thumbnail work', async () => {
   const f = fixture();
   f.requestFrames(f.request);
@@ -91,7 +141,7 @@ test('a newer zoom supersedes queued tiles, and clearing media cancels pending t
   await f.tick();
   f.requestFrames({ ...f.request, firstFrame: 9000, lastFrame: 9600 });
   await f.drain();
-  assert.deepEqual(f.calls, [0, 290, 300, 310, 320]);
+  assert.deepEqual(f.calls, [0, 290, 300, 310, 320, 330]);
   f.requestFrames({ ...f.request, clip: 2 });
   f.requestFrames({ ...f.request, clip: 3 });
   await f.tick();

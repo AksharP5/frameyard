@@ -7,10 +7,8 @@ import { userDataDirectory } from "./app-paths";
 import { isAbsolute, join } from "node:path";
 import { existsSync } from "node:fs";
 import { realpath } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
-import { abortFileWrite, closeFileWrite, openFileWrite } from "./file-write";
-import type { OpenFileWrite } from "./file-write";
+import { abortFileWrite, closeFileWrite, FileWrites } from "./file-write";
 import { allowsMediaCheck, allowsMediaRequest, isEditorUrl, isExternalWebUrl } from "./window-security";
 import { DapiServer } from "./dapi/server";
 import { RendererCalls } from "./dapi/renderer-calls";
@@ -120,19 +118,7 @@ function applyBackdrop(window = mainWindow) {
   setNativeBackdrop(window.getNativeWindowHandle(), blur, red, green, blue, alpha);
 }
 
-const openWrites = new Map<string, { entry: OpenFileWrite; owner: number }>();
-
-function ownedWrite(id: string, owner: number): OpenFileWrite | undefined {
-  const write = openWrites.get(id);
-  if (write && write.owner !== owner) throw new Error("This output belongs to another project window");
-  return write?.entry;
-}
-
-async function abortWindowWrites(owner: number): Promise<void> {
-  const writes = [...openWrites].filter(([, write]) => write.owner === owner);
-  for (const [id] of writes) openWrites.delete(id);
-  await Promise.all(writes.map(([, write]) => abortFileWrite(write.entry).catch(error => console.error("Could not release interrupted output", error))));
-}
+const openWrites = new FileWrites();
 
 let mainWindow: BrowserWindow | null = null;
 const editorWindows = new Set<BrowserWindow>();
@@ -171,7 +157,7 @@ function captureConsole(window: BrowserWindow) {
   window.webContents.on("render-process-gone", (_event, details) => {
     pushLog("error", `Renderer process gone: ${details.reason} (exit code ${details.exitCode})`, "");
     void disposeOriginalVideos(window.webContents.id);
-    void abortWindowWrites(window.webContents.id);
+    void openWrites.abortOwner(window.webContents.id);
   });
 }
 
@@ -301,7 +287,7 @@ function createWindow(show = true, background = false): BrowserWindow {
     mainBridge.emit(window, MAIN_CHANNELS.WINDOW_FULLSCREEN_CHANGE, { fullscreen: false });
   });
   const mediaOwner = window.webContents.id;
-  window.webContents.once("destroyed", () => { void disposeOriginalVideos(mediaOwner); void abortWindowWrites(mediaOwner); });
+  window.webContents.once("destroyed", () => { void disposeOriginalVideos(mediaOwner); void openWrites.abortOwner(mediaOwner); });
   window.on("closed", () => {
     editorWindows.delete(window);
     if (mainWindow === window) mainWindow = null;
@@ -592,31 +578,27 @@ if (app.requestSingleInstanceLock()) {
     if (!isAbsolute(path)) throw new Error(`The output path must be absolute (got "${path}").`);
     // Bytes stay in a temp file until publishing. An exclusive write fails if
     // another process claims the output name while encoding.
-    const entry = await openFileWrite(path, exclusive === true);
-    const id = randomUUID();
-    openWrites.set(id, { entry, owner: event.sender.id });
+    const id = await openWrites.open(path, exclusive === true, event.sender.id, () => !event.sender.isDestroyed());
     return { id };
   });
 
   mainBridge.handle(MAIN_CHANNELS.FILE_WRITE_CHUNK, async ({ id, data, position }, event) => {
-    const entry = ownedWrite(id, event.sender.id);
+    const entry = openWrites.get(id, event.sender.id);
     if (!entry) throw new Error(`No open file for write id ${id}`);
     await entry.handle.write(data, 0, data.byteLength, position);
   });
 
   mainBridge.handle(MAIN_CHANNELS.FILE_WRITE_CLOSE, async ({ id }, event) => {
-    const entry = ownedWrite(id, event.sender.id);
+    const entry = openWrites.take(id, event.sender.id);
     if (!entry) return;
-    openWrites.delete(id);
     await closeFileWrite(entry, noteRenamed);
   });
 
   // Abort drops only the temp file. A destination created during encoding
   // belongs to the other writer and is left alone.
   mainBridge.handle(MAIN_CHANNELS.FILE_WRITE_ABORT, async ({ id }, event) => {
-    const entry = ownedWrite(id, event.sender.id);
+    const entry = openWrites.take(id, event.sender.id);
     if (!entry) return;
-    openWrites.delete(id);
     await abortFileWrite(entry);
   });
 

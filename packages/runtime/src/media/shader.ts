@@ -91,6 +91,7 @@ type UniformSlot = {
 	binding: number;
 	components: number;
 	buffer: GPUBuffer;
+	data: Float32Array<ArrayBuffer>;
 };
 
 type Pipeline = {
@@ -120,8 +121,8 @@ export class ShaderHost {
 		if (this.disposed || code === this.code) return;
 		this.code = code;
 		const gen = ++this.generation;
+		this.releasePipeline();
 		this.compilePromise = this.compile(code, gen).catch((error) => {
-			if (gen === this.generation) this.gpu = null;
 			console.error("[shader-paint]", error);
 		});
 	}
@@ -138,7 +139,7 @@ export class ShaderHost {
 
 	private async compile(code: string, gen: number): Promise<void> {
 		const device = await sharedDevice();
-		if (!device || this.disposed) return;
+		if (!device || this.disposed || gen !== this.generation) return;
 
 		const module = device.createShaderModule({ code: PRELUDE + code });
 		const info = await module.getCompilationInfo();
@@ -147,7 +148,6 @@ export class ShaderHost {
 		const preludeLines = PRELUDE.split("\n").length;
 		const errors = info.messages.filter((m) => m.type === "error");
 		if (errors.length > 0) {
-			this.gpu = null;
 			const details = errors
 				.map((m) => `${Math.max(1, m.lineNum - preludeLines + 1)}:${m.linePos} ${m.message}`)
 				.join("\n");
@@ -166,78 +166,98 @@ export class ShaderHost {
 		// `uniforms` record by name. An explicit layout keeps declared-but-unused
 		// bindings valid (an "auto" layout would strip them).
 		const slots: UniformSlot[] = [];
-		for (const match of code.matchAll(UNIFORM_RE)) {
-			const components = UNIFORM_COMPONENTS[match[3]];
-			if (components === undefined) {
-				console.warn(`[shader-paint] uniform \`${match[2]}\` has unsupported type ${match[3]} (use f32/vec2f/vec3f/vec4f)`);
-				continue;
+		let globals: GPUBuffer | null = null;
+		let installed = false;
+		try {
+			for (const match of code.matchAll(UNIFORM_RE)) {
+				const components = UNIFORM_COMPONENTS[match[3]];
+				if (components === undefined) {
+					console.warn(`[shader-paint] uniform \`${match[2]}\` has unsupported type ${match[3]} (use f32/vec2f/vec3f/vec4f)`);
+					continue;
+				}
+				slots.push({
+					name: match[2],
+					binding: Number(match[1]),
+					components,
+					data: new Float32Array(components),
+					buffer: device.createBuffer({
+						size: components * 4,
+						usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+					}),
+				});
 			}
-			slots.push({
-				name: match[2],
-				binding: Number(match[1]),
-				components,
-				buffer: device.createBuffer({
-					size: components * 4,
-					usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-				}),
+
+			const group1Layout = device.createBindGroupLayout({
+				entries: slots.map((slot) => ({
+					binding: slot.binding,
+					visibility: GPUShaderStage.FRAGMENT,
+					buffer: { type: "uniform" as const },
+				})),
 			});
+
+			const pipeline = device.createRenderPipeline({
+				layout: device.createPipelineLayout({ bindGroupLayouts: [group0Layout, group1Layout] }),
+				vertex: { module, entryPoint: "vs" },
+				fragment: {
+					module,
+					entryPoint: "main",
+					targets: [{ format: navigator.gpu.getPreferredCanvasFormat() }],
+				},
+			});
+			if (gen !== this.generation || this.disposed) return;
+
+			globals = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+			this.gpu = {
+				device,
+				pipeline,
+				sampler: device.createSampler({ magFilter: "linear", minFilter: "linear" }),
+				globals,
+				slots,
+				group1: device.createBindGroup({
+					layout: group1Layout,
+					entries: slots.map((slot) => ({ binding: slot.binding, resource: { buffer: slot.buffer } })),
+				}),
+				group0Layout,
+			};
+			installed = true;
+		} finally {
+			if (!installed) {
+				globals?.destroy();
+				for (const slot of slots) slot.buffer.destroy();
+			}
 		}
+	}
 
-		const group1Layout = device.createBindGroupLayout({
-			entries: slots.map((slot) => ({
-				binding: slot.binding,
-				visibility: GPUShaderStage.FRAGMENT,
-				buffer: { type: "uniform" as const },
-			})),
-		});
-
-		const pipeline = device.createRenderPipeline({
-			layout: device.createPipelineLayout({ bindGroupLayouts: [group0Layout, group1Layout] }),
-			vertex: { module, entryPoint: "vs" },
-			fragment: {
-				module,
-				entryPoint: "main",
-				targets: [{ format: navigator.gpu.getPreferredCanvasFormat() }],
-			},
-		});
-		if (gen !== this.generation || this.disposed) return;
-
-		this.gpu = {
-			device,
-			pipeline,
-			sampler: device.createSampler({ magFilter: "linear", minFilter: "linear" }),
-			globals: device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }),
-			slots,
-			group1: device.createBindGroup({
-				layout: group1Layout,
-				entries: slots.map((slot) => ({ binding: slot.binding, resource: { buffer: slot.buffer } })),
-			}),
-			group0Layout,
-		};
-		// The source texture and its bind group belong to the old pipeline's layout.
+	private releasePipeline(): void {
 		this.sourceTexture?.destroy();
 		this.sourceTexture = null;
 		this.group0 = null;
+		if (this.gpu) {
+			this.gpu.globals.destroy();
+			for (const slot of this.gpu.slots) slot.buffer.destroy();
+			this.gpu = null;
+		}
 	}
 
 	private writeUniforms(uniforms: Record<string, UniformValue> | null): void {
 		const gpu = this.gpu!;
 		for (const slot of gpu.slots) {
 			const value = uniforms?.[slot.name];
-			if (value === undefined) continue;
-			const data = new Float32Array(slot.components);
+			const data = slot.data;
+			data.fill(0);
 			if (typeof value === "number") {
 				data[0] = value;
 			} else if (Array.isArray(value)) {
 				for (let i = 0; i < Math.min(slot.components, value.length); i++) data[i] = value[i];
-			} else {
+			} else if (typeof value === "string") {
 				if (!this.colorCache.has(value)) this.colorCache.set(value, parseColor(value));
 				const color = this.colorCache.get(value);
-				if (color == null) continue;
-				data[0] = ((color >> 16) & 0xff) / 255;
-				if (slot.components >= 2) data[1] = ((color >> 8) & 0xff) / 255;
-				if (slot.components >= 3) data[2] = (color & 0xff) / 255;
-				if (slot.components >= 4) data[3] = 1;
+				if (color != null) {
+					data[0] = ((color >> 16) & 0xff) / 255;
+					if (slot.components >= 2) data[1] = ((color >> 8) & 0xff) / 255;
+					if (slot.components >= 3) data[2] = (color & 0xff) / 255;
+					if (slot.components >= 4) data[3] = 1;
+				}
 			}
 			gpu.device.queue.writeBuffer(slot.buffer, 0, data);
 		}
@@ -340,13 +360,7 @@ export class ShaderHost {
 		if (this.disposed) return;
 		this.disposed = true;
 		this.generation++;
-		this.sourceTexture?.destroy();
-		this.sourceTexture = null;
-		if (this.gpu) {
-			this.gpu.globals.destroy();
-			for (const slot of this.gpu.slots) slot.buffer.destroy();
-			this.gpu = null;
-		}
+		this.releasePipeline();
 		this.context?.unconfigure();
 		this.canvas.width = 0;
 		this.canvas.height = 0;

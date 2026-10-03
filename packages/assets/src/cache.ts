@@ -14,8 +14,9 @@ import type { Asset } from './types';
 /** The project directory derived data is kept in. */
 export const CACHE_DIR = 'cache';
 
-/** Whether a project-relative path is inside the cache directory. */
-export const isCacheFile = (path: string): boolean => path === CACHE_DIR || path.startsWith(`${CACHE_DIR}/`);
+/** Asset derivations and native playback/audio outputs are both project-owned caches. */
+export const isCacheFile = (path: string): boolean =>
+	path === CACHE_DIR || path.startsWith(`${CACHE_DIR}/`) || path === '.cache' || path.startsWith('.cache/');
 
 /** A kind of cached value: where it lives under `cache/`, and how it is stored. */
 export interface CacheKind<T> {

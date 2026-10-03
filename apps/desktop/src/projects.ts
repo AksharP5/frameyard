@@ -1137,10 +1137,13 @@ export async function removeEntry(dir: string, path: string): Promise<void> {
 type DirectoryWatch = { watcher: FSWatcher; ino: number; dev: number };
 type ProjectWatch = {
   directories: Map<string, DirectoryWatch>;
-  queue: Promise<void>;
+  pending: Set<string>;
+  timer?: ReturnType<typeof setTimeout>;
+  flushing: boolean;
   window: BrowserWindow | null;
 };
 const watchers = new Map<string, ProjectWatch>();
+const IGNORED_WATCH_ROOTS = new Set([APP_DIR, "node_modules", ".cache", ".git"]);
 
 /**
  * What the app believes is on disk, by absolute path: a digest of the content
@@ -1223,7 +1226,7 @@ export async function noteRenamed(temp: string, as: string): Promise<void> {
 
 export function watchProject(window: BrowserWindow | null, dir: string): void {
   if (watchers.has(dir)) return;
-  const project: ProjectWatch = { directories: new Map(), queue: Promise.resolve(), window };
+  const project: ProjectWatch = { directories: new Map(), pending: new Set(), flushing: false, window };
   watchers.set(dir, project);
 
   const forget = (path: string): void => {
@@ -1234,30 +1237,46 @@ export function watchProject(window: BrowserWindow | null, dir: string): void {
     }
   };
 
+  const schedule = (): void => {
+    if (project.timer || project.flushing) return;
+    project.timer = setTimeout(() => {
+      void flush().catch(error => console.error("[projects] Could not publish file changes", error));
+    }, 10);
+  };
+
+  const flush = async (): Promise<void> => {
+    project.timer = undefined;
+    project.flushing = true;
+    try {
+      // One settle delay per burst; reads stay ordered, including edits arriving during a read.
+      for (const file of [...project.pending]) {
+        if (watchers.get(dir) !== project) return;
+        project.pending.delete(file);
+        const current = await digestOf(file);
+        if (watchers.get(dir) !== project) return;
+        if (known.get(file) === current) continue;
+        known.set(file, current);
+        const path = relative(dir, file).split(sep).join("/");
+        mainBridge.emit(project.window, MAIN_CHANNELS.PROJECTS_CHANGED, { dir, path });
+      }
+    } finally {
+      project.flushing = false;
+      if (watchers.get(dir) === project && project.pending.size) schedule();
+    }
+  };
+
   const changed = (file: string): void => {
     const path = relative(dir, file).split(sep).join("/");
     if (!path || path.startsWith("../")) return;
-    if (path.startsWith("node_modules/") || path === "node_modules") return;
-    if (path.startsWith(`${APP_DIR}/`) || path === APP_DIR) return;
+    if (IGNORED_WATCH_ROOTS.has(path.split("/")[0])) return;
     if (isTempPath(path) || /\.diffusion-save-[\da-f-]{36}$/.test(path)) return;
-
-    // Reads stay ordered so a slower old event cannot overwrite the digest
-    // recorded for a newer one. The short delay lets in-place saves finish.
-    project.queue = project.queue
-      .then(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 10));
-        if (watchers.get(dir) !== project) return;
-        const current = await digestOf(file);
-        if (watchers.get(dir) !== project || known.get(file) === current) return;
-        known.set(file, current);
-        mainBridge.emit(project.window, MAIN_CHANNELS.PROJECTS_CHANGED, { dir, path });
-      })
-      .catch(() => { });
+    project.pending.add(file);
+    schedule();
   };
 
   const attach = (directory: string): void => {
     const rootEntry = relative(dir, directory).split(sep)[0];
-    if (rootEntry === APP_DIR || rootEntry === "node_modules") return;
+    if (IGNORED_WATCH_ROOTS.has(rootEntry)) return;
 
     const info = directory === dir ? statSync(directory) : lstatSync(directory);
     if (!info.isDirectory()) {
@@ -1307,7 +1326,11 @@ export function watchProject(window: BrowserWindow | null, dir: string): void {
 export function unwatchProject(dir: string): void {
   const watched = watchers.get(dir);
   watchers.delete(dir);
-  if (watched) for (const { watcher } of watched.directories.values()) watcher.close();
+  if (watched) {
+    clearTimeout(watched.timer);
+    watched.pending.clear();
+    for (const { watcher } of watched.directories.values()) watcher.close();
+  }
   // What the folder holds while nobody is watching is not the app's to
   // remember: the next watch starts from a fresh load of the project anyway.
   const prefix = dir.endsWith(sep) ? dir : dir + sep;

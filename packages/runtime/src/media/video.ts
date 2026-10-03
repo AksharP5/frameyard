@@ -519,6 +519,7 @@ export class VideoBuffer {
 
 			if (tile) {
 				if (resized || this.renderedTileRevision !== tile.revision) {
+					ctx.clearRect(0, 0, tile.width, tile.height);
 					ctx.drawImage(
 						this.cache.atlas,
 						tile.x,
