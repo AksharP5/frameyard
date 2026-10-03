@@ -66,6 +66,8 @@ export type FrameRequest = {
 	canDecode?: () => boolean;
 };
 
+type DecodeRequest = FrameRequest & { resolution: number };
+
 type AssetFrames = {
 	frames: Frame[];
 	decoding: boolean;
@@ -79,8 +81,8 @@ type ClipFrames = {
 	/** The stretch `frames` covers, in source frames. */
 	start: number;
 	end: number;
-	request: FrameRequest | null;
-	pending: FrameRequest | null;
+	request: DecodeRequest | null;
+	pending: DecodeRequest | null;
 	decoding: boolean;
 };
 
@@ -279,14 +281,15 @@ export function requestFrames(request: FrameRequest): void {
 		mediaDirty = true;
 	}
 	if (request.canDecode?.() === false) return;
+	const decodedRequest = { ...request, resolution: window.devicePixelRatio };
 	const record = assetFrames.get(request.asset.id);
 
 	if (!record || (!record.decoding && !record.decoded)) {
-		void decodeSpread(request);
+		void decodeSpread(decodedRequest);
 	}
 
 	if (record && record.frames.length > 0) {
-		void updateClip(request);
+		void updateClip(decodedRequest);
 	}
 }
 
@@ -368,7 +371,7 @@ export function forgetAssetMedia(assetId: string): void {
  * on the timeline, and what it keeps showing wherever its own strip has not
  * reached.
  */
-async function decodeSpread(request: FrameRequest): Promise<void> {
+async function decodeSpread(request: DecodeRequest): Promise<void> {
 	const { asset } = request;
 
 	const record = assetFrames.get(asset.id) ?? { frames: [], decoding: false, decoded: false };
@@ -420,7 +423,7 @@ async function decodeSpread(request: FrameRequest): Promise<void> {
  * running replaces whatever was queued behind it — the work that finally runs
  * is for where the timeline ended up, not everywhere it passed through.
  */
-async function updateClip(request: FrameRequest): Promise<void> {
+async function updateClip(request: DecodeRequest): Promise<void> {
 	const cached = clipFrames.get(request.clip) ?? {
 		assetId: request.asset.id,
 		frames: [],
@@ -454,18 +457,18 @@ async function updateClip(request: FrameRequest): Promise<void> {
 			// Nothing on screen is worth keeping: every tile is the wrong size
 			// or covers the wrong stretch, so the whole range is decoded again.
 			from = wanted.firstIndex;
-			to = wanted.lastIndex;
+			to = wanted.endIndex;
 			for (const frame of cached.frames) frame.stale = true;
 		} else if (wanted.start < cached.start) {
 			from = wanted.firstIndex;
 			to = Math.floor(cached.start / request.interval);
 		} else if (wanted.end > cached.end) {
 			from = Math.floor(cached.end / request.interval);
-			to = wanted.lastIndex;
+			to = wanted.endIndex;
 		}
 
 		for (const frame of cached.frames) {
-			if (frame.timestamp > wanted.end || frame.timestamp < wanted.start) frame.stale = true;
+			if (frame.timestamp >= wanted.end || frame.timestamp < wanted.start) frame.stale = true;
 		}
 
 		const count = to - from;
@@ -527,21 +530,21 @@ async function updateClip(request: FrameRequest): Promise<void> {
 
 /**
  * The tiles to have decoded: the ones the visible stretch falls on, one
- * either side, and never past the ends of the file.
+ * either side, and never past the ends of the file. The end index is exclusive
+ * so the final partial tile is included without seeking to the source end.
  */
 function tileRange(request: FrameRequest) {
 	const { firstFrame, lastFrame, interval, asset } = request;
 
-	const lastTile = Math.floor(secondsToFrames(asset.duration, request.fps) / interval);
+	const sourceEndIndex = Math.ceil(secondsToFrames(asset.duration, request.fps) / interval);
 	const firstIndex = Math.max(Math.floor(firstFrame / interval) - TILE_MARGIN, 0);
-	const lastIndex = Math.min(Math.floor(lastFrame / interval) + TILE_MARGIN, lastTile);
+	const endIndex = Math.min(Math.floor(lastFrame / interval) + TILE_MARGIN + 1, sourceEndIndex);
 
-	return { firstIndex, lastIndex, start: firstIndex * interval, end: lastIndex * interval };
+	return { firstIndex, endIndex, start: firstIndex * interval, end: endIndex * interval };
 }
 
-function createSink(track: InputVideoTrack, request: FrameRequest): CanvasSink {
-	const dpr = window.devicePixelRatio;
-	return new CanvasSink(track, { width: request.width * dpr, height: request.height * dpr, fit: 'cover' });
+function createSink(track: InputVideoTrack, request: DecodeRequest): CanvasSink {
+	return new CanvasSink(track, { width: request.width * request.resolution, height: request.height * request.resolution, fit: 'cover' });
 }
 
 /** The strip without what has been superseded, in the order it is drawn. */
@@ -551,14 +554,14 @@ function keep(frames: Frame[], upTo?: number): Frame[] {
 		.sort((a, b) => a.timestamp - b.timestamp);
 }
 
-function rangeHash(request: FrameRequest | null): string {
+function rangeHash(request: DecodeRequest | null): string {
 	if (!request) return '';
 	return `${sizeHash(request)}-${request.interval}-${request.firstFrame}-${request.lastFrame}`;
 }
 
-function sizeHash(request: FrameRequest | null): string {
+function sizeHash(request: DecodeRequest | null): string {
 	if (!request) return '';
-	return `${request.width}x${request.height}@${window.devicePixelRatio}`;
+	return `${request.width}x${request.height}@${request.resolution}`;
 }
 
 /** The frame nearest `timestamp`, or -1 when there are none. */

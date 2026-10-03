@@ -20,19 +20,27 @@ class Canvas {
   width: number; height: number;
   readonly pixels = new Map<string, number | undefined>();
   draws = 0;
+  clears = 0;
   constructor(width: number, height: number) { this.width = width; this.height = height; }
   getContext() { return {
-    clearRect() {}, resetTransform() {}, translate() {}, rotate() {},
-    drawImage: (source: { timestamp?: number; pixels?: Map<string, number | undefined> }, ...coordinates: number[]) => {
+    clearRect: (x: number, y: number, width: number, height: number) => {
+      this.clears++;
+      for (const key of this.pixels.keys()) {
+        const [px, py] = key.split(',').map(Number);
+        if (px >= x && px < x + width && py >= y && py < y + height) this.pixels.delete(key);
+      }
+    }, resetTransform() {}, translate() {}, rotate() {},
+    drawImage: (source: { timestamp?: number; transparent?: boolean; pixels?: Map<string, number | undefined> }, ...coordinates: number[]) => {
       this.draws++;
       const crop = coordinates.length === 8;
-      this.pixels.set(`${coordinates[crop ? 4 : 0]},${coordinates[crop ? 5 : 1]}`,
-        source.timestamp ?? source.pixels?.get(crop ? `${coordinates[0]},${coordinates[1]}` : '0,0'));
+      const pixel = source.transparent ? undefined
+        : source.timestamp ?? source.pixels?.get(crop ? `${coordinates[0]},${coordinates[1]}` : '0,0');
+      if (pixel !== undefined) this.pixels.set(`${coordinates[crop ? 4 : 0]},${coordinates[crop ? 5 : 1]}`, pixel);
     },
   }; }
 }
 
-function fixture(stage: 'key' | 'packet' | 'timestamp' | 'output' | 'forward-key' | 'forward-packet' | 'variable-rate' | 'dense-scrub' | 'scrub' | 'scrub-stale' | 'end-output' | 'read-error' | 'codec-error', variableFrames = [0, 4, 8]) {
+function fixture(stage: 'key' | 'packet' | 'timestamp' | 'output' | 'forward-key' | 'forward-packet' | 'variable-rate' | 'transparent' | 'dense-scrub' | 'scrub' | 'scrub-stale' | 'end-output' | 'read-error' | 'codec-error', variableFrames = [0, 4, 8]) {
   const started = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
   let created = 0, closed = 0, keyReads = 0;
@@ -40,6 +48,7 @@ function fixture(stage: 'key' | 'packet' | 'timestamp' | 'output' | 'forward-key
   class Frame {
     timestamp: number; displayWidth = 2; displayHeight = 2;
     duration: number;
+    get transparent() { return stage === 'transparent' && this.timestamp > 0; }
     constructor(timestamp = 0, duration = 1e6 / 30) { this.timestamp = timestamp; this.duration = duration; }
     close() { closed++; }
   }
@@ -67,8 +76,8 @@ function fixture(stage: 'key' | 'packet' | 'timestamp' | 'output' | 'forward-key
         }
         async *packets(keyPacket = packet) {
           if (stage === 'packet') { started.resolve(); await release.promise; }
-          if (stage === 'forward-key' || stage === 'forward-packet' || stage === 'variable-rate' || stage === 'dense-scrub') {
-            const frames = stage === 'variable-rate' || stage === 'dense-scrub' ? variableFrames : Array.from({ length: 120 }, (_, index) => index);
+          if (stage === 'forward-key' || stage === 'forward-packet' || stage === 'variable-rate' || stage === 'transparent' || stage === 'dense-scrub') {
+            const frames = stage === 'variable-rate' || stage === 'transparent' || stage === 'dense-scrub' ? variableFrames : Array.from({ length: 120 }, (_, index) => index);
             for (const [index, frame] of frames.entries()) {
               if (stage === 'forward-packet' && frame === 1) { started.resolve(); await release.promise; }
               const timestamp = frame / 30;
@@ -259,6 +268,34 @@ test('cached VFR picture spans do not restart decoding for nominal frames inside
     assert.equal(f.buffer.toBitmap(), canvas);
     assert.equal(canvas.draws, 3, 'replacing a tile at the same frame index redraws it');
     assert.equal(canvas.pixels.get('0,0'), 123);
+  } finally { f.buffer.dispose(); }
+});
+
+test('transparent video pictures replace the previous display picture without repainting held frames', async () => {
+  const f = fixture('transparent', [0, 12]);
+  try {
+    await f.buffer.initialized;
+    f.buffer.seekTo(0, 30);
+    await setImmediate();
+    const canvas = f.buffer.toBitmap() as unknown as Canvas;
+    assert.equal(canvas.pixels.get('0,0'), 0);
+
+    f.buffer.seekTo(12, 30);
+    await setImmediate();
+    assert.equal(f.buffer.toBitmap(), canvas);
+    assert.equal(canvas.pixels.size, 0, 'transparent pixels cannot retain the preceding opaque picture');
+    const clears = canvas.clears;
+    const draws = canvas.draws;
+    f.buffer.seekTo(13, 30);
+    await setImmediate();
+    f.buffer.toBitmap();
+    assert.equal(canvas.clears, clears, 'holding one source picture does not clear its display again');
+    assert.equal(canvas.draws, draws);
+
+    f.buffer.seekTo(0, 30);
+    await setImmediate();
+    f.buffer.toBitmap();
+    assert.equal(canvas.pixels.get('0,0'), 0, 'a backward seek restores the opaque picture');
   } finally { f.buffer.dispose(); }
 });
 
