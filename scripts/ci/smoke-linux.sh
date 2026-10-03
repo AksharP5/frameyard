@@ -71,4 +71,5 @@ assert.ok(Number(probe.format.duration) >= 0.9);
 assert.ok(readdirSync(join(output, 'captures')).some(name => name.endsWith('.png') && statSync(join(output, 'captures', name)).size > 100));
 JS
 
+node "$(dirname "$0")/source-restore.mjs" "$dapi" "$project" "$output/source-restore"
 node "$(dirname "$0")/parallel-projects.mjs" "$dapi" "$output/parallel"
