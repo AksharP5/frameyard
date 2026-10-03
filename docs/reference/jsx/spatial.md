@@ -45,6 +45,8 @@ Scene3d also supports `focusDistance` and `aperture` for depth-of-field blur, pl
 
 Color arrays use components from 0 to 1. `points`, `pointColors`, `vertices` and `vertexColors` accept array keyframes. Equal-length arrays interpolate component by component; changed lengths hold until the next key. XYZ paths animate through `property="d"`; matching command structures interpolate, while incompatible structures hold.
 
+Mesh and point-cloud numeric arrays also accept `Float32Array` and `Uint32Array`. The document copies the supplied view and keeps typed geometry compact; Float32 vertex attributes and Uint32 indices reuse the document-owned buffers for rendering. Coordinate strides, attribute lengths and triangle index bounds still apply. Change geometry through source or editor property edits, which replace the owned buffers.
+
 Depth-tested XYZ paths currently tessellate contours separately, so holes require `depthTest={false}` to preserve projected Cairo-style filling. Their tube strokes do not reproduce every 2D cap, join and dash pattern; projected paths retain those 2D stroke semantics.
 
 ```tsx

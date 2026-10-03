@@ -36,9 +36,8 @@ export interface ProjectRecord extends ProjectInfo {
 }
 
 /**
- * The bundle a project last mounted successfully, keyed by its id. Two jobs:
- * the copy an export re-renders (see `@/engine/capture`), and the head start
- * the next open of the project mounts while its first compile still runs.
+ * The bundle a project last mounted successfully, keyed by its id.
+ * Export re-renders this copy (see `@/engine/capture`).
  * Written only after a mount lands, so what is here is always something the
  * canvas has shown.
  */

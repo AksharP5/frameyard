@@ -1,4 +1,4 @@
-import { SPATIAL_PARAMETERS, SPATIAL_ARRAYS, MESH_SHAPES, LIGHT_TYPES, parseSpatialParameter, parseNumberArray, parsePath3D, parsePhysicsWorld, parseRigidBody, type SpatialParameter } from '@diffusionstudio/jsx';
+import { SPATIAL_PARAMETERS, SPATIAL_ARRAYS, MESH_SHAPES, LIGHT_TYPES, parseSpatialParameter, parseNumberArray, isNumericBuffer, parsePath3D, parsePhysicsWorld, parseRigidBody, type SpatialParameter, type NumericArray } from '@diffusionstudio/jsx';
 import { Scene3D, SpatialParameters, SpatialGeometry, SpatialMaterial, LightSource, GradientSpace, StrokeDash, PhysicsWorld, RigidBody } from '@diffusionstudio/runtime';
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -814,7 +814,8 @@ export class RuntimeDocument implements ProjectDocument<SceneNode> {
         if (node.native && Object.hasOwn(SPATIAL_PARAMETERS, name)) value = parseSpatialParameter(name as SpatialParameter, value);
         if (node.native && ['points','pointColors','vertices','vertexColors','indices','normals','uv','dash'].includes(name)) {
             value = parseNumberArray(value, name, ['points','vertices','normals'].includes(name) ? 3 : ['pointColors','vertexColors'].includes(name) ? 4 : name === 'uv' ? 2 : 1);
-            if ((name === 'indices' || name === 'dash') && (value as number[]).some(n => n < 0 || name === 'indices' && !Number.isInteger(n))) throw new Error(`${name} contains invalid values`);
+            if ((name === 'indices' || name === 'dash') && (value as NumericArray).some(n => n < 0 || name === 'indices' && !Number.isInteger(n))) throw new Error(`${name} contains invalid values`);
+            if (name === 'dash' && isNumericBuffer(value)) value = Array.from(value);
         }
         if (node.native && name === 'shape' && value != null && value !== false && !MESH_SHAPES.includes(value as typeof MESH_SHAPES[number])) throw new Error('Invalid mesh shape');
         if (entity.has(LightSource) && name === 'type' && !LIGHT_TYPES.includes(value as typeof LIGHT_TYPES[number])) throw new Error('Invalid light type');
@@ -1747,7 +1748,7 @@ export class RuntimeDocument implements ProjectDocument<SceneNode> {
 			node.entity.set(Keyframe, { value: 0, arrayValue: undefined, stringValue: (property === 'path.d' ? parsePathData : parsePath3D)(value ?? '') });
 			return;
 		}
-        if (Array.isArray(value)) {
+        if (Array.isArray(value) || isNumericBuffer(value)) {
             if (property && !SPATIAL_ARRAYS.some(key => property === `spatial.${key}`)) throw new Error('Only geometry array tracks accept numeric arrays');
             node.entity.set(Keyframe, { value: 0, stringValue: undefined, arrayValue: parseNumberArray(value, 'keyframe value', !property ? 1 : property.endsWith('Colors') ? 4 : 3) }); return;
         }

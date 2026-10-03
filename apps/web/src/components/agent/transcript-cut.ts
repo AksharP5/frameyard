@@ -4,7 +4,7 @@ import {
   getEntityChildren, getEntityTree, handOffDecoders, hasHtmlPaint, recomputeEntityTimeRange, setPlayhead,
 } from "@diffusionstudio/runtime";
 import { authoredElement } from "@diffusionstudio/reconciler";
-import { isAssetRef, isPropValue } from "@diffusionstudio/jsx";
+import { isAssetRef, isPropValue, isNumericBuffer } from "@diffusionstudio/jsx";
 import { getDocumentEditor } from "@/engine/editor";
 import { getEditHistory } from "@/engine/history";
 import { isClipLocked } from "@/engine/clip-links";
@@ -67,7 +67,7 @@ export function planTranscriptCut(world: World, scene: Entity, from: number, to:
       }
       const authored = authoredElement(node);
       if (!authored) continue;
-      if (!node.get(Source)?.value || Object.values(authored.props).some((value) => value !== undefined && !isPropValue(value) && !isAssetRef(value))) {
+      if (!node.get(Source)?.value || Object.values(authored.props).some((value) => value !== undefined && !isPropValue(value) && !isNumericBuffer(value) && !isAssetRef(value))) {
         throw new Error("This cut includes a clip with dynamic properties that cannot be preserved. Flatten it first.");
       }
     }

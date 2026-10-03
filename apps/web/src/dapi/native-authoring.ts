@@ -1,4 +1,4 @@
-import { ANIMATABLE_PROPERTIES, validateCustomMeshGeometry, validatePointCloudGeometry, type AnimatableProperty, type AuthoredTree, type PropValue, isPropValue } from "@diffusionstudio/jsx";
+import { ANIMATABLE_PROPERTIES, validateCustomMeshGeometry, validatePointCloudGeometry, type AnimatableProperty, type AuthoredTree, type PropValue, isPropValue, isNumericBuffer } from "@diffusionstudio/jsx";
 import { authoredElement, createRuntimeDocument, renderAuthored } from "@diffusionstudio/reconciler";
 import { Source, SpatialGeometry, createRuntimeWorld, getEntityTree, getParentEntity, isScene } from "@diffusionstudio/runtime";
 import { getDocumentEditor } from "@/engine/editor";
@@ -29,7 +29,7 @@ export function validateNativeTree(tree: AuthoredTree, parent?: Entity): void {
     for (const owner of ancestors) {
       const node = document.createElement(owner.tag.charAt(0).toUpperCase() + owner.tag.slice(1));
       for (const [name, value] of Object.entries(owner.props)) {
-        if (isPropValue(value)) document.setProperty(node, name, value);
+        if (isPropValue(value) || isNumericBuffer(value)) document.setProperty(node, name, value);
       }
       document.insertNode(target, node);
       target = node;

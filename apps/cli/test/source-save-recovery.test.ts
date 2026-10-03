@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { runInThisContext } from "node:vm";
 import { build } from "esbuild";
-import { watch } from "node:fs";
+import { watch, writeFileSync } from "node:fs";
 import { setTimeout } from "node:timers/promises";
 import * as crypto from "node:crypto";
 import { ProjectChanges } from "../../desktop/src/project-changes.ts";
@@ -36,6 +36,73 @@ function sourceWriter(failRename: (target: string) => boolean = () => false, aft
   );
   return Object.assign(module.exports.applyEdits, { stampProject: module.exports.stampProject });
 }
+
+test("stamping saves each file before reading the next and preserves file-local IDs", async (t) => {
+  const dir = await fs.mkdtemp(join(tmpdir(), "source-stamp-sequential-"));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const initial = 'export default () => <scene id={"scene"}><rect id="shared" /><rect /></scene>;';
+  const current = 'export default () => <scene id={"scene"}><rect id="shared" x={42} /><rect /></scene>;';
+  const names = ["first.tsx", "second.tsx"];
+  await Promise.all(names.map(file => fs.writeFile(join(dir, file), initial, { mode: 0o640 })));
+  let first: string | undefined;
+  const writes: string[] = [];
+  await sourceWriter().stampProject({ dir, onWrite: file => {
+    writes.push(file);
+    if (first) return;
+    first = file;
+    // A later source must be read when its turn arrives, not kept from an
+    // earlier project-wide parse. This also exercises either directory order.
+    const later = names.find(name => name !== file)!;
+    writeFileSync(join(dir, later), current);
+  } });
+  assert.equal(writes.length, 2);
+  const saved = await Promise.all(names.map(file => fs.readFile(join(dir, file), "utf8")));
+  for (const [index, text] of saved.entries()) {
+    assert.match(text, /id=\{"scene"\}/);
+    assert.match(text, /id="shared"/);
+    assert.match(text, /<rect id="[a-z0-9]{6}" \/>/);
+    assert.equal(text.match(/\bid=/g)?.length, 3);
+    assert.equal((await fs.stat(join(dir, names[index]))).mode & 0o777, 0o640);
+    if (names[index] !== first) assert.match(text, /x=\{42\}/);
+  }
+  await sourceWriter().stampProject({ dir, onWrite: () => assert.fail("named files must not be rewritten") });
+  assert.deepEqual(await Promise.all(names.map(file => fs.readFile(join(dir, file), "utf8"))), saved);
+});
+
+test("stamping leaves malformed and unreadable files alone while naming valid sources", async (t) => {
+  const dir = await fs.mkdtemp(join(tmpdir(), "source-stamp-invalid-"));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const malformed = 'export default () => <scene><rect /></broken>;';
+  const plain = 'export const identity = <T>(value: T): T => value;';
+  const computed = 'export const view = (id: string) => <rect id={id} />;';
+  await fs.writeFile(join(dir, "broken.tsx"), malformed);
+  await fs.symlink(join(dir, "absent.tsx"), join(dir, "unreadable.tsx"));
+  await fs.writeFile(join(dir, "plain.ts"), plain);
+  await fs.writeFile(join(dir, "computed.tsx"), computed);
+  await fs.writeFile(join(dir, "valid.jsx"), 'export default () => <scene id="scene"><rect /></scene>;');
+  const writes: string[] = [];
+  await sourceWriter().stampProject({ dir, onWrite: file => { writes.push(file); } });
+  assert.deepEqual(writes, ["valid.jsx"]);
+  assert.equal(await fs.readFile(join(dir, "broken.tsx"), "utf8"), malformed);
+  assert.equal(await fs.readFile(join(dir, "plain.ts"), "utf8"), plain);
+  assert.equal(await fs.readFile(join(dir, "computed.tsx"), "utf8"), computed);
+  assert.match(await fs.readFile(join(dir, "valid.jsx"), "utf8"), /<rect id="[a-z0-9]{6}" \/>/);
+});
+
+test("stamping propagates failed saves and preserves originals without staged files", async (t) => {
+  const dir = await fs.mkdtemp(join(tmpdir(), "source-stamp-failure-"));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const file = join(dir, "index.tsx"), initial = 'export default () => <scene><rect /></scene>;';
+  await fs.writeFile(file, initial);
+  await assert.rejects(sourceWriter(() => true).stampProject({ dir }), /disk is full/);
+  assert.equal(await fs.readFile(file, "utf8"), initial);
+  assert.deepEqual(await fs.readdir(dir), ["index.tsx"]);
+
+  const concurrent = 'export default () => <scene background="blue"><rect /></scene>;';
+  await assert.rejects(sourceWriter(undefined, () => fs.writeFile(file, concurrent)).stampProject({ dir }), /source changed during saving/);
+  assert.equal(await fs.readFile(file, "utf8"), concurrent);
+  assert.deepEqual(await fs.readdir(dir), ["index.tsx"]);
+});
 
 test("atomic source saves do not reload the editor and subsequent external edits do", async (t) => {
   const dir = await fs.mkdtemp(join(tmpdir(), "source-save-watch-"));

@@ -7,7 +7,7 @@ import type { Entity } from "koota";
 import type { AssetRef } from "./generate";
 import type { HighlightOptions } from "./highlight";
 import type { PresetSettings } from "./presets";
-import { SPATIAL_PROPERTY_PATHS, SPATIAL_ARRAY_PATHS, type MeshShape, type LightType } from "./spatial.ts";
+import { SPATIAL_PROPERTY_PATHS, SPATIAL_ARRAY_PATHS, type MeshShape, type LightType, type ReadonlyNumericArray } from "./spatial.ts";
 import type { PhysicsWorldOptions, RigidBodyOptions } from "./physics";
 
 /**
@@ -793,7 +793,7 @@ export type KeyframeProps = {
    */
   time: Time;
   /** The value at `time`: a number, a CSS color on a `color` track, or SVG path data on a `d` track. */
-  value: number | string | readonly number[];
+  value: number | string | ReadonlyNumericArray;
   /** Shapes the segment to the next keyframe; ignored on the last. Default "linear". */
   easing?: Easing;
 };
@@ -1000,11 +1000,11 @@ export type Scene3DProps = GroupProps & SceneCameraProps & {
 export type MeshProps = CommonProps & FillProps & {
   shape?: MeshShape;
   depth?: number;
-  vertices?: readonly number[];
-  indices?: readonly number[];
-  normals?: readonly number[];
-  uv?: readonly number[];
-  vertexColors?: readonly number[];
+  vertices?: ReadonlyNumericArray;
+  indices?: ReadonlyNumericArray;
+  normals?: ReadonlyNumericArray;
+  uv?: ReadonlyNumericArray;
+  vertexColors?: ReadonlyNumericArray;
   roughness?: number;
   metalness?: number;
   transmission?: number;
@@ -1027,8 +1027,8 @@ export type Path3DProps = CommonProps & FillProps & {
 };
 
 export type PointCloudProps = CommonProps & FillProps & {
-  points: readonly number[];
-  pointColors?: readonly number[];
+  points: ReadonlyNumericArray;
+  pointColors?: ReadonlyNumericArray;
   pointSize?: number;
   children?: SolidJSX.Element;
 };

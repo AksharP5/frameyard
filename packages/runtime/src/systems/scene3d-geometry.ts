@@ -1,7 +1,12 @@
 import * as THREE from 'three';
 import type { Entity } from 'koota';
-import { validateCustomMeshGeometry } from '@diffusionstudio/jsx';
+import { validateCustomMeshGeometry, type ReadonlyNumericArray } from '@diffusionstudio/jsx';
 import { Computed, SpatialGeometry } from '../traits';
+
+/** The document owns typed buffers; ordinary inputs still need float conversion. */
+export function floatAttribute(values: ReadonlyNumericArray, itemSize: number): THREE.BufferAttribute {
+  return values instanceof Float32Array ? new THREE.BufferAttribute(values, itemSize) : new THREE.Float32BufferAttribute(values, itemSize);
+}
 
 export type SpatialCurve = { points: THREE.Vector3[]; closed: boolean };
 
@@ -53,12 +58,12 @@ export function meshGeometry(entity: Entity): THREE.BufferGeometry {
   if (data.shape === 'custom') {
     validateCustomMeshGeometry({ vertices: c.vertices, indices: data.indices, normals: data.normals, uv: data.uv, vertexColors: c.vertexColors });
     const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(c.vertices, 3));
-    if (data.indices.length) geometry.setIndex(data.indices);
-    if (data.normals.length) geometry.setAttribute('normal', new THREE.Float32BufferAttribute(data.normals, 3));
+    geometry.setAttribute('position', floatAttribute(c.vertices, 3));
+    if (data.indices.length) geometry.setIndex(Array.isArray(data.indices) ? data.indices : new THREE.BufferAttribute(data.indices instanceof Uint32Array ? data.indices : new Uint32Array(data.indices), 1));
+    if (data.normals.length) geometry.setAttribute('normal', floatAttribute(data.normals, 3));
     else geometry.computeVertexNormals();
-    if (data.uv.length) geometry.setAttribute('uv', new THREE.Float32BufferAttribute(data.uv, 2));
-    if (c.vertexColors.length) geometry.setAttribute('color', new THREE.Float32BufferAttribute(c.vertexColors, 4));
+    if (data.uv.length) geometry.setAttribute('uv', floatAttribute(data.uv, 2));
+    if (c.vertexColors.length) geometry.setAttribute('color', floatAttribute(c.vertexColors, 4));
     return geometry;
   }
   const w = Math.max(.001, c.width), h = Math.max(.001, c.height), d = Math.max(.001, c.depth);

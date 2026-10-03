@@ -10,7 +10,8 @@ const bundle = await build({
     contents: `
       export * as runtime from '@diffusionstudio/runtime';
       export { createRuntimeDocument, authoredTree, renderAuthored, trackPropertyPath, trackProperty } from '@diffusionstudio/reconciler';
-      export { SOURCE_ATTR, ANIMATABLE_PROPERTIES } from '@diffusionstudio/jsx';
+      export { SOURCE_ATTR, ANIMATABLE_PROPERTIES, serializePropValue } from '@diffusionstudio/jsx';
+      export { meshGeometry } from '../../../../packages/runtime/src/systems/scene3d-geometry';
       export { getEditHistory } from './history';
       export { getDocumentEditor } from './editor';
       export { handleGeometryInteraction, handleMaskInteraction } from './input/interactions';
@@ -25,7 +26,8 @@ const module = { exports: {} as {
   runtime: typeof import('@diffusionstudio/runtime');
 
 } & Pick<typeof import('@diffusionstudio/reconciler'), 'createRuntimeDocument' | 'authoredTree' | 'renderAuthored' | 'trackPropertyPath' | 'trackProperty'>
-  & Pick<typeof import('@diffusionstudio/jsx'), 'SOURCE_ATTR' | 'ANIMATABLE_PROPERTIES'>
+  & Pick<typeof import('@diffusionstudio/jsx'), 'SOURCE_ATTR' | 'ANIMATABLE_PROPERTIES' | 'serializePropValue'>
+  & Pick<typeof import('../../../packages/runtime/src/systems/scene3d-geometry'), 'meshGeometry'>
   & Pick<typeof import('../../web/src/engine/history'), 'getEditHistory'>
   & Pick<typeof import('../../web/src/engine/editor'), 'getDocumentEditor'>
   & Pick<typeof import('../../web/src/engine/input/interactions'), 'handleGeometryInteraction' | 'handleMaskInteraction'>
@@ -419,6 +421,83 @@ test('cycle rejection preserves runtime and authored trees, including adopted en
   assert.equal(ancestor.parent, f.scene);
   assert.equal(api.getParentEntity(ancestor.entity), f.scene.entity);
   assert.equal(api.getParentEntity(adopted), descendant.entity);
+});
+
+test('typed geometry keeps source-buffer isolation, native ownership and valid GPU indices', (t) => {
+  const f = fixture();
+  t.after(() => { f.document.dispose(); f.world.destroy(); });
+  const backing = new Float32Array([999, 0.1, 0, 0, 30, 0, 0, 0, 30, 0, 999]);
+  const vertices = backing.subarray(1, 10), indices = new Uint32Array([0, 1, 2]);
+  const mesh = f.add('Mesh', { shape: 'custom', vertices, indices }, f.scene);
+  const owned = mesh.entity.get(api.SpatialGeometry)!;
+  assert.ok(owned.vertices instanceof Float32Array);
+  assert.ok(owned.indices instanceof Uint32Array);
+  assert.notEqual(owned.vertices.buffer, vertices.buffer);
+  assert.notEqual(owned.indices.buffer, indices.buffer);
+  assert.equal(owned.vertices.length, 9, 'only the subarray view is copied');
+  assert.equal(owned.vertices[0], Math.fround(0.1));
+  backing[1] = 90; indices[0] = 2;
+  assert.equal(owned.vertices[0], Math.fround(0.1));
+  assert.equal(owned.indices[0], 0);
+
+  const geometry = reconciler.meshGeometry(mesh.entity);
+  t.after(() => geometry.dispose());
+  assert.equal(geometry.getAttribute('position').array, owned.vertices, 'GPU attribute reuses the document-owned float buffer');
+  assert.equal(geometry.index!.array, owned.indices, 'typed indices are a BufferAttribute');
+  for (const [name, value] of [
+    ['vertices', new Float32Array([1, 2])],
+    ['vertices', new Float32Array([NaN, 0, 0])],
+    ['vertices', new Float64Array([0, 0, 0])],
+    ['vertices', new Uint8Array([0, 0, 0])],
+    ['indices', new Float32Array([0.5])],
+    ['indices', new Float32Array([-1])],
+  ] as const) {
+    assert.throws(() => f.document.setProperty(mesh, name, value), /finite numbers|invalid values/);
+  }
+  assert.equal(mesh.entity.get(api.SpatialGeometry)!.vertices, owned.vertices, 'rejected edits leave the native document unchanged');
+});
+
+test('typed geometry survives source edits, undo, clipboard cloning and geometry keyframe seeks', (t) => {
+  const f = fixture();
+  t.after(() => { f.document.dispose(); f.world.destroy(); });
+  const vertices = new Float32Array([0, 0, 0, 30, 0, 0, 0, 30, 0]);
+  const mesh = f.add('Mesh', { shape: 'custom', vertices, indices: new Uint32Array([0, 1, 2]), end: 3 }, f.scene);
+  const original = Array.from(vertices);
+  const tree = reconciler.authoredTree(f.world, mesh.entity)!;
+  assert.ok(tree.props.vertices instanceof Float32Array, 'native authored trees preserve typed geometry');
+  const record = api.serializeEntity(mesh.entity), copy = api.createEntity(f.world);
+  api.deserializeEntity(copy, record);
+  assert.ok(record.SpatialGeometry!.vertices instanceof Float32Array);
+  assert.ok(copy.get(api.SpatialGeometry)!.vertices instanceof Float32Array);
+  assert.notEqual(copy.get(api.SpatialGeometry)!.vertices, mesh.entity.get(api.SpatialGeometry)!.vertices);
+  record.SpatialGeometry!.vertices[0] = 50;
+  assert.equal(copy.get(api.SpatialGeometry)!.vertices[0], 0, 'clipboard data is detached');
+
+  const editor = getDocumentEditor(f.world), history = getEditHistory(f.world);
+  const edits: import('../../web/src/engine/editor').EntityEdit[] = [];
+  editor.onEdit(edit => edits.push(edit));
+  const shifted = original.map((value, index) => index % 3 === 0 ? value + 60 : value);
+  editor.editProperty(mesh.entity, 'vertices', shifted);
+  const edit = edits.find(edit => edit.kind === 'prop');
+  assert.ok(edit?.kind === 'prop');
+  assert.deepEqual(edit.previous, original, 'typed previous values reach the source writer as JSON arrays');
+  assert.deepEqual(JSON.parse(JSON.stringify(edit)).previous, original);
+  history.undo(); assert.deepEqual(Array.from(mesh.entity.get(api.SpatialGeometry)!.vertices), original);
+  history.redo(); assert.deepEqual(Array.from(mesh.entity.get(api.SpatialGeometry)!.vertices), shifted);
+  assert.deepEqual(reconciler.serializePropValue(vertices), original);
+
+  const track = f.add('KeyframeTrack', { property: 'vertices' }, mesh);
+  f.add('Keyframe', { time: 0, value: new Float32Array(original) }, track);
+  f.add('Keyframe', { time: 1, value: new Float32Array(shifted) }, track);
+  const sample = (frame: number) => {
+    mesh.entity.set(api.Computed, { localTime: frame }); api.motionSystem(f.world);
+    return Array.from(mesh.entity.get(api.Computed)!.vertices);
+  };
+  const middle = sample(15);
+  assert.deepEqual(middle, original.map((value, index) => index % 3 === 0 ? value + 30 : value));
+  assert.deepEqual(sample(30), shifted);
+  assert.deepEqual(sample(0), original);
+  assert.deepEqual(sample(15), middle, 'out-of-order seeks reproduce geometry');
 });
 
 test('resizing applies child constraints through sequences while retaining keyframes', (t) => {
