@@ -89,6 +89,7 @@ export function EditorPage() {
     let disposed = false;
     let generation = 0;
     let revision = 0;
+    let mountedRevision = -1;
     let hasFreshBundle = false;
 
     // The library first: a mounted project's `src` values name its assets.
@@ -115,7 +116,7 @@ export function EditorPage() {
     /** Puts `code` on the stage, unless it is what is there already. */
     const applyBundle = (code: string): void => {
       const frameRate = config.frameRate();
-      if (code === mountedCode && world.get(FrameRate)?.value === frameRate) return;
+      if (code === mountedCode && revision === mountedRevision && world.get(FrameRate)?.value === frameRate) return;
       const preserveSelection = hasFreshBundle || revision > 0;
       const times = new Map(world.query(Scene, Source).map((scene) => [scene.get(Source)!.value, scene.get(Computed)?.localTimeInSeconds ?? 0]));
       const selected = new Set(world.query(Selected, Source).map((entity) => entity.get(Source)!.value));
@@ -133,6 +134,7 @@ export function EditorPage() {
       world.set(ProjectFrameRate, { value: frameRate });
       mounted = mount(code, world);
       mountedCode = code;
+      mountedRevision = revision;
       for (const scene of world.query(Scene, Source)) {
         const seconds = times.get(scene.get(Source)!.value);
         if (seconds !== undefined) setPlayhead(world, scene, seconds * frameRate);
