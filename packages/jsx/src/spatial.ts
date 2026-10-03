@@ -48,6 +48,12 @@ export const SPATIAL_PROPERTY_PATHS = Object.fromEntries(
 
 export const SPATIAL_ARRAYS = ['points', 'pointColors', 'vertices', 'vertexColors'] as const;
 export type SpatialArray = typeof SPATIAL_ARRAYS[number];
+export type NumericArray = number[] | Float32Array | Uint32Array;
+export type ReadonlyNumericArray = readonly number[] | Exclude<NumericArray, number[]>;
+
+export function isNumericBuffer(value: unknown): value is Exclude<NumericArray, number[]> {
+  return value instanceof Float32Array || value instanceof Uint32Array;
+}
 export const SPATIAL_ARRAY_PATHS = Object.fromEntries(
   SPATIAL_ARRAYS.map(name => [name, `spatial.${name}`]),
 ) as { [K in SpatialArray]: `spatial.${K}` };
@@ -66,20 +72,20 @@ export function parseSpatialParameter(name: SpatialParameter, value: unknown): n
   return value;
 }
 
-export function parseNumberArray(value: unknown, name: string, stride = 1): number[] {
+export function parseNumberArray(value: unknown, name: string, stride = 1): NumericArray {
   if (value === false || value == null) return [];
-  if (!Array.isArray(value) || value.length % stride || !value.every(item => typeof item === 'number' && Number.isFinite(item))) {
+  if ((!Array.isArray(value) && !isNumericBuffer(value)) || value.length % stride || !value.every(item => typeof item === 'number' && Number.isFinite(item))) {
     throw new Error(`${name} must contain finite numbers in groups of ${stride}`);
   }
-  return [...value];
+  return isNumericBuffer(value) ? value.slice() : [...value];
 }
 
 export function validateCustomMeshGeometry(data: {
-  vertices: readonly number[];
-  indices: readonly number[];
-  normals: readonly number[];
-  uv: readonly number[];
-  vertexColors: readonly number[];
+  vertices: ReadonlyNumericArray;
+  indices: ReadonlyNumericArray;
+  normals: ReadonlyNumericArray;
+  uv: ReadonlyNumericArray;
+  vertexColors: ReadonlyNumericArray;
 }): void {
   const count = data.vertices.length / 3;
   if (!Number.isInteger(count)) throw new Error('Custom mesh vertices must contain XYZ groups');
@@ -94,7 +100,7 @@ export function validateCustomMeshGeometry(data: {
   if (data.vertexColors.length && data.vertexColors.length !== count * 4) throw new Error('Custom mesh vertexColors must have one RGBA group per vertex');
 }
 
-export function validatePointCloudGeometry(data: { points: readonly number[]; pointColors: readonly number[] }): void {
+export function validatePointCloudGeometry(data: { points: ReadonlyNumericArray; pointColors: ReadonlyNumericArray }): void {
   if (data.points.length % 3) throw new Error('Point cloud points must contain XYZ groups');
   if (data.pointColors.length && data.pointColors.length !== data.points.length / 3 * 4) {
     throw new Error('Point cloud pointColors must have one RGBA group per point');

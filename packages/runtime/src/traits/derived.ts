@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 import { trait, type Entity } from 'koota';
-import { SPATIAL_DEFAULTS } from '@diffusionstudio/jsx';
+import { SPATIAL_DEFAULTS, type NumericArray } from '@diffusionstudio/jsx';
 
 // Fully resolved per-frame values (base state + constraints + animations +
 // keyframes). Written by the motion and transform systems, read by render and
@@ -11,10 +11,10 @@ import { SPATIAL_DEFAULTS } from '@diffusionstudio/jsx';
 export const Computed = trait({
   ...SPATIAL_DEFAULTS,
   path3d: '',
-  points: () => [] as number[],
-  pointColors: () => [] as number[],
-  vertices: () => [] as number[],
-  vertexColors: () => [] as number[],
+  points: () => [] as NumericArray,
+  pointColors: () => [] as NumericArray,
+  vertices: () => [] as NumericArray,
+  vertexColors: () => [] as NumericArray,
 	positionX: 0,
 	positionY: 0,
 	positionZ: 0,

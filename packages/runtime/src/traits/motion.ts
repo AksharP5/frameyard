@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 import { trait, type Entity } from 'koota';
+import type { NumericArray } from '@diffusionstudio/jsx';
 
 import { AnimationType, AnimationPhase } from '../constants';
 
@@ -18,7 +19,7 @@ export const KeyframeTrack = trait({
 
 // Keyframe entity: ChildOf its KeyframeTrack. Easing applies to the segment
 // from this keyframe to the next-in-time on the same track.
-export const Keyframe = trait({ time: 0, value: 0, stringValue: undefined as string | undefined, arrayValue: () => undefined as number[] | undefined, easing: 'linear' });
+export const Keyframe = trait({ time: 0, value: 0, stringValue: undefined as string | undefined, arrayValue: () => undefined as NumericArray | undefined, easing: 'linear' });
 
 // Animation entity: one preset in/out animation, ChildOf its target.
 export const Animation = trait({

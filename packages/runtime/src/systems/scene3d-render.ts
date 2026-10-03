@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { validatePointCloudGeometry } from '@diffusionstudio/jsx';
+import { validatePointCloudGeometry, type ReadonlyNumericArray } from '@diffusionstudio/jsx';
 import type { Entity, World } from 'koota';
 import { EffectType, GeometryType } from '../constants';
 import {
@@ -11,7 +11,7 @@ import { sceneCamera, spatialNode } from './spatial';
 import { projectPoint3D, rotation4, translation4, multiply4 } from '../math/spatial';
 import { invert2D, transformPoint, type Point } from '../math';
 import { entityWorldMat } from '../queries/interaction';
-import { meshGeometry, sampleSpatialPath, spatialPathGeometry } from './scene3d-geometry';
+import { floatAttribute, meshGeometry, sampleSpatialPath, spatialPathGeometry } from './scene3d-geometry';
 import { motionEffectsFrame } from '../media/motion-effects';
 import { drawOnto, getSurfaceContext } from '../utils/surface';
 import { gradeFrame } from '../media/color-grade';
@@ -22,7 +22,7 @@ export type ProjectedVisual = { d: string; width: number; height: number; sceneX
 type DrawVisual = (entity: Entity, projected?: ProjectedVisual) => void;
 type Entry = {
   object: THREE.Object3D; key: string; source?: OffscreenCanvas; texture?: THREE.CanvasTexture<OffscreenCanvas>;
-  arrays?: readonly (readonly number[] | undefined)[]; path?: string;
+  arrays?: readonly (ReadonlyNumericArray | undefined)[]; path?: string;
   width?: number; height?: number; padding?: number; paintKey?: string;
 };
 type SceneRenderer = {
@@ -100,13 +100,14 @@ function getRenderer(world: World, root: Entity): SceneRenderer {
   shared.scenes.set(root, state); return state;
 }
 
-/** Prepare future 3D clips while paused, without changing the playhead or canvas. */
+/** Prepare visible 3D clips while paused, without changing the playhead or canvas. */
 export function prepareScenes3D(world: World, draw: DrawVisual): void {
   if (world.get(Mode)?.value !== 'realtime' || world.query(Playback).some(entity => entity.get(Playback)?.playing)) return;
   for (const root of world.query(Scene3D)) {
     if (renderers.get(world)?.scenes.get(root)?.prepared) continue;
     let ancestor: Entity | null = root;
-    while (ancestor && !ancestor.has(Hidden)) ancestor = getParentEntity(ancestor);
+    while (ancestor && !ancestor.has(Hidden) && !ancestor.has(Culled)
+      && ancestor.get(Computed)?.visibility !== 0 && (ancestor.get(Computed)?.opacity ?? 1) > 0) ancestor = getParentEntity(ancestor);
     if (ancestor) continue;
     const regions = world.get(HitRegions)?.list, count = regions?.length ?? 0;
     try { drawScene3D(world, root, draw, true); }
@@ -168,8 +169,8 @@ function createEntry(entity: Entity, key: string, depthTest: boolean): Entry {
   } else if (type === GeometryType.POINT_CLOUD) {
     validatePointCloudGeometry({ points: c.points, pointColors: c.pointColors });
     const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(c.points, 3));
-    if (c.pointColors.length) geometry.setAttribute('color', new THREE.Float32BufferAttribute(c.pointColors, 4));
+    geometry.setAttribute('position', floatAttribute(c.points, 3));
+    if (c.pointColors.length) geometry.setAttribute('color', floatAttribute(c.pointColors, 4));
     const material = new THREE.PointsMaterial({ size: c.pointSize, sizeAttenuation: false, transparent: true, vertexColors: c.pointColors.length > 0 });
     material.onBeforeCompile = shader => { shader.fragmentShader = shader.fragmentShader.replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\nif (length(gl_PointCoord - vec2(.5)) > .5) discard;'); };
     object = new THREE.Points(geometry, material);
@@ -287,11 +288,11 @@ export function drawScene3D(world: World, root: Entity, draw: DrawVisual, prepar
     const c = entity.get(Computed)!, type = entity.get(Geometry)?.value;
     const spatial = spatialNode(world, entity);
     if (entity.has(Hidden) || entity.has(IsMask) || !spatial) return;
-    if (!preparing && (entity.has(Culled) || c.visibility === 0 || !spatial.visible)) return;
+    if (entity.has(Culled) || c.visibility === 0 || !spatial.visible) return;
     const opacity = inheritedOpacity * c.opacity;
     const authoredDepth = entity.get(Host)?.props.depthTest;
     const depthTest = typeof authoredDepth === 'boolean' ? authoredDepth : inheritedDepthTest;
-    if (opacity <= 0 && !preparing) return;
+    if (opacity <= 0) return;
     if (type !== undefined) {
       const geometry = entity.get(SpatialGeometry), options = entity.get(SpatialMaterial);
       // Authored arrays are copied on edits; animated arrays are replaced by motionSystem.

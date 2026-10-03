@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+import { isNumericBuffer } from './spatial';
+
 /**
  * How the compile step, the host and the editor agree to name the elements of
  * a project's source. Everything here is data all three sides read; none of
@@ -78,6 +80,12 @@ export function isPropValue(value: unknown): value is PropValue {
     default:
       return false;
   }
+}
+
+/** Typed geometry travels to source edits as ordinary numeric JSON arrays. */
+export function serializePropValue(value: unknown): PropValue | undefined {
+  if (isNumericBuffer(value)) return Array.from(value);
+  return isPropValue(value) ? value : undefined;
 }
 
 /**

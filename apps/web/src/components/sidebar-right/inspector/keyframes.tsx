@@ -2,7 +2,7 @@ import { For, Show, createSignal } from "solid-js";
 import { useWorld } from "@diffusionstudio/koota-solid";
 import { Cache, ChildOf, Computed, FrameRate, Keyframe as KeyframeTrait, KeyframeTrack, colorToHex, getActiveEntity, getParentEntity, parseColor, parsePathData, setPlayhead } from "@diffusionstudio/runtime";
 import { trackProperty } from "@diffusionstudio/reconciler";
-import { SPATIAL_ARRAYS, SPATIAL_ARRAY_PATHS, parseNumberArray, parsePath3D } from "@diffusionstudio/jsx";
+import { SPATIAL_ARRAYS, SPATIAL_ARRAY_PATHS, parseNumberArray, parsePath3D, serializePropValue } from "@diffusionstudio/jsx";
 import { useDerived, useEditor } from "@/engine/hooks";
 import { formatProperty } from "@/components/timeline/layers/keyframe";
 import { Button } from "@/components/ui/button";
@@ -60,14 +60,14 @@ export function KeyframeSettings(props: { selection: Entity[] }) {
   const [error, setError] = createSignal("");
   const pathValue = () => path() === "path.d" || path() === "spatial.path3d";
   const arrayProperty = () => SPATIAL_ARRAYS.find(property => SPATIAL_ARRAY_PATHS[property] === path());
-  const stringValue = () => pathValue() ? data()?.stringValue ?? "" : arrayProperty() ? JSON.stringify(data()?.arrayValue ?? []) : colorToHex(data()?.value ?? 0);
+  const stringValue = () => pathValue() ? data()?.stringValue ?? "" : arrayProperty() ? JSON.stringify(serializePropValue(data()?.arrayValue) ?? []) : colorToHex(data()?.value ?? 0);
 
   const setValue = (raw: string | number) => {
     try {
       let value: string | number | number[] = raw;
       if (pathValue()) value = (path() === "spatial.path3d" ? parsePath3D : parsePathData)(raw);
       const array = arrayProperty();
-      if (array) value = parseNumberArray(JSON.parse(String(raw)), array, array.endsWith("Colors") ? 4 : 3);
+      if (array) value = Array.from(parseNumberArray(JSON.parse(String(raw)), array, array.endsWith("Colors") ? 4 : 3));
       if (path() === "color" && parseColor(value) === null) throw new Error("Enter a valid color");
       for (const node of props.selection) {
         const nodePath = getParentEntity(node)?.get(KeyframeTrack)?.property;

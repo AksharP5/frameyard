@@ -1,18 +1,18 @@
 import { trait } from 'koota';
-import { SPATIAL_DEFAULTS, type MeshShape, type LightType, type PhysicsWorldSettings, type RigidBodySettings } from '@diffusionstudio/jsx';
+import { SPATIAL_DEFAULTS, type MeshShape, type LightType, type PhysicsWorldSettings, type RigidBodySettings, type NumericArray } from '@diffusionstudio/jsx';
 
 export const Scene3D = trait();
 export const SpatialParameters = trait({ ...SPATIAL_DEFAULTS });
 export const SpatialGeometry = trait({
   shape: 'box' as MeshShape,
   path: '',
-  points: () => [] as number[],
-  pointColors: () => [] as number[],
-  vertices: () => [] as number[],
-  indices: () => [] as number[],
-  normals: () => [] as number[],
-  uv: () => [] as number[],
-  vertexColors: () => [] as number[],
+  points: () => [] as NumericArray,
+  pointColors: () => [] as NumericArray,
+  vertices: () => [] as NumericArray,
+  indices: () => [] as NumericArray,
+  normals: () => [] as NumericArray,
+  uv: () => [] as NumericArray,
+  vertexColors: () => [] as NumericArray,
 });
 export const SpatialMaterial = trait({
   lit: true,

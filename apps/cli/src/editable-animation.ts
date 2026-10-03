@@ -206,6 +206,10 @@ export function capturedAnimationToJsx(input: unknown, prefix: string, name: str
   const uniqueIssues = [...new Map(issues.map(issue => [`${issue.layer}\0${issue.feature}`, issue])).values()];
   if (uniqueIssues.length && !allowPartial) throw new Error(`Editable conversion needs unsupported features:\n${uniqueIssues.slice(0, 15).map(issue => `- ${issue.layer}: ${issue.feature}`).join("\n")}\nOriginal source is unchanged. Use --allow-partial only to create an incomplete editable study.`);
   if (!capture.layers.length) throw new Error("Animation has no supported editable layers.");
-  const jsx = `export default function Animation() {\n  return (\n${serializeTree(tree, 2)}\n  );\n}\n`;
-  return { jsx, tree, width: capture.width, height: capture.height, duration: capture.duration, frameRate: capture.frameRate, layerCount: capture.layers.length + 3, keyframeCount, issues: uniqueIssues };
+  let jsx: string | undefined;
+  return {
+    // Tree consumers can retain large geometry in separate modules without constructing one huge JSX string.
+    get jsx() { return jsx ??= `export default function Animation() {\n  return (\n${serializeTree(tree, 2)}\n  );\n}\n`; },
+    tree, width: capture.width, height: capture.height, duration: capture.duration, frameRate: capture.frameRate, layerCount: capture.layers.length + 3, keyframeCount, issues: uniqueIssues,
+  };
 }

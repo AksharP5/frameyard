@@ -606,7 +606,7 @@ function locate(
 /**
  * One write against a project's sources. ts-morph parses into a file system of
  * its own: bytes come off disk and go back to it here, and every file a write
- * touches is read once, edited in place, and saved at the end.
+ * touches is read once, edited in place, and saved atomically.
  *
  * One instance is one operation — construct it, run it, discard it. That is
  * what keeps a later write from editing a tree parsed before the project
@@ -648,9 +648,9 @@ class SourceWriter {
    * Drops every file the parser had to guess at, since re-printing one would
    * hand back source no one wrote — a file mid-edit is not a file to write to.
    *
-   * Checked in one pass because ts-morph builds a program to answer for a
-   * file, and that program is rebuilt every time another file arrives or one
-   * is edited: asking per file would cost a program per file.
+   * Check the loaded files in one pass because ts-morph rebuilds its program
+   * every time a file arrives or is edited. Stamping loads only one at a time;
+   * a batch of edits can share the same program for its initial checks.
    */
   private dropUnparsed(paths: Iterable<string> = this.files.keys()): void {
     const program = this.project.getProgram();
@@ -667,11 +667,6 @@ class SourceWriter {
     if (!open) return;
     this.files.delete(path);
     this.project.removeSourceFile(open.sourceFile);
-  }
-
-  /** Writes back the files an edit actually changed, and only those. */
-  private async save(): Promise<void> {
-    for (const [path, open] of this.files) await this.saveFile(path, open);
   }
 
   private async saveFile(path: string, open: OpenFile): Promise<void> {
@@ -705,14 +700,23 @@ class SourceWriter {
    * makes this safe to run before every compile.
    */
   public async stampProject(paths: string[]): Promise<void> {
-    for (const path of paths) await this.load(path);
-    this.dropUnparsed();
+    // IDs and syntax checks are file-local. Release each tree before loading
+    // another, so compile preparation does not retain the entire project.
+    for (const path of paths) {
+      try {
+        await this.load(path);
+        this.dropUnparsed([path]);
+        if (!this.files.has(path)) continue;
 
-    for (const path of [...this.files.keys()]) this.stampFile(path);
-
-    // Nothing ts-morph will not vouch for reaches the disk.
-    this.dropUnparsed();
-    await this.save();
+        this.stampFile(path);
+        // Nothing ts-morph will not vouch for reaches the disk.
+        this.dropUnparsed([path]);
+        const open = this.files.get(path);
+        if (open) await this.saveFile(path, open);
+      } finally {
+        this.discard(path);
+      }
+    }
   }
 
   private stampFile(path: string): void {

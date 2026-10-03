@@ -28,6 +28,7 @@ import {
 } from "@diffusionstudio/runtime";
 
 import type { AnimatableProperty } from "@diffusionstudio/jsx";
+import { isNumericBuffer } from "@diffusionstudio/jsx";
 import type { Entity, World } from "koota";
 import type { DocumentEditor } from "./editor";
 
@@ -64,6 +65,7 @@ function currentValue(world: World, target: Entity, property: AnimatableProperty
   const value = getPropertyPaths(world)[path]?.computed[target.id()];
   if (property === "d") return typeof value === "string" ? value : null;
   if (Array.isArray(value)) return value;
+  if (isNumericBuffer(value)) return Array.from(value);
   if (typeof value !== "number") return null;
   return property === "color" ? colorToHex(value) : value;
 }

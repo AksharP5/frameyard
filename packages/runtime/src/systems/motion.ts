@@ -1,4 +1,4 @@
-import { SPATIAL_DEFAULTS, SPATIAL_PROPERTY_PATHS, SPATIAL_ARRAYS, SPATIAL_ARRAY_PATHS, interpolatePath3D, type SpatialParameter, type SpatialArray } from '@diffusionstudio/jsx';
+import { SPATIAL_DEFAULTS, SPATIAL_PROPERTY_PATHS, SPATIAL_ARRAYS, SPATIAL_ARRAY_PATHS, interpolatePath3D, isNumericBuffer, type SpatialParameter, type SpatialArray, type NumericArray } from '@diffusionstudio/jsx';
 import { SpatialParameters, SpatialGeometry } from '../traits';
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -315,7 +315,7 @@ export function motionSystem(world: World): void {
 			const result = sampleTrack(world, keyframes, localFrame, property);
 			if (result === null || target == null) continue;
             if (property === 'spatial.path3d') { if (typeof result === 'string') computed.path3d[target.id()] = result; continue; }
-            if (Array.isArray(result)) { const key = SPATIAL_ARRAYS.find(name => property === SPATIAL_ARRAY_PATHS[name]); if (key) computed[key][target.id()] = result; continue; }
+            if (Array.isArray(result) || isNumericBuffer(result)) { const key = SPATIAL_ARRAYS.find(name => property === SPATIAL_ARRAY_PATHS[name]); if (key) computed[key][target.id()] = result; continue; }
             if (property === 'path.d') {
 				if (typeof result === 'string') computed.pathData[target.id()] = result;
 				continue;
@@ -342,7 +342,7 @@ export function getPropertyPaths(world: World) {
 	const computed = store(world, Computed);
     const spatial = store(world, SpatialParameters), geometry = store(world, SpatialGeometry);
     const numericPaths = Object.fromEntries((Object.keys(SPATIAL_DEFAULTS) as SpatialParameter[]).map(key => [SPATIAL_PROPERTY_PATHS[key], { computed: computed[key], authored: spatial[key] }])) as { [K in SpatialParameter as `spatial.${K}`]: { computed: number[]; authored: number[] } };
-    const arrayPaths = Object.fromEntries(SPATIAL_ARRAYS.map(key => [SPATIAL_ARRAY_PATHS[key], { computed: computed[key], authored: geometry[key] }])) as { [K in SpatialArray as `spatial.${K}`]: { computed: number[][]; authored: number[][] } };
+    const arrayPaths = Object.fromEntries(SPATIAL_ARRAYS.map(key => [SPATIAL_ARRAY_PATHS[key], { computed: computed[key], authored: geometry[key] }])) as { [K in SpatialArray as `spatial.${K}`]: { computed: NumericArray[]; authored: NumericArray[] } };
     return {
         ...numericPaths,
         ...arrayPaths,
@@ -607,7 +607,7 @@ function sampleTrack(
 	keyframes: Entity[],
 	frame: number,
 	property: PropertyPath,
-): number | string | number[] | null {
+): number | string | NumericArray | null {
 	const keyframe = store(world, Keyframe);
 	const values = property === 'path.d' || property === 'spatial.path3d' ? keyframe.stringValue : SPATIAL_ARRAYS.some(key => property === SPATIAL_ARRAY_PATHS[key]) ? keyframe.arrayValue : keyframe.value;
 	if (keyframes.length === 0) return null;
@@ -657,7 +657,9 @@ function sampleTrack(
 	if (typeof startValue === 'string' && typeof endValue === 'string') {
 		return (property === 'spatial.path3d' ? interpolatePath3D : interpolatePathData)(startValue, endValue, progress);
 	}
-	if (Array.isArray(startValue) && Array.isArray(endValue)) return startValue.length === endValue.length ? startValue.map((value, index) => value + (endValue[index]! - value) * progress) : startValue;
+	if ((Array.isArray(startValue) || isNumericBuffer(startValue)) && (Array.isArray(endValue) || isNumericBuffer(endValue))) {
+		return startValue.length === endValue.length ? Array.from(startValue, (value, index) => value + (endValue[index]! - value) * progress) : startValue;
+	}
 	if (typeof startValue !== 'number' || typeof endValue !== 'number') return null;
 
 	if (property === 'color') return lerpColor(startValue, endValue, progress);

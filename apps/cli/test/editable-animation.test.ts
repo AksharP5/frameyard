@@ -9,6 +9,25 @@ import type { AuthoredTree } from "@diffusionstudio/jsx";
 import { capturedAnimationToJsx, simplifyKeys } from "../src/editable-animation.ts";
 import { convertAnimation } from "../src/animation.ts";
 
+test("tree-only conversion validates geometry without serializing JSX; JSX is cached when requested", async () => {
+  let serializations = 0;
+  const vertices = [0, 0, 0, 10, 0, 0, 0, 10, 0];
+  Object.defineProperty(vertices, "toJSON", { value: () => { serializations++; return Array.from(vertices); } });
+  const capture = { width: 640, height: 360, duration: 1, frameRate: 30, issues: [], layers: [
+    { id: "mesh", kind: "mesh", name: "Editable mesh", frames: [{ time: 0, props: { shape: "custom", vertices, indices: [0, 1, 2] } }] },
+  ] };
+  const result = capturedAnimationToJsx(capture, "converted", "Geometry");
+  assert.deepEqual(result.tree.children[0].children[1].props.vertices, vertices);
+  assert.equal(serializations, 0);
+  const jsx = result.jsx;
+  assert.equal(serializations, 1);
+  assert.equal(result.jsx, jsx);
+  assert.equal(serializations, 1);
+  await transform(jsx, { loader: "tsx" });
+  vertices[0] = Infinity;
+  assert.throws(() => capturedAnimationToJsx(capture, "invalid", "Invalid geometry"), /Invalid captured vertices/);
+});
+
 test("native conversion retains nested geometry, editable text, styles and reduced timing", async () => {
   const result = capturedAnimationToJsx({ width: 640, height: 360, duration: 1, frameRate: 30, issues: [], layers: [
     { id: "parent", kind: "group", name: "Diagram", frames: [{ time: 0, props: { opacity: 1 } }] },

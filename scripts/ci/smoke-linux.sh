@@ -17,6 +17,13 @@ export default function Smoke() {
       <group id="content" end={1}>
         <rect id="background" width={640} height={360} fill="#143a58" />
         <rect id="square" x={80} y={80} width={200} height={200} fill="#f5ba42" />
+        <scene3d id="typed-viewport" width={640} height={360} end={1}>
+          <mesh id="typed-triangle" shape="custom" lit={false} fill="#00dc3c"
+            vertices={new Float32Array([400, 80, 0, 520, 80, 0, 400, 200, 0])}
+            indices={new Uint32Array([0, 1, 2])}
+            normals={new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1])}
+            uv={new Float32Array([0, 0, 1, 0, 0, 1])} />
+        </scene3d>
       </group>
     </scene>
   </stage>;
@@ -49,14 +56,14 @@ const context = JSON.parse(readFileSync(join(output, 'open-context.json'), 'utf8
 assert.equal(context.projectDir, join(output, 'project'));
 const check = JSON.parse(readFileSync(join(output, 'check.json'), 'utf8'));
 assert.deepEqual(check.issues, []);
-assert.equal(check.stats.nodes, 4);
+assert.equal(check.stats.nodes, 6);
 const probe = JSON.parse(readFileSync(join(output, 'probe.json'), 'utf8'));
 const video = probe.streams.find(stream => stream.codec_type === 'video');
 assert.equal(video?.codec_name, 'h264');
 assert.equal(video.width, 1920);
 assert.equal(video.height, 1080);
 const pixels = execFileSync('ffmpeg', ['-v', 'error', '-i', join(output, 'smoke.mp4'), '-frames:v', '1', '-vf', 'scale=640:360', '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1']);
-for (const [x, y, expected] of [[20, 20, [20, 58, 88]], [100, 100, [245, 186, 66]]]) {
+for (const [x, y, expected] of [[20, 20, [20, 58, 88]], [100, 100, [245, 186, 66]], [450, 100, [0, 220, 60]]]) {
   const offset = (y * 640 + x) * 3;
   expected.forEach((value, channel) => assert.ok(Math.abs(pixels[offset + channel] - value) <= 6, `Unexpected exported color at ${x},${y}`));
 }

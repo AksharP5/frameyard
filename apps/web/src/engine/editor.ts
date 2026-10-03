@@ -11,7 +11,7 @@
  */
 
 import { Active, Background, Chars, colorToHex, Computed, DEFAULT_BACKGROUND, FrameRate, framesToSeconds, getActiveEntity, getEntityChildren, getEntityTree, getIntrinsicPaint, getParentEntity, getTimelineOrigin, isScene, isText, Loop, PaintType, RenderSurface, Selected, Sequential, setActive, Size, Source, Stage } from '@diffusionstudio/runtime';
-import { isAssetRef, isPropValue, serializeAssetRef, SOURCE_ATTR } from '@diffusionstudio/jsx';
+import { isAssetRef, serializePropValue, serializeAssetRef, SOURCE_ATTR } from '@diffusionstudio/jsx';
 import { createRoot, createSignal } from 'solid-js';
 
 import { authoredElement, authoredTree, getRuntimeDocument, insert, isSceneNode, renderAuthored, withDocument } from '@diffusionstudio/reconciler';
@@ -207,7 +207,8 @@ interface Recorded {
  * decides this, so a new kind of value is taught here once.
  */
 function wireValue(value: unknown): EditValue | undefined {
-	if (isPropValue(value)) return value;
+	const serialized = serializePropValue(value);
+	if (serialized !== undefined) return serialized;
 	if (isAssetRef(value)) return serializeAssetRef(value);
 	return undefined;
 }

@@ -24,10 +24,9 @@ import { setInspectEntries } from '@/engine/inspect';
 import { attachLibrary, isLibraryFile } from '@/engine/library';
 import { attachAi } from '@/utils/gen-ai';
 import { attachProjectConfig, isProjectConfigFile } from '@/engine/project-config';
-import { loadProjectBundle, rememberProjectBundle } from '@/lib/db';
+import { rememberProjectBundle } from '@/lib/db';
 import { isCacheFile } from '@diffusionstudio/assets';
 import { createEditWriter, getProjectRecovery, waitForProjectEdits } from '@/projects/edits';
-import { recoveryJson } from '@/projects/edit-recovery';
 import { compileProject, refreshProject, watchProject } from '@/projects/host';
 import { isProjectSourceFile } from '@/projects/change-batch';
 import { captureProjectCover } from '@/projects/cover';
@@ -139,8 +138,8 @@ export function EditorPage() {
         if (seconds !== undefined) setPlayhead(world, scene, seconds * frameRate);
       }
       const sources = new Map(world.query(Source).map(entity => [entity.get(Source)!.value, entity]));
-      // Cached JSX can carry an obsolete selection. Only live edits or a
-      // previously fresh mount override the source, and always as an exact set.
+      // Only live edits or a previous mount override the source's selection,
+      // and always as an exact set.
       const restored = preserveSelection
         ? world.query(Source).filter(entity => selected.has(entity.get(Source)!.value))
         : [...world.query(Selected)];
@@ -167,35 +166,7 @@ export function EditorPage() {
       await waitForProjectEdits(dir);
       if (disposed || current !== generation) return;
       const compiledRevision = revision;
-      const compiling = compileProject(dir);
-      const loading = Promise.all([library.load(), config.ready]);
-
-      // First open only: the bundle the last session mounted, straight from
-      // the app's database, goes on the stage while the compile chews
-      // through the sources — unless the compile wins the race outright. A
-      // bundle the sources have outgrown can fail against today's assets;
-      // the compile that is already running replaces it either way.
-      if (current === 1) {
-        // Neither arm may reject: the loser would be an unhandled rejection,
-        // and the compile's real failure is dealt with below.
-        const cached = await Promise.race([
-          Promise.all([loadProjectBundle(untrack(project.id)), loading])
-            .then(([code]) => code, () => null),
-          compiling.then(() => null, () => null),
-        ]);
-        if (disposed || current !== generation) return;
-        if (cached && mountedCode === undefined) {
-          try {
-            // Recovered edits need the current source, not a cached preview whose
-            // writer would block the fresh compile with its recovery warning.
-            if (recoveryJson(dir) === null) applyBundle(cached);
-          } catch {
-            // The compile lands next, with a toast of its own if it must.
-          }
-        }
-      }
-
-      const [result] = await Promise.all([compiling, loading]);
+      const [result] = await Promise.all([compileProject(dir), library.load(), config.ready]);
       if (disposed || current !== generation) return;
 
       await writer?.settleForReload();
@@ -215,8 +186,7 @@ export function EditorPage() {
         hasFreshBundle = true;
         setEditorLoadState({ world, status: "ready", mountedFrame: engine.frame() });
         engine.requestFrame();
-        // What an export renders a second time, and the next open's head
-        // start (see `rememberProjectBundle`) — recorded only once it has
+        // What an export renders a second time — recorded only once it has
         // actually mounted, so the record never runs ahead of the canvas.
         rememberProjectBundle(untrack(project.id), result.code).catch((error) =>
           console.error('[projects] could not save the bundle', error));

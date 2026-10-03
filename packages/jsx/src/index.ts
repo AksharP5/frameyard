@@ -53,6 +53,7 @@ export {
   isCompositionTag,
   isLoopTag,
   isPropValue,
+  serializePropValue,
   parseSource,
 } from "./source";
 export type { AuthoredElement, AuthoredTree, CompositionTag, PropValue } from "./source";

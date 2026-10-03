@@ -8,6 +8,7 @@ import { build } from 'esbuild';
 import type { World } from 'koota';
 import type { EntityEdit } from '../../web/src/engine/editor.ts';
 import type { EditorRecovery } from '../../desktop/src/checkpoint-contracts.ts';
+import type { CompileResult } from '../../desktop/src/main-channels.ts';
 import type { WriteResult } from '../../desktop/src/edit.ts';
 
 const web = fileURLToPath(new URL('../../web/src/', import.meta.url));
@@ -23,12 +24,13 @@ const built = await build({
 
 function fixture(t: TestContext, recovered?: string, selections: Record<string, string[]> = {}, outgoingSave?: Promise<WriteResult>) {
   const storage = new Map(recovered ? [['diffusion-studio:edit-recovery:project', recovered]] : []);
-  const compiled = Promise.withResolvers<{ ok: true; code: string }>();
+  const compiled = Promise.withResolvers<CompileResult>();
   let compilation = compiled.promise;
   let sourceChanged: ((paths: string[]) => void) | undefined;
   const states: { status: string; error?: string }[] = [];
   const loaded = Promise.withResolvers<{ status: string; error?: string }>();
   const mounts: string[] = [], cleanups: (() => void)[] = [];
+  const remembered: { projectId: string; code: string }[] = [];
   const Source = Symbol('Source'), Selected = Symbol('Selected'), Scene = Symbol('Scene');
   const sources = [...new Set(Object.values(selections).flat())];
   const makeEntity = (source: string, selected: boolean) => ({
@@ -93,7 +95,7 @@ function fixture(t: TestContext, recovered?: string, selections: Record<string, 
     '@/engine/library': { attachLibrary: () => library, isLibraryFile: () => false },
     '@/engine/project-config': { attachProjectConfig: () => config, isProjectConfigFile: () => false },
     '@/utils/gen-ai': { attachAi: noop },
-    '@/lib/db': { loadProjectBundle: async () => 'cached', rememberProjectBundle: async () => {} },
+    '@/lib/db': { loadProjectBundle: async () => 'cached', rememberProjectBundle: async (projectId: string, code: string) => { remembered.push({ projectId, code }); } },
     '@/lib/local-mode': { localMode: true },
     '@/lib/ipc': { mainBridge: { call: async (_channel: string, input: { dir: string; editorRecovery?: EditorRecovery }) => {
       if (checkpointFailure) throw new Error('Checkpoint disk failure');
@@ -125,7 +127,7 @@ function fixture(t: TestContext, recovered?: string, selections: Record<string, 
     writer.dispose();
   }
   module.exports.EditorPage();
-  return { ...module.exports, states, recompile: async (code: string) => { compilation = Promise.resolve({ ok: true, code }); assert.ok(sourceChanged); sourceChanged(['index.tsx']); await setImmediate(); }, checkpoint: () => { assert.ok(recoveryTick); recoveryTick(); }, checkpoints, errors, failCheckpoint: () => { checkpointFailure = true; }, world, mounts, storage, compiled, loaded, edit: (value: EntityEdit) => { assert.ok(edit); edit(value); }, writes: () => writes,
+  return { ...module.exports, states, recompile: async (result: CompileResult) => { compilation = Promise.resolve(result); assert.ok(sourceChanged); sourceChanged(['index.tsx']); await setImmediate(); }, checkpoint: () => { assert.ok(recoveryTick); recoveryTick(); }, checkpoints, errors, failCheckpoint: () => { checkpointFailure = true; }, world, mounts, remembered, storage, compiled, loaded, edit: (value: EntityEdit) => { assert.ok(edit); edit(value); }, writes: () => writes,
     allowWrites: () => { writeFails = false; },
     compilations: () => compilations,
     selected: () => entities.filter(entity => entity.selected).map(entity => entity.source),
@@ -133,7 +135,7 @@ function fixture(t: TestContext, recovered?: string, selections: Record<string, 
   };
 }
 
-test('reopening waits for the outgoing save before compiling or mounting a cached scene', async (t) => {
+test('reopening waits for the outgoing save before compiling or mounting a scene', async (t) => {
   const save = Promise.withResolvers<WriteResult>();
   const f = fixture(t, undefined, {}, save.promise);
   await setImmediate();
@@ -148,33 +150,33 @@ test('reopening waits for the outgoing save before compiling or mounting a cache
   assert.equal(f.storage.size, 0);
 });
 
-test('fresh source selection replaces stale cached selection when opening a project', async (t) => {
+test('opening waits for current source without mounting obsolete cached code', async (t) => {
   const f = fixture(t, undefined, { cached: ['shade'], fresh: ['text'] });
   await setImmediate();
-  assert.deepEqual(f.selected(), ['shade']);
+  assert.equal(f.compilations(), 1);
+  assert.deepEqual(f.mounts, []);
+  assert.deepEqual(f.remembered, []);
   f.compiled.resolve({ ok: true, code: 'fresh' });
   assert.equal((await f.loaded.promise).status, 'ready');
+  assert.deepEqual(f.mounts, ['fresh']);
+  assert.deepEqual(f.remembered, [{ projectId: 'project-id', code: 'fresh' }]);
   assert.deepEqual(f.selected(), ['text']);
   assert.equal(f.writes(), 0, 'restoring selection must not rewrite the source');
 });
 
-test('live selections, including an empty selection, survive compilation without adding authored selections', async (t) => {
+test('live selections, including an empty selection, survive reloads without adding authored selections', async (t) => {
   for (const selection of [['text'], []]) {
-    const f = fixture(t, undefined, { cached: ['shade'], fresh: ['shade'], external: ['text'], later: ['shade'] });
+    const f = fixture(t, undefined, { fresh: ['shade'], external: ['text'], later: ['shade'] });
     f.allowWrites();
-    await setImmediate();
-    f.select(selection);
-    await f.flushProjectEdits(f.world);
     f.compiled.resolve({ ok: true, code: 'fresh' });
     assert.equal((await f.loaded.promise).status, 'ready');
-    assert.deepEqual(f.selected(), selection, 'user input while the cached preview is visible takes priority');
-    f.select(['shade']);
+    f.select(selection);
     await f.flushProjectEdits(f.world);
-    await f.recompile('external');
-    assert.deepEqual(f.selected(), ['shade']);
+    await f.recompile({ ok: true, code: 'external' });
+    assert.deepEqual(f.selected(), selection, 'live selection takes priority over newly compiled source');
     f.select([]);
     await f.flushProjectEdits(f.world);
-    await f.recompile('later');
+    await f.recompile({ ok: true, code: 'later' });
     assert.deepEqual(f.selected(), [], 'a live reload must not reselect a layer after the user cleared selection');
   }
 });
@@ -191,18 +193,28 @@ test('opening with recovered edits mounts fresh saved code and keeps recovery av
   assert.equal(f.writes(), 0, 'opening must not replay or discard recovery');
 });
 
-test('fresh compilation cannot replace a cached scene whose live edits failed to save', async (t) => {
+test('reload cannot replace the active scene whose live edits failed to save', async (t) => {
   const f = fixture(t);
-  await setImmediate();
-  assert.deepEqual(f.mounts, ['cached']);
+  f.compiled.resolve({ ok: true, code: 'fresh' });
+  await f.loaded.promise;
   f.edit({ kind: 'text', source: 'index.tsx:title', value: 'Unsaved title' });
   await assert.rejects(f.flushProjectEdits(f.world), /Disk is full/);
-  f.compiled.resolve({ ok: true, code: 'fresh' });
-  assert.match((await f.loaded.promise).error ?? '', /Disk is full/);
-  assert.deepEqual(f.mounts, ['cached']);
+  await f.recompile({ ok: true, code: 'external' });
+  assert.match(f.states.at(-1)?.error ?? '', /Disk is full/);
+  assert.deepEqual(f.mounts, ['fresh']);
   assert.match(f.getProjectRecovery(f.world) ?? '', /Unsaved title/);
 });
 
+test('failed compilation preserves the active scene and its export bundle', async (t) => {
+  const f = fixture(t, undefined, { fresh: ['text'] });
+  f.compiled.resolve({ ok: true, code: 'fresh' });
+  await f.loaded.promise;
+  await f.recompile({ ok: false, error: 'Invalid imported geometry source' });
+  assert.match(f.states.at(-1)?.error ?? '', /Invalid imported geometry source/);
+  assert.deepEqual(f.mounts, ['fresh']);
+  assert.deepEqual(f.selected(), ['text'], 'the active scene must remain mounted');
+  assert.deepEqual(f.remembered, [{ projectId: 'project-id', code: 'fresh' }]);
+});
 
 test('automatic checkpoints retain pending edits separately when saving the source is blocked', async (t) => {
   const journal = JSON.stringify({ version: 1, updatedAt: '', safe: true, edits: [{ kind: 'set', source: 'index.tsx:scene', props: { timelineZoom: 0.5 } }] });
@@ -236,7 +248,7 @@ for (const safe of [true, false]) {
     const f = fixture(t, journal);
     f.compiled.resolve({ ok: true, code: 'fresh' });
     await f.loaded.promise;
-    await f.recompile('external update');
+    await f.recompile({ ok: true, code: 'external update' });
     assert.deepEqual(f.mounts, ['fresh', 'external update']);
     assert.equal(f.states.at(-1)?.status, 'ready');
     assert.match(f.getProjectRecovery(f.world) ?? '', /Recovered title/);
@@ -244,7 +256,7 @@ for (const safe of [true, false]) {
     assert.equal(f.writes(), 0);
 
     f.edit({ kind: 'text', source: 'index.tsx:title', value: 'Live unsaved title' });
-    await f.recompile('another external update');
+    await f.recompile({ ok: true, code: 'another external update' });
     assert.deepEqual(f.mounts, ['fresh', 'external update'], 'live edits must prevent remounting');
     assert.equal(f.states.at(-1)?.status, 'error');
     assert.match(f.getProjectRecovery(f.world) ?? '', /Live unsaved title/);
