@@ -11,8 +11,10 @@ const built = await build({
       export * as spatial from './packages/runtime/src/math/spatial';
       export { createRuntimeDocument } from '@diffusionstudio/reconciler';
       export * as gestures from './apps/web/src/engine/input/spatial-gestures';
+      export { handleMaskInteraction } from './apps/web/src/engine/input/interactions';
+      export { getDocumentEditor } from './apps/web/src/engine/editor';
       export { snapshotSelectionMask } from './apps/web/src/engine/input/snapping';
-      export { Pointer, Keys } from './apps/web/src/engine/traits';
+      export { Pointer, Keys, SnapLines, Hud } from './apps/web/src/engine/traits';
       export { SOURCE_ATTR } from '@diffusionstudio/jsx';
       export { getEditHistory } from './apps/web/src/engine/history';
     `,
@@ -27,13 +29,15 @@ const module = { exports: {} as {
   spatial: typeof import('../../../packages/runtime/src/math/spatial');
   gestures: typeof import('../../web/src/engine/input/spatial-gestures');
 } & Pick<typeof import('@diffusionstudio/reconciler'), 'createRuntimeDocument'>
+  & Pick<typeof import('../../web/src/engine/input/interactions'), 'handleMaskInteraction'>
+  & Pick<typeof import('../../web/src/engine/editor'), 'getDocumentEditor'>
   & Pick<typeof import('../../web/src/engine/input/snapping'), 'snapshotSelectionMask'>
-  & Pick<typeof import('../../web/src/engine/traits'), 'Pointer' | 'Keys'>
+  & Pick<typeof import('../../web/src/engine/traits'), 'Pointer' | 'Keys' | 'SnapLines' | 'Hud'>
   & Pick<typeof import('@diffusionstudio/jsx'), 'SOURCE_ATTR'>
   & Pick<typeof import('../../web/src/engine/history'), 'getEditHistory'> };
 class Element {}
-runInThisContext(`(function(module,exports,HTMLCanvasElement,HTMLElement,Element,gestureJsx){"use strict";${built.outputFiles[0].text}\n})`)(module, module.exports, Element, Element, Element, (component: (props: object) => unknown, props: object) => component(props));
-const { runtime: api, spatial, gestures, createRuntimeDocument, Pointer, Keys, SOURCE_ATTR, snapshotSelectionMask, getEditHistory } = module.exports;
+runInThisContext(`(function(module,exports,HTMLCanvasElement,HTMLImageElement,HTMLElement,Element,gestureJsx){"use strict";${built.outputFiles[0].text}\n})`)(module, module.exports, Element, Element, Element, Element, (component: (props: object) => unknown, props: object) => component(props));
+const { runtime: api, spatial, gestures, createRuntimeDocument, Pointer, Keys, SnapLines, Hud, SOURCE_ATTR, snapshotSelectionMask, getEditHistory, handleMaskInteraction, getDocumentEditor } = module.exports;
 const camera = { x: 500, y: 300, z: 1000, perspective: 1000, zoom: 1, rotationX: 0, rotationY: 0, rotation: 0, width: 1000, height: 600 };
 const close = (actual: number, expected: number) => assert.ok(Math.abs(actual - expected) < 1e-8, `${actual} differs from ${expected}`);
 const closePoint = (actual: { x: number; y: number }, expected: { x: number; y: number }) => { close(actual.x, expected.x); close(actual.y, expected.y); };
@@ -41,7 +45,7 @@ const closePoint = (actual: { x: number; y: number }, expected: { x: number; y: 
 function fixture() {
   const world = api.createRuntimeWorld('spatial-motion');
   world.get(api.Root)!.set(api.Camera, { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 });
-  world.add(Pointer, Keys);
+  world.add(Pointer, Keys, SnapLines, Hud);
   const document = createRuntimeDocument(world);
   let id = 0;
   const add = (tag: string, props: Record<string, unknown>, parent = document.stage) => {
@@ -151,6 +155,44 @@ function begin(f: ReturnType<typeof fixture>, nodes: import('koota').Entity[], s
   snapshotSelectionMask(f.world);
   gestures.snapshotSpatialGesture(f.world);
 }
+
+test('Alt-drag duplicates an animated layer at the playhead without moving its original', () => {
+  const f = fixture();
+  try {
+    const rect = f.add('Rect', { x: 0, y: 30, width: 80, height: 60, end: 2 }, f.scene);
+    const track = f.add('KeyframeTrack', { property: 'x' }, rect);
+    f.add('Keyframe', { time: 0, value: 0 }, track);
+    f.add('Keyframe', { time: 1, value: 100 }, track);
+    api.setPlayhead(f.world, f.scene.entity, 30);
+    api.playbackSystem(f.world);
+    api.motionSystem(f.world);
+    api.transformSystem(f.world);
+    const editor = getDocumentEditor(f.world);
+    editor.select(rect.entity);
+    f.world.get(Keys)!.held.add('alt');
+    f.world.get(Keys)!.held.add('mod');
+    f.scene.entity.set(api.Playback, { playing: true });
+    f.world.set(api.Time, { delta: 1000 / 30 });
+    f.world.set(Pointer, { phase: 'pressed', button: 0, clientX: 120, clientY: 50, dragStartX: 120, dragStartY: 50, over: true });
+    handleMaskInteraction(f.world, { type: 'dragstart', clientX: 120, clientY: 50, button: 0, target: { kind: 'entity', id: rect.entity } });
+    const [copy] = api.getSelection(f.world);
+    assert.ok(copy && copy !== rect.entity);
+    close(copy.get(api.Computed)!.positionX, 100);
+    close(f.scene.entity.get(api.Computed)!.localTime, 30);
+    f.scene.entity.set(api.Playback, { playing: false });
+    api.playbackSystem(f.world);
+    api.motionSystem(f.world);
+    api.transformSystem(f.world);
+    f.world.set(Pointer, { clientX: 130, clientY: 50 });
+    handleMaskInteraction(f.world, { type: 'drag', clientX: 130, clientY: 50, button: 0, target: { kind: 'entity', id: copy } });
+    api.motionSystem(f.world);
+    close(copy.get(api.Computed)!.positionX, 110);
+    close(rect.entity.get(api.Computed)!.positionX, 100);
+  } finally {
+    f.document.dispose();
+    f.world.destroy();
+  }
+});
 
 
 test('spatial drag keeps the grabbed point under the pointer and undo restores its source position', () => {

@@ -610,6 +610,13 @@ function getGlobalFrame(world: World, entity: Entity): number {
 	return 0;
 }
 
+/** Refresh clip time and visibility without advancing playheads or scheduling media. */
+export function updatePlaybackVisibility(world: World): void {
+	for (const entity of world.query(Or(Geometry, Group, AdjustmentLayer), ChildOf(world.get(Root)!))) {
+		updateVisibility(world, entity, entity);
+	}
+}
+
 export function playbackSystem(world: World): void {
 	preparePhysics(world);
 	const computed = store(world, Computed);
@@ -619,9 +626,7 @@ export function playbackSystem(world: World): void {
 		advancePlayhead(world, entity);
 	}
 
-	for (const entity of world.query(Or(Geometry, Group, AdjustmentLayer), ChildOf(world.get(Root)!))) {
-		updateVisibility(world, entity, entity);
-	}
+	updatePlaybackVisibility(world);
 
 	// handle transition visibility
 	for (const clip of world.query(Or(Geometry, Group, AdjustmentLayer), Transition)) {

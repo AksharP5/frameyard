@@ -505,6 +505,16 @@ if (app.requestSingleInstanceLock()) {
     scheduleMainIdle();
     refreshTray();
   });
+  mainBridge.handle(MAIN_CHANNELS.WINDOW_SHOW, async (_input, event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window || window.isDestroyed()) return;
+    await app.dock?.show();
+    if (window.isDestroyed()) return;
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
+    refreshTray();
+  });
   mainBridge.handle(MAIN_CHANNELS.WINDOW_CAPTURE, async (_input, event) => {
     const window = BrowserWindow.fromWebContents(event.sender);
     if (!window || window.isDestroyed()) throw new Error("No editor window");

@@ -32,6 +32,9 @@ Assistant in that project.
 
 Codex keeps the native sessions and context tools described below. Claude Code
 uses upstream chat history, model selection, questions, and file attachments.
+Use **Add files** in the home composer or Claude Code chat to choose files;
+folders can be attached by dragging them into the composer. The model menu
+groups available models under their coding agent.
 Area notes, time ranges, skills, effect references, and transcript or video
 attachments use Codex. Attaching one from a workspace panel selects Codex.
 
@@ -457,8 +460,9 @@ Neither action moves the playhead or changes clip timing.
 
 Click selects the top visible item. **Alt-click** repeatedly at an overlap to
 cycle through the items there, including full-scene effects and nested group
-contents. Double-click a group to enter it. Alt-drag on a resize handle keeps its
-existing center-resize behavior.
+contents. Double-click a group to enter it. **Alt-drag** a selected layer to
+duplicate and move the copy. Animated copies begin at the current playhead pose.
+Alt-drag on a resize handle resizes around the center.
 
 Hidden, locked, and out-of-time items do not intercept canvas clicks. Select those
 items in the timeline or layer list; unlock or reveal them before canvas editing.

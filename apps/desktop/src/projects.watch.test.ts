@@ -33,7 +33,7 @@ vi.mock("node:fs/promises", async importOriginal => {
   return { ...fs, readFile: vi.fn(fs.readFile), rename: vi.fn(fs.rename) };
 });
 const { readFile: readFileOnDisk, rename: renameOnDisk } = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
-const { deleteProject, noteContent, noteRenamed, renameProject, unwatchProject, watchProject, writeManifest } = await import("./projects");
+const { deleteProject, noteContent, noteRenamed, readConfig, renameProject, unwatchProject, watchProject, writeConfig, writeManifest } = await import("./projects");
 
 let dir: string;
 let changed: string[] = [];
@@ -299,6 +299,52 @@ describe("watchProject", () => {
 
   it("says nothing about the manifest it writes itself", async () => {
     await writeManifest(dir, { assets: [{ source: "assets/clip.mp4" }] });
+    await settle();
+    expect(changed).toEqual([]);
+  });
+
+  // A slider in the export settings writes the config on every move, so the
+  // next write is claimed before the event for the last one is answered.
+  it("says nothing about config writes that overlap, and keeps the last", async () => {
+    await writeFile(join(dir, "package.json"), `${JSON.stringify({ name: "p" }, null, 2)}\n`, "utf8");
+    await waitFor("package.json");
+
+    changed = [];
+    const writes: Promise<void>[] = [];
+    for (let bitrate = 1; bitrate <= 40; bitrate++) {
+      writes.push(writeConfig(dir, { export: { intro: { video: { bitrate } } } }));
+      await settle(8);
+    }
+    await Promise.all(writes);
+
+    await settle();
+    expect(changed).toEqual([]);
+    expect(await readConfig(dir)).toEqual({ export: { intro: { video: { bitrate: 40 } } } });
+  });
+
+  it("reports an outside edit after coalesced writes return to earlier content", async () => {
+    const file = join(dir, "index.tsx");
+    noteContent(file, "first\n");
+    noteContent(file, "second\n");
+    noteContent(file, "first\n");
+    await writeFileAtomic(file, "first\n");
+    await settle();
+    expect(changed).toEqual([]);
+
+    await writeFile(file, "second\n", "utf8");
+    await waitFor("index.tsx");
+  });
+
+  it("reports an outside edit that lands between two of the app's own", async () => {
+    const file = join(dir, "index.tsx");
+    noteContent(file, "ours\n");
+    noteContent(file, "ours again\n");
+    await writeFileAtomic(file, "ours\n");
+    await writeFile(file, "theirs\n", "utf8");
+    await waitFor("index.tsx");
+
+    changed = [];
+    await writeFileAtomic(file, "ours again\n");
     await settle();
     expect(changed).toEqual([]);
   });
