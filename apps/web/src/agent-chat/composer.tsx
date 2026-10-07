@@ -8,6 +8,7 @@
 
 import { For, Show, type JSX } from "solid-js";
 
+import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { Popover, PopoverContent, PopoverPortal, PopoverTrigger } from "@/components/ui/popover";
 import type { CodexSkill } from "@desktop/codex-capabilities";
@@ -15,7 +16,7 @@ import type { SkillCatalog } from "@/components/agent/use-codex-capabilities";
 
 import type { HarnessId, ModelRef } from "@diffusionstudio/agent-chat";
 
-import { AttachmentTile, DropOverlay, createDropZone, mergeAttachments, type Attachment } from "./attachments";
+import { AttachmentTile, DropOverlay, createDropZone, mergeAttachments, pickAttachments, type Attachment } from "./attachments";
 import { ModelPicker } from "./model-picker";
 import { PromptInput } from "./prompt-input";
 import { removeSkillMention } from "./skill-mentions";
@@ -54,7 +55,8 @@ type ComposerProps = {
 };
 
 export function Composer(props: ComposerProps) {
-  const drop = createDropZone((dropped) => props.onAttachments(mergeAttachments(props.attachments, dropped)));
+  const attach = (added: Attachment[]) => props.onAttachments(mergeAttachments(props.attachments, added));
+  const drop = createDropZone(attach);
 
   const canSend = () => (!props.running || props.steering) && !props.waiting && !props.blocked && !props.sendDisabled && props.model !== null && (props.hasContent ?? (props.text.trim().length > 0 || props.attachments.length > 0));
 
@@ -133,7 +135,19 @@ export function Composer(props: ComposerProps) {
         />
       </div>
       <div class="flex min-h-7 shrink-0 items-center justify-between gap-1">
-        <Show when={props.controls}>
+        <Show when={props.controls} fallback={
+          <Button
+            variant="ghost"
+            size="icon-square"
+            onClick={async () => attach(await pickAttachments())}
+            disabled={props.blocked !== null}
+            aria-label="Add files"
+            title="Add files"
+            class="text-muted-foreground hover:bg-muted"
+          >
+            <Icon name="plus-add" />
+          </Button>
+        }>
           <Popover placement="top-start">
             <PopoverTrigger as="button" type="button" aria-label="Add context" title="Add context" class="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-ring">
               <Icon name="plus-add" class="size-4" />
