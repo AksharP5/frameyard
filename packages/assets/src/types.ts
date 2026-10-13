@@ -61,6 +61,8 @@ interface AssetBase {
 	mimeType: string;
 	stat?: AssetStat;
 	generation?: AssetGeneration;
+	/** The generation job that produced these bytes, for its settings and cost. */
+	job?: string;
 	/**
 	 * Resolved on the fly for a `src` that names a path or URL outside the
 	 * library; lives in memory only and is never written to the manifest.

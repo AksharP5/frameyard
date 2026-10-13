@@ -26,19 +26,14 @@ import type { Entity, World } from 'koota';
 import type { AuthoredTree, ProjectDocument, RuntimeDocument } from '@diffusionstudio/reconciler';
 
 /**
- * A value an edit can carry to the file: what a source spells as a literal,
- * or a `generate.*` declaration in its wire form (see `SerializedAssetRef`),
- * which the writer spells as the call that reproduces it.
- */
-export type EditValue = PropValue | SerializedAssetRef;
-
-/**
  * A property the editor changed, in the vocabulary of the JSX rather than of
  * the traits it was written to: `source` is the element it belongs to (its
  * SOURCE_ATTR stamp) and `value` is what a project would have written there.
  * Whoever mounts the document decides what to do with these — writing them
  * back to disk is the point, but nothing here knows about a disk.
  */
+export type EditValue = PropValue | SerializedAssetRef;
+
 export interface PropEdit {
 	kind: 'prop';
 	source: string;
@@ -110,9 +105,9 @@ export interface MoveEdit {
 /**
  * A deleted subtree as it stood the moment before it went, one node per
  * authored element: the source it was stamped with, what a project would
- * author it as (live values, `AssetRef`s included — this never crosses a
- * wire), and its children in order. What an undo needs to put the subtree
- * back, and to pair the old sources with the new ones the reinsert mints.
+ * author it as (live values included — this never crosses a wire), and its
+ * children in order. What an undo needs to put the subtree back, and to pair
+ * the old sources with the new ones the reinsert mints.
  */
 export interface CapturedNode {
 	source: string;
@@ -200,11 +195,11 @@ interface Recorded {
 }
 
 /**
- * A prop as an edit can carry it (see `EditValue`): a value a file spells as
- * it is, a declaration in its wire form, or undefined for anything else — an
- * element is written with whatever of it the file can say, and the rest is
- * the project's to keep, not the writer's to guess at. The one place that
- * decides this, so a new kind of value is taught here once.
+ * A prop as an edit can carry it (a `PropValue`): a value a file spells as
+ * it is, or undefined for anything else — an element is written with whatever
+ * of it the file can say, and the rest is the project's to keep, not the
+ * writer's to guess at. The one place that decides this, so a new kind of
+ * value is taught here once.
  */
 function wireValue(value: unknown): EditValue | undefined {
 	const serialized = serializePropValue(value);

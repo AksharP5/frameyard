@@ -73,7 +73,7 @@ export function ProjectMenu(props: { wordmark?: boolean } = {}) {
         >
           <Icon name="frameyard" class="size-6" /><Show when={props.wordmark}><span class="focus-wordmark">frameyard</span></Show>
           <div class="flex items-center justify-center overflow-clip h-6 w-4">
-            <Icon name="chevron-down" class="size-6" />
+            <Icon name="chevron-down" />
           </div>
         </DropdownMenuTrigger>
         <DropdownMenuPortal>
@@ -162,7 +162,7 @@ export function ProjectMenu(props: { wordmark?: boolean } = {}) {
                   onSelect={() => downloadDesktopApp("main_menu")}
                 >
                   <span class="grid h-7 w-6 shrink-0 place-items-center overflow-clip">
-                    <Icon name="download" class="size-6" />
+                    <Icon name="download" />
                   </span>
                   Get desktop app (macOS)
                 </DropdownMenuItem>

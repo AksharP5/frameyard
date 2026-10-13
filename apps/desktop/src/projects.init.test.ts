@@ -18,7 +18,7 @@ vi.mock("electron", () => ({
   ipcMain: { on: () => { } },
 }));
 
-const { initProject, resolveProject } = await import("./projects");
+const { compileProject, initProject, resolveProject } = await import("./projects");
 
 let root: string;
 
@@ -95,5 +95,28 @@ describe("initProject", () => {
     await writeFile(file, "");
     await expect(initProject(null, file)).rejects.toThrow(/not a folder/);
     expect(await readFile(file, "utf8")).toBe("");
+  });
+});
+
+describe("compileProject", () => {
+  it("preserves generation declarations and source-less captions that the local runtime still supports", async () => {
+    const dir = join(root, "local-generations");
+    await mkdir(dir);
+    const source = `import { generate } from "@diffusionstudio/jsx";
+export default () => <scene id="scene"><image id="image" src={generate.image({ prompt: "next take" })} /><captions id="captions" seed={2} /></scene>;
+`;
+    await writeFile(join(dir, "index.tsx"), source);
+    await writeFile(join(dir, "assets.yml"), `version: 1
+folders: []
+assets:
+  - id: transcript
+    path: generated/captions.json
+    source: assets/generated/captions.json
+    generation:
+      key: transcript:v1:scene:2
+`);
+
+    expect(await compileProject(dir)).toMatchObject({ ok: true });
+    expect(await readFile(join(dir, "index.tsx"), "utf8")).toBe(source);
   });
 });

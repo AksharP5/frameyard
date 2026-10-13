@@ -80,7 +80,7 @@ export function HistoryMenu(props: HistoryMenuProps) {
                       <Icon name="spinner-loader" class="size-6 -mr-1 shrink-0" />
                     </Show>
                     <Show when={chat.status === "waiting"}>
-                      <Icon name="dot" class="size-6 -mr-1 shrink-0 text-primary" />
+                      <Icon name="dot" class="-mr-1 shrink-0 text-primary" />
                     </Show>
                     <span class="min-w-0 flex-1 truncate" title={chat.title}>
                       {chat.title}
@@ -91,7 +91,7 @@ export function HistoryMenu(props: HistoryMenuProps) {
                       </span>
                     </Show>
                     <Show when={chat.id === props.chatId}>
-                      <Icon name="confirm-check" class="size-6 -mr-1 shrink-0 group-hover/row:hidden" />
+                      <Icon name="confirm-check" class="-mr-1 shrink-0 group-hover/row:hidden" />
                     </Show>
                     <button
                       type="button"
@@ -103,7 +103,7 @@ export function HistoryMenu(props: HistoryMenuProps) {
                     >
                       <Icon
                         name="close-remove-small"
-                        class="absolute left-1/2 top-1/2 size-6 -translate-x-1/2 -translate-y-1/2 text-inherit!"
+                        class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-inherit!"
                       />
                     </button>
                   </DropdownMenuItem>

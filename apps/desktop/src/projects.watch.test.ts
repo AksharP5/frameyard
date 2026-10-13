@@ -186,6 +186,17 @@ describe("watchProject", () => {
     await waitFor("index.tsx");
   });
 
+  it("forgets a project whose folder was already removed without asking Trash to remove it", async () => {
+    await rm(dir, { recursive: true });
+    vi.mocked(shell.trashItem).mockClear();
+    expect(await deleteProject(dir)).toBe("");
+    expect(shell.trashItem).not.toHaveBeenCalled();
+    await mkdir(dir);
+    await writeFile(join(dir, "index.tsx"), "export const stage = 1;\n", "utf8");
+    await settle();
+    expect(changed).not.toContain("index.tsx");
+  });
+
   it("reports a file someone else writes", async () => {
     await writeFile(join(dir, "index.tsx"), "export const stage = 1;\n", "utf8");
     await waitFor("index.tsx");

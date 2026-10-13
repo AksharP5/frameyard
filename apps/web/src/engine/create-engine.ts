@@ -5,7 +5,7 @@
 import { assetSystem, renderSystem, transformSystem, playbackSystem, motionSystem, AudioEngine, createRuntimeWorld, Geometry, Playback, Mode, RenderSurface, Time, ChildOf, syncInteractiveState } from '@diffusionstudio/runtime';
 import { hudSystem } from './hud';
 import { createSignal, type Accessor, type Setter } from 'solid-js';
-import { AssetSelection, Hud, Keys, MODIFIER_KEYS, ObjectMaskTool, Pointer, PointerEvents, ProjectConfig, SnapLines } from './traits';
+import { AssetSelection, DrawTool, GradientTool, Hud, Keys, MODIFIER_KEYS, ObjectMaskTool, PathEditor, Pointer, PointerEvents, ProjectConfig, SnapLines } from './traits';
 import { inputSystem } from './input/input-system';
 import { clearClipFrames, clearClipPeaks, clearMedia, clearPeaks, timelineSystem, TimelineSurface } from './timeline';
 import { clearObjectTrackOf, clearObjectTracks } from './object-mask';
@@ -55,7 +55,7 @@ class Engine {
 	public constructor(projectId: string, options: EngineOptions = {}) {
 		this.world = createRuntimeWorld(projectId);
 		this.unsubscribe.push(mainBridge.handle(MAIN_CHANNELS.WORKSPACE_VISIBILITY, ({ visible }) => this.setVisible(visible)));
-		this.world.add(Pointer, Keys, SnapLines, Hud, ObjectMaskTool, PointerEvents, AssetSelection, ProjectConfig, TimelineSurface);
+		this.world.add(Pointer, Keys, SnapLines, Hud, ObjectMaskTool, DrawTool, PathEditor, GradientTool, PointerEvents, AssetSelection, ProjectConfig, TimelineSurface);
 
 		this.unsubscribe.push(
 			this.world.onAdd(ChildOf('*'), () => (this.interactiveDirty = true)),

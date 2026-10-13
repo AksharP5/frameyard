@@ -63,7 +63,7 @@ test('motion blocks insert as independently editable native trees and preserve s
       assert.ok(nodes.some(node => node.tag === 'keyframeTrack'), `${block.id} exposes animation tracks`);
       assert.equal(tree.props.end, block.duration);
 
-      const track = world.query(api.KeyframeTrack).find(node => node.get(api.KeyframeTrack)?.property === (block.id === 'growth-chart' ? 'path.d' : 'rotation.y'))
+      const track = world.query(api.KeyframeTrack).find(node => node.get(api.KeyframeTrack)?.property === (block.id === 'growth-chart' ? 'path' : 'rotation.y'))
         ?? world.queryFirst(api.KeyframeTrack)!;
       const target = track.get(api.KeyframeTrack)!.target!;
       const keys = track.get(api.Cache)!.keyframes;
@@ -72,12 +72,13 @@ test('motion blocks insert as independently editable native trees and preserve s
       const sample = () => {
         target.set(api.Computed, { localTime: last.get(api.Keyframe)!.time });
         api.motionSystem(world);
-        return api.getPropertyPaths(world)[path].computed[target.id()];
+        const value = api.getPropertyPaths(world)[path].computed[target.id()];
+        return path === 'path' ? api.formatPath(value as NonNullable<typeof original.path>) : value;
       };
       const original = last.get(api.Keyframe)!;
-      const value = path === 'path.d' ? original.stringValue : original.value;
+      const value = path === 'path' ? api.formatPath(original.path!) : original.value;
       assert.equal(sample(), value);
-      const next = typeof value === 'string' ? 'M 0 0 L 200 200' : value + 5;
+      const next = typeof value === 'string' ? 'M0 0 L200 200' : value + 5;
       history.beginGesture();
       editor.editProperty(last, 'value', next);
       history.endGesture();

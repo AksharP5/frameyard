@@ -8,6 +8,7 @@ import { getSourceWindow } from '../../utils/time';
 import { deleteEntity } from '../../actions/entities';
 import { getAssetFile } from '../../actions/assets';
 import { parseSubtitles } from './subtitles';
+import { parseTranscriptJson } from './transcript';
 
 import type { Entity, World } from 'koota';
 import type { Asset, Transcript, WordGroup } from '@diffusionstudio/assets';
@@ -176,7 +177,7 @@ export async function resolveTranscript(asset: Asset): Promise<Transcript> {
 		if (asset.mimeType === 'application/x-subrip' || asset.mimeType === 'text/vtt') {
 			return parseSubtitles(text);
 		}
-		return JSON.parse(text);
+		return parseTranscriptJson(text);
 	}
 
 	if ((asset.type === 'AUDIO' || asset.type === 'VIDEO') && asset.transcript) {

@@ -41,7 +41,7 @@ export const MAIN_CHANNELS = {
   // Renderer→Main requests
   APP_OPEN_EXTERNAL: "app:open-external",
   APP_SHOW_IN_FOLDER: "app:show-in-folder",
-  ANALYTICS_TRACK: "analytics:track",
+  ANALYTICS_CONFIGURE: "analytics:configure",
   AUTH_GET_PENDING_CALLBACK: "auth:get-pending-callback",
   CHECKOUT_GET_PENDING_CALLBACK: "checkout:get-pending-callback",
   WINDOW_IS_FULLSCREEN: "window:is-fullscreen",
@@ -234,8 +234,8 @@ export type MainRequestMap = {
   [MAIN_CHANNELS.APP_OPEN_EXTERNAL]: { request: { url: string }; response: void };
   [MAIN_CHANNELS.AUTH_GET_PENDING_CALLBACK]: { request: void; response: string | null };
   [MAIN_CHANNELS.CHECKOUT_GET_PENDING_CALLBACK]: { request: void; response: string | null };
-  [MAIN_CHANNELS.ANALYTICS_TRACK]: {
-    request: { event: string; data?: Record<string, string | number | boolean> };
+  [MAIN_CHANNELS.ANALYTICS_CONFIGURE]: {
+    request: { apiUrl: string; token: string | null };
     response: void;
   };
   [MAIN_CHANNELS.WINDOW_IS_FULLSCREEN]: { request: void; response: boolean };

@@ -4,16 +4,7 @@
 
 
 import { store } from './store';
-import {
-	ChildOf, Culled, Sequential, Group, Scene, Scene3D, SpatialParameters, SpatialGeometry, Audio, Paint, AssetId,
-	Delay, Trim, PlaybackRate, SourceFrameRate, Animation, Keyframe, KeyframeTrack, ItemIndex,
-	PathData, SceneCamera, LayerMaterial, SceneEffects, Position, Offset, Rotation, Scale, UniformScale, Skew, Anchor, Flip,
-	Opacity, Color, Blur, Volume, Effect, CornerRadius, MixedCornerRadius,
-	ColorStop, StrokeStyle, Size, Computed, Active, Stage, IsClipPath,
-	ImageDecoderHandle, VideoDecoderHandle,
-	AudioDecoderHandle, CaptionDecoderHandle, WaveformHandle,
-	ShaderHostHandle, AudioBusHandle, TextStyle, TextRange,
-} from '../traits';
+import { ChildOf, Culled, Sequential, Group, Scene, Scene3D, SpatialParameters, SpatialGeometry, Audio, Paint, AssetId, Delay, Trim, PlaybackRate, SourceFrameRate, Animation, Keyframe, KeyframeTrack, ItemIndex, PathData, SceneCamera, LayerMaterial, SceneEffects, Position, Offset, Rotation, Scale, UniformScale, Skew, Anchor, Flip, Pivot, Opacity, Color, Blur, Volume, Effect, CornerRadius, MixedCornerRadius, ColorStop, LinearGradient, EllipticalGradient, PathTrim, StrokeStyle, StrokeDash, Size, Computed, Active, Stage, IsClipPath, ImageDecoderHandle, VideoDecoderHandle, AudioDecoderHandle, CaptionDecoderHandle, WaveformHandle, ShaderHostHandle, AudioBusHandle, TextStyle, TextRange } from '../traits';
 import { getParentEntity } from '../queries/hierarchy';
 import { evictFromCaches, rebuildCaches, refileClipPath } from '../actions/cache';
 import { syncStagePlayback } from '../actions/playback';
@@ -121,7 +112,7 @@ export function observeWorld(world: World): () => void {
 	// A sequence is a group without spatial identity of its own.
 	subs.push(world.onAdd(Sequential, (entity) => {
 		entity.add(Group);
-		entity.remove(Position, Offset, Rotation, Scale, Skew, Anchor, Flip);
+		entity.remove(Position, Offset, Rotation, Scale, Skew, Anchor, Pivot, Flip);
 	}));
 
 	const refile = (clipPath: boolean) => (entity: Entity) => {
@@ -311,8 +302,42 @@ export function observeWorld(world: World): () => void {
 		store(world, Computed).stopOffset[entity.id()] = entity.get(ColorStop)!.offset;
 	});
 
+	mirror(LinearGradient, (entity) => {
+		const computed = store(world, Computed);
+		const { x1, y1, x2, y2 } = entity.get(LinearGradient)!;
+		computed.gradientX1[entity.id()] = x1;
+		computed.gradientY1[entity.id()] = y1;
+		computed.gradientX2[entity.id()] = x2;
+		computed.gradientY2[entity.id()] = y2;
+	});
+
+	mirror(EllipticalGradient, (entity) => {
+		const computed = store(world, Computed);
+		const { cx, cy, rx, ry } = entity.get(EllipticalGradient)!;
+		computed.gradientCX[entity.id()] = cx;
+		computed.gradientCY[entity.id()] = cy;
+		computed.gradientRX[entity.id()] = rx;
+		computed.gradientRY[entity.id()] = ry;
+	});
+
+	mirror(PathTrim, (entity) => {
+		const computed = store(world, Computed);
+		const { start, end, offset } = entity.get(PathTrim)!;
+		computed.trimStart[entity.id()] = start;
+		computed.trimEnd[entity.id()] = end;
+		computed.trimOffset[entity.id()] = offset;
+	});
+
 	mirror(StrokeStyle, (entity) => {
 		store(world, Computed).strokeWidth[entity.id()] = entity.get(StrokeStyle)!.width;
+	});
+
+	mirror(StrokeDash, (entity) => {
+		const computed = store(world, Computed);
+		const { dash, gap, offset } = entity.get(StrokeDash)!;
+		computed.dash[entity.id()] = dash;
+		computed.dashGap[entity.id()] = gap;
+		computed.dashOffset[entity.id()] = offset;
 	});
 
 	// Size flows into Computed via propagation (descendants owning a Size

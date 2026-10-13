@@ -7,6 +7,8 @@ import type { NumericArray } from '@diffusionstudio/jsx';
 
 import { AnimationType, AnimationPhase } from '../constants';
 
+import type { PathGeometry } from '../math/path';
+
 // KeyframeTrack entity: one per (target, property) pair. ChildOf its target
 // (geometry, paint, color stop, ...) and owns the Keyframe entities as
 // children. `target` is denormalised: ChildOf is authoritative, but the keyed
@@ -19,7 +21,7 @@ export const KeyframeTrack = trait({
 
 // Keyframe entity: ChildOf its KeyframeTrack. Easing applies to the segment
 // from this keyframe to the next-in-time on the same track.
-export const Keyframe = trait({ time: 0, value: 0, stringValue: undefined as string | undefined, arrayValue: () => undefined as NumericArray | undefined, easing: 'linear' });
+export const Keyframe = trait({ time: 0, value: 0, stringValue: undefined as string | undefined, arrayValue: () => undefined as NumericArray | undefined, easing: 'linear', path: () => null as PathGeometry | null });
 
 // Animation entity: one preset in/out animation, ChildOf its target.
 export const Animation = trait({

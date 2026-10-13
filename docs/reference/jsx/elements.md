@@ -16,16 +16,16 @@ camelCase composition elements map 1:1 onto entities. Lowercase DOM vocabulary i
 
 | Element | What it is |
 | ------- | ---------- |
-| [`<rect>`](./rect.md) | A rectangle. Takes paints, strokes, shadows and effects. With `clipPath` it clips its parent instead of drawing. The older `mask` prop still works. |
-| [`<path>` / `<ellipse>`](./path.md) | Native SVG vector geometry or a boxed ellipse, with editable paints, strokes, masks and path keyframes. |
-| [`<mesh>` / `<path3d>` / `<pointCloud>`](./spatial.md#geometry-and-appearance) | Solid geometry, XYZ curves and point arrays in a native 3D viewport. |
-| [`<light>` / `<volume>`](./spatial.md#lights-and-volumes) | Editable 3D lighting and procedural density volumes. |
+| [`<rect>`](./rect.md) | A rectangle. Takes paints, strokes, shadows and effects. With `clipPath` it clips its parent instead of drawing. |
+| [`<ellipse>`](./ellipse.md) | An ellipse inscribed in its box. Takes what a rect takes. |
+| [`<polygon>`](./polygon.md) | A regular polygon (`pointCount` corners, a triangle by default) stretched to fill its box. Takes what a rect takes. |
+| [`<path>`](./path.md) | A vector outline from SVG path data (`d`), in its box's pixels or stretched from a `viewBox`; morphs between keyframes and trims. Takes what a rect takes. |
 | [`<text>`](./text.md) | Text; its children are the glyphs. Sizes itself to them unless given a box. |
 | [`<textRange>`](./text.md#textrange) | A style override over a run of the parent `<text>`'s glyphs, by character index. |
 | [`<video>`](./video.md) | A video clip: a rect whose intrinsic paint is the media `src` names. |
 | [`<image>`](./image.md) | A picture: a rect whose intrinsic paint is the media `src` names. |
 | [`<audio>`](./audio.md) | A clip with a sound and no picture; on the canvas, a waveform box. |
-| [`<captions>`](./captions.md) | A styled, timed transcript of the enclosing scene (or of a transcript file). |
+| [`<captions>`](./captions.md) | A styled, timed transcript, mounted from a transcript file or an asset that carries one. |
 | [`<adjustmentLayer>`](./adjustment-layer.md) | Draws nothing; its transform composes onto the clip directly below it, for as long as its own clip lasts. |
 | [`<preset>`](./preset.md) | Editable title, graphic or live scene filter from the Effects library. |
 | [`<highlight>`](./highlight.md) | Enlarges a live region of the composited layers below it, with background blur and dimming. |
@@ -39,7 +39,7 @@ Children of a node, stacked in document order over its intrinsic fill. See [pain
 | Element | What it is |
 | ------- | ---------- |
 | `<solidPaint>` | A solid color; what the `fill` prop is shorthand for. |
-| `<linearGradientPaint>` / `<radialGradientPaint>` | A gradient; takes `<colorStop>` children. |
+| `<linearGradientPaint>` / `<radialGradientPaint>` / `<angularGradientPaint>` | A gradient; takes `<colorStop>` children. |
 | `<colorStop>` | One gradient stop. Valid only inside a gradient paint. |
 | `<imagePaint>` / `<videoPaint>` | Media painted into another element's box — a rect or a text filled with a picture. |
 | [`<htmlPaint>`](./html.md) | The paint form of `<html>`. |
@@ -52,7 +52,7 @@ Sub-entity children of the node (or paint) that holds them. See [styles.md](./st
 
 | Element | What it is |
 | ------- | ---------- |
-| `<stroke>` | An outline of the parent's box or glyphs. Several stack. |
+| `<stroke>` | An outline of the parent's box or glyphs, in its `color` or its solid and gradient paint children. Several stack. |
 | `<shadow>` | A drop shadow beneath the parent's silhouette. Several stack. |
 | `<effect>` | A CSS-style filter over the parent's rendered pixels. Several stack. |
 | `<mask>` | A matte limiting the `<effect>` holding it: the alpha of a tracked frame sequence. Under an `opacity` effect, the cut-out. See [styles.md](./styles.md#mask). |
@@ -71,7 +71,7 @@ User-defined components are ordinary Solid components; they compose the elements
 | ------- | ----------- |
 | `<video>`, `<image>`, `<adjustmentLayer>` | 1920 × 1080 |
 | `<scene>` | required — the frame's own size |
-| `<rect>`, `<path>`, `<ellipse>`, `<html>`, `<surface>` | 100 × 100 |
+| `<rect>`, `<ellipse>`, `<polygon>`, `<path>`, `<html>`, `<surface>` | 100 × 100 |
 | `<audio>` | 500 × 150 (the waveform box on the canvas) |
 | `<rect clipPath>` | 500 × 500 |
 | `<text>` | fits its glyphs |
@@ -101,12 +101,13 @@ Every node accepts:
 | `rotation` | `number` | `0` | Rotation in degrees. |
 | `z` | `number` | `0` | Depth in pixels; positive moves toward the default scene camera. |
 | `rotationX`, `rotationY` | `number` | `0` | Tilt around the horizontal and vertical axes in degrees. |
+| `pivotX`, `pivotY` | `number` | box center; unsized group origin | Fixed transform pivot in local pixels. Takes precedence over `anchorX` and `anchorY`. A missing axis is 0. |
 | `anchorX`, `anchorY` | `number` | `0.5` | Transform pivot as fractions of the box; `0` is the start, `0.5` the center. |
 | `skewX`, `skewY` | `number` | `0` | Skew in degrees, persisted through manual and agent edits. |
 | `flipX`, `flipY` | `boolean` | `false` | Reflect along the respective axis. |
 | `backdropBlur` | `number` | `0` | Blur the composited content behind the layer, in pixels. |
 | `refraction` | `number` | `0` | Glass displacement strength, 0–1. |
-| `scale` | `number` | `1` | Uniform scale about the box origin. Overrides `scaleX`/`scaleY` while set. |
+| `scale` | `number` | `1` | Uniform scale about the pivot. Overrides `scaleX`/`scaleY` while set. |
 | `scaleX`, `scaleY` | `number` | `1` | Per-axis scale. |
 | `scaleZ` | `number` | `1` | Depth scale in a native 3D viewport. |
 | `renderOrder`, `depthTest` | `number`, `boolean` | `0`, `true` | Explicit 3D drawable order and depth testing; see [native 3D](./spatial.md). |

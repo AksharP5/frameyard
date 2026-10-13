@@ -19,7 +19,7 @@ import type { CodexRequest } from "./codex-contracts";
 import { agentChatEndpoint, cancelProjectAgents, configureAgentChat, deleteProjectChats, stopAgentChat } from "./agent-chat";
 import { cliStatus, installCli, uninstallCli } from "./cli-install";
 import { applyMcp, healMcpRegistrations, mcpStatus } from "./mcp-install";
-import { trackEvent, trackInstall } from "./analytics";
+import { configureAnalytics, countCanvasEdits, startAnalytics, track } from "./analytics";
 import { setupAppMenu } from "./menu";
 import { AppTray } from "./tray";
 import { transcribeLocal } from "./transcription";
@@ -439,6 +439,7 @@ if (app.requestSingleInstanceLock()) {
   const dapi = new DapiServer({
     version: app.getVersion(), logs: () => logBuffer, docsDir: docsDir(),
     runAgentTool: codex.runTool,
+    onToolCall: props => track("tool_called", props),
     window: { visible, show: showMainWindow, hide: hideWindows },
     renderer, workspaces, workspaceAction,
     getWindow: () => legacyAgentWindow && !legacyAgentWindow.isDestroyed() ? legacyAgentWindow
@@ -483,7 +484,7 @@ if (app.requestSingleInstanceLock()) {
       if (!event.sender.isDestroyed()) mainBridge.emit(BrowserWindow.fromWebContents(event.sender), MAIN_CHANNELS.MEDIA_PLAYBACK_PROGRESS, { ...input, progress });
     }),
   );
-  mainBridge.handle(MAIN_CHANNELS.ANALYTICS_TRACK, ({ event, data }) => trackEvent(event, data));
+  mainBridge.handle(MAIN_CHANNELS.ANALYTICS_CONFIGURE, (config) => configureAnalytics(config));
   mainBridge.handle(MAIN_CHANNELS.AUTH_GET_PENDING_CALLBACK, () =>
     takePendingDeepLink(MAIN_CHANNELS.AUTH_CALLBACK),
   );
@@ -559,7 +560,10 @@ if (app.requestSingleInstanceLock()) {
     await deleteProjectChats(id);
   });
   mainBridge.handle(MAIN_CHANNELS.PROJECTS_COMPILE, ({ dir }) => compileProject(dir));
-  mainBridge.handle(MAIN_CHANNELS.PROJECTS_WRITE, ({ dir, edits }) => writeProject(dir, edits));
+  mainBridge.handle(MAIN_CHANNELS.PROJECTS_WRITE, ({ dir, edits }) => {
+    countCanvasEdits(edits.map(edit => edit.kind));
+    return writeProject(dir, edits);
+  });
   mainBridge.handle(MAIN_CHANNELS.PROJECTS_WATCH, async ({ dir }, event) => {
     const window = BrowserWindow.fromWebContents(event.sender);
     if (!window) throw new Error("No editor window");
@@ -645,7 +649,7 @@ if (app.requestSingleInstanceLock()) {
       }),
     );
     healMcpRegistrations();
-    trackInstall();
+    startAnalytics(() => BrowserWindow.getAllWindows().length > 0);
     tray?.start();
     if (isHiddenLaunch(process.argv)) void app.dock?.hide();
     else void showMainWindow();

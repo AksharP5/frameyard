@@ -5,8 +5,8 @@ Segment an object in a video with SAM 2.1 and track it through the footage, writ
 | | |
 | --- | --- |
 | MCP tool | `media_segment` |
-| CLI | `dapi media segment <path> --time <time> [options]` |
-| CLI aliases | `dapi media mask` |
+| CLI | `dapi segment <path> --time <time> [options]` |
+| CLI aliases | `dapi mask` |
 
 ## Input
 
@@ -25,14 +25,14 @@ Segment an object in a video with SAM 2.1 and track it through the footage, writ
 
 ## Prompting
 
-A prompt needs at least one point on the object or a box around it; `exclude` points only take things away. Coordinates are fractions of the frame as it displays (rotation applied), the same space [`media_grab`](./grab.md) frames are drawn in. A box is usually the most reliable first prompt: draw it around the object as seen in a grabbed frame. When the mask spills onto something next to the object, add an `exclude` point on that thing; when it misses part of the object, add a point on the missing part.
+A prompt needs at least one point on the object or a box around it; `exclude` points only take things away. Coordinates are fractions of the frame as it displays (rotation applied), the same space [`grab`](./grab.md) frames are drawn in. A box is usually the most reliable first prompt: draw it around the object as seen in a grabbed frame. When the mask spills onto something next to the object, add an `exclude` point on that thing; when it misses part of the object, add a point on the missing part.
 
 The loop is preview, look, adjust:
 
 ```bash
-dapi media segment footage/skater.mp4 --time 2.4 --box 0.4,0.2,0.65,0.95 --preview
-dapi media segment footage/skater.mp4 --time 2.4 --box 0.4,0.2,0.65,0.95 --exclude 0.5,0.9 --preview
-dapi media segment footage/skater.mp4 --time 2.4 --box 0.4,0.2,0.65,0.95 --exclude 0.5,0.9 --start 2 --end 9 -o masks/skater.mask
+dapi segment footage/skater.mp4 --time 2.4 --box 0.4,0.2,0.65,0.95 --preview
+dapi segment footage/skater.mp4 --time 2.4 --box 0.4,0.2,0.65,0.95 --exclude 0.5,0.9 --preview
+dapi segment footage/skater.mp4 --time 2.4 --box 0.4,0.2,0.65,0.95 --exclude 0.5,0.9 --start 2 --end 9 -o masks/skater.mask
 ```
 
 The first preview of a frame encodes it, which takes a moment; further previews on the same frame, file and model run the mask decoder alone and return at once. A preview writes no mask, so it takes neither a span nor an `output`.
@@ -44,7 +44,7 @@ Without `preview`, the object is segmented on the prompted frame and followed fo
 **Into the project's library** (a project is open and `output` is a library path or left out), the track runs in the background. The call returns at once with the mask's `path` and `src`, the span it covers, and `state: "tracking"` — no picture and no findings yet. Poll [`context`](../context.md) until the track's row in `masks` (the one whose `src` matches) is `done`: that row carries the findings below and the contact sheet as `image`, and the mask file is in the library from then on. Name it in a `<mask>` once it is done. A `failed` row says why in `error`; closing the project stops its tracks.
 
 ```bash
-dapi media segment footage/skater.mp4 --time 2.4 --box 0.4,0.2,0.65,0.95 --start 2 --end 9 -o masks/skater.mask
+dapi segment footage/skater.mp4 --time 2.4 --box 0.4,0.2,0.65,0.95 --start 2 --end 9 -o masks/skater.mask
 dapi context
 ```
 
@@ -85,7 +85,7 @@ One JSON object:
 }
 ```
 
-`lost` covers occlusion and the object leaving the frame as well as a track that slipped; look at those moments with [`media_grab`](./grab.md) before trusting or re-prompting them. Over MCP the image also arrives inline when it is at most a megabyte.
+`lost` covers occlusion and the object leaving the frame as well as a track that slipped; look at those moments with [`grab`](./grab.md) before trusting or re-prompting them. Over MCP the image also arrives inline when it is at most a megabyte.
 
 ## Errors
 

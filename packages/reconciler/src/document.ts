@@ -1,11 +1,11 @@
 import { SPATIAL_PARAMETERS, SPATIAL_ARRAYS, MESH_SHAPES, LIGHT_TYPES, parseSpatialParameter, parseNumberArray, isNumericBuffer, parsePath3D, parsePhysicsWorld, parseRigidBody, type SpatialParameter, type NumericArray } from '@diffusionstudio/jsx';
-import { Scene3D, SpatialParameters, SpatialGeometry, SpatialMaterial, LightSource, GradientSpace, StrokeDash, PhysicsWorld, RigidBody } from '@diffusionstudio/runtime';
+import { Scene3D, SpatialParameters, SpatialGeometry, SpatialMaterial, LightSource, GradientSpace, PhysicsWorld, RigidBody } from '@diffusionstudio/runtime';
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
-import { DepthSort, LayerMaterial, SceneEffects, Anchor, Skew, Flip, SceneCamera, PathData, parsePathData, parsePathViewBox, Active, AdjustmentLayer, Animation, AnimationPhase, AnimationType, appendChild, AssetId, Audio, AudioStream, AudioProcessing, parseAudioProcessing, Background, bindAsset, BlendMode, BlendModeType, Blur, Caption, CaptionAlign, CAPTION_PRESET_FILLS, CAPTION_PRESET_STYLES, CaptionType, Chars, ClipHeight, ClipLink, Locked, Markers, ClipsContent, Computed, Constraint, ConstraintCache, ConstraintType, CornerRadius, ColorGrade, parseColorGrade, createEntity, DEFAULT_BACKGROUND, Color, ColorStop, Delay, Effect, EffectType, Expanded, FontStyle, FramePromises, FrameRate, ProjectFrameRate, Generating, GenerationRequest, getActiveEntity, Loop, LoadRequest, Mask, Geometry, GeometryType, isAncestorOf, getParentEntity, getParentNode, Hidden, Highlight, Preset, Host, IsClipPath, isText, ItemIndex, KeepAspectRatio, Keyframe, KeyframeTrack, MixedCornerRadius, Mode, Muted, Name, Offset, Opacity, Paint, PaintType, parseColor, PendingSource, PendingSync, Playback, PlaybackRate, Position, removeChild, RenderSurface, resizeEntity, Scale, ScaleMode, ScaleModeType, secondsToFrames, getAsset, getEntityChildren, Group, Sequential, Shader, Size, Stage, Root, Rotation, Scene, Selected, Shadow, Source, SourceFrameRate, setCameraMatrix, setPlayhead, setTimelineView, Stroke, StrokeCap, StrokeJoin, StrokeStyle, SyncRequest, TextAlign, TextBaseline, TextCase, TextRange, TextStyle, TranscriptionRequest, Transition, TransitionType, Trim, UniformScale, Volume, Workarea } from '@diffusionstudio/runtime';
+import { DepthSort, LayerMaterial, SceneEffects, Anchor, Skew, Flip, SceneCamera, PathData, parsePathData, parsePathViewBox, Active, AdjustmentLayer, Animation, AnimationPhase, AnimationType, appendChild, AssetId, Audio, AudioStream, AudioProcessing, parseAudioProcessing, Background, bindAsset, BlendMode, BlendModeType, Blur, Caption, CaptionAlign, CAPTION_PRESET_FILLS, CAPTION_PRESET_STYLES, CaptionType, Chars, ClipHeight, ClipLink, Locked, Markers, ClipsContent, Computed, Constraint, ConstraintCache, ConstraintType, CornerRadius, ColorGrade, parseColorGrade, createEntity, DEFAULT_BACKGROUND, Color, ColorStop, Delay, Effect, EffectType, Expanded, FontStyle, FramePromises, FrameRate, ProjectFrameRate, Generating, GenerationRequest, getActiveEntity, Loop, LoadRequest, Mask, Geometry, GeometryType, isAncestorOf, getParentEntity, getParentNode, Hidden, Highlight, Preset, Host, IsClipPath, isText, ItemIndex, KeepAspectRatio, Keyframe, KeyframeTrack, MixedCornerRadius, Mode, Muted, Name, Offset, Opacity, Paint, PaintType, parseColor, PendingSource, PendingSync, Playback, PlaybackRate, Position, removeChild, RenderSurface, resizeEntity, Scale, ScaleMode, ScaleModeType, secondsToFrames, getAsset, getEntityChildren, Group, Sequential, Shader, Size, Stage, Root, Rotation, Scene, Selected, Shadow, Source, SourceFrameRate, setCameraMatrix, setPlayhead, setTimelineView, Stroke, StrokeCap, StrokeJoin, StrokeStyle, SyncRequest, TextAlign, TextBaseline, TextCase, TextRange, TextStyle, TranscriptionRequest, Transition, TransitionType, Trim, UniformScale, Volume, Workarea, clampPointCount, EvenOdd, LINEAR_GRADIENT_DEFAULTS, LinearGradient, Pivot, parsePath, PathTrim, PointCount, ELLIPTICAL_GRADIENT_DEFAULTS, EllipticalGradient, StrokeDash, VectorPath, ViewBox } from '@diffusionstudio/runtime';
 import { DEFAULT_MASK_SMOOTHING } from '@diffusionstudio/assets';
 import { ANIMATABLE_PROPERTIES, HIGHLIGHT_DEFAULTS, LOOP_ATTR, parseHighlightOptions, parsePresetOptions, parseTime, SOURCE_ATTR } from '@diffusionstudio/jsx';
 import { createSignal } from 'solid-js';
@@ -108,6 +108,7 @@ const PAINT_TYPES: Record<string, PaintType> = {
 	solidPaint: PaintType.SOLID,
 	linearGradientPaint: PaintType.LINEAR_GRADIENT,
 	radialGradientPaint: PaintType.RADIAL_GRADIENT,
+	angularGradientPaint: PaintType.ANGULAR_GRADIENT,
 	shaderPaint: PaintType.SHADER,
 	surfacePaint: PaintType.SURFACE,
 	htmlPaint: PaintType.HTML,
@@ -177,9 +178,9 @@ const TRACK_PROPERTIES: Readonly<Record<string, PropertyPath>> = ANIMATABLE_PROP
  */
 export function trackPropertyPath(holder: Entity | null, property: string): PropertyPath | undefined {
 	const path = TRACK_PROPERTIES[property];
-  if (path === 'path.d' && !holder) return undefined;
+  if (path === 'path' && !holder) return undefined;
 	if (path === 'width' && holder?.has(Stroke)) return 'stroke.width';
-	if (path === 'path.d' && holder?.get(Geometry)?.value === GeometryType.PATH_3D) return 'spatial.path3d';
+	if (path === 'path' && holder?.get(Geometry)?.value === GeometryType.PATH_3D) return 'spatial.path3d';
 	return path;
 }
 
@@ -202,6 +203,7 @@ const TRACK_PROPERTY_NAMES = {
 export function trackProperty(path: string): AnimatableProperty | undefined {
 	return TRACK_PROPERTY_NAMES[path as PropertyPath];
 }
+
 
 /** The `<rect>` props of the per-corner radii, in the trait's (CSS) order. */
 const CORNER_PROPS = ['cornerRadiusTopLeft', 'cornerRadiusTopRight', 'cornerRadiusBottomRight', 'cornerRadiusBottomLeft'] as const;
@@ -528,13 +530,30 @@ export class RuntimeDocument implements ProjectDocument<SceneNode> {
 				resizeEntity(this.world, entity, { width: 1920, height: 1080 });
 				break;
 			}
-			case 'rect':
+			case 'rect': {
+				entity = createEntity(this.world);
+				entity.add(Geometry);
+				entity.set(Geometry, { value: GeometryType.RECT });
+				entity.add(Position);
+				entity.set(Position, { x: 0, y: 0 });
+				resizeEntity(this.world, entity, { width: 100, height: 100 });
+				break;
+			}
 			case 'ellipse':
+			case 'polygon': {
+				entity = createEntity(this.world);
+				entity.add(Geometry);
+				entity.set(Geometry, { value: name === 'ellipse' ? GeometryType.ELLIPSE : GeometryType.POLYGON });
+				entity.add(Position);
+				entity.set(Position, { x: 0, y: 0 });
+				resizeEntity(this.world, entity, { width: 100, height: 100 });
+				break;
+			}
 			case 'path': {
 				entity = createEntity(this.world);
 				entity.add(Geometry);
-				entity.set(Geometry, { value: name === 'path' ? GeometryType.PATH : name === 'ellipse' ? GeometryType.ELLIPSE : GeometryType.RECT });
-				if (name === 'path') entity.add(PathData);
+				entity.set(Geometry, { value: GeometryType.PATH });
+				entity.add(PathData);
 				entity.add(Position);
 				entity.set(Position, { x: 0, y: 0 });
 				resizeEntity(this.world, entity, { width: 100, height: 100 });
@@ -595,6 +614,7 @@ export class RuntimeDocument implements ProjectDocument<SceneNode> {
 			case 'solidPaint':
 			case 'linearGradientPaint':
 			case 'radialGradientPaint':
+			case 'angularGradientPaint':
 			case 'shaderPaint':
 			case 'surfacePaint':
 			case 'htmlPaint':
@@ -667,7 +687,6 @@ export class RuntimeDocument implements ProjectDocument<SceneNode> {
 				entity.add(Stroke);
 				entity.add(Paint);
 				entity.set(Paint, { value: PaintType.SOLID });
-				entity.add(Color);
 				entity.add(StrokeStyle);
 				break;
 			}
@@ -799,7 +818,7 @@ export class RuntimeDocument implements ProjectDocument<SceneNode> {
 		}
 		if (entity.has(Keyframe) && name === 'value') {
 			const property = getParentEntity(entity)?.get(KeyframeTrack)?.property;
-			if (property === 'path.d') value = parsePathData(value);
+			if (property === 'path' || property === 'path.d') value = parsePathData(value);
 			else if (property === 'spatial.path3d') value = parsePath3D(value);
 			else if (SPATIAL_ARRAYS.some(key => property === `spatial.${key}`)) value = parseNumberArray(value, property!, property!.endsWith('Colors') ? 4 : 3);
             else if (property?.startsWith('spatial.') && Object.hasOwn(SPATIAL_PARAMETERS, property.slice(8))) value = parseSpatialParameter(property.slice(8) as SpatialParameter, value);
@@ -807,12 +826,12 @@ export class RuntimeDocument implements ProjectDocument<SceneNode> {
 		}
 		if (entity.has(PathData)) {
 			if (name === 'd') value = (entity.get(Geometry)?.value === GeometryType.PATH_3D ? parsePath3D : parsePathData)(value === false || value == null ? '' : value);
-			if (name === 'viewBox') value = parsePathViewBox(value === false ? undefined : value);
+			if (name === 'viewBox' && typeof value !== 'string') value = parsePathViewBox(value === false ? undefined : value);
 			if (name === 'fillRule' && value != null && value !== false && value !== 'nonzero' && value !== 'evenodd') throw new Error('Path fillRule must be nonzero or evenodd');
 		}
 
         if (node.native && Object.hasOwn(SPATIAL_PARAMETERS, name)) value = parseSpatialParameter(name as SpatialParameter, value);
-        if (node.native && ['points','pointColors','vertices','vertexColors','indices','normals','uv','dash'].includes(name)) {
+        if (node.native && (['points','pointColors','vertices','vertexColors','indices','normals','uv'].includes(name) || name === 'dash' && (Array.isArray(value) || isNumericBuffer(value)))) {
             value = parseNumberArray(value, name, ['points','vertices','normals'].includes(name) ? 3 : ['pointColors','vertexColors'].includes(name) ? 4 : name === 'uv' ? 2 : 1);
             if ((name === 'indices' || name === 'dash') && (value as NumericArray).some(n => n < 0 || name === 'indices' && !Number.isInteger(n))) throw new Error(`${name} contains invalid values`);
             if (name === 'dash' && isNumericBuffer(value)) value = Array.from(value);
@@ -832,7 +851,7 @@ export class RuntimeDocument implements ProjectDocument<SceneNode> {
 			else node.props[name] = value;
 		}
 
-        if (node.native && Object.hasOwn(SPATIAL_PARAMETERS, name)) {
+        if (node.native && Object.hasOwn(SPATIAL_PARAMETERS, name) && !['x1', 'y1', 'x2', 'y2', 'dashOffset'].includes(name)) {
             entity.add(SpatialParameters); entity.set(SpatialParameters, { [name]: value }); return;
         }
         if (node.native && ['points','pointColors','vertices','vertexColors','indices','normals','uv'].includes(name)) {
@@ -846,7 +865,7 @@ export class RuntimeDocument implements ProjectDocument<SceneNode> {
             entity.set(SpatialMaterial, { [name]: value == null ? fallback : value }); return;
         }
         if (node.native && name === 'gradientSpace') { entity.add(GradientSpace); entity.set(GradientSpace, { value: value === 'screen' ? 'screen' : 'local' }); return; }
-        if (node.native && name === 'dash') { entity.add(StrokeDash); entity.set(StrokeDash, { value: value as number[] }); return; }
+        if (node.native && name === 'dash' && Array.isArray(value)) { entity.add(StrokeDash); entity.set(StrokeDash, { value: value as number[], offset: toNumber(node.props.dashOffset) ?? 0 }); return; }
         if (node.native && name === 'physics') { if (!physics) entity.remove(PhysicsWorld); else { entity.add(PhysicsWorld); entity.set(PhysicsWorld, { settings: physics }); } return; }
         if (node.native && name === 'rigidBody') { if (!body) entity.remove(RigidBody); else { entity.add(RigidBody); entity.set(RigidBody, { settings: body }); } return; }
         if (entity.get(Geometry)?.value === GeometryType.PATH_3D && name === 'd') { entity.set(SpatialGeometry, { path: value as string }); return; }
@@ -976,20 +995,6 @@ export class RuntimeDocument implements ProjectDocument<SceneNode> {
 				entity.set(Offset, { [name === 'offsetX' ? 'x' : 'y']: toNumber(value) ?? 0 });
 				return;
 			}
-			case 'd': {
-				if (!entity.has(PathData)) return;
-				entity.set(PathData, { value: typeof value === 'string' ? value : '' });
-				return;
-			}
-			case 'fillRule': {
-				if (entity.has(PathData)) entity.set(PathData, { fillRule: value === 'evenodd' ? 'evenodd' : 'nonzero' });
-				return;
-			}
-			case 'viewBox': {
-				if (!entity.has(PathData)) return;
-				entity.set(PathData, { viewBox: parsePathViewBox(value) });
-				return;
-			}
 			case 'anchorX':
 			case 'anchorY': {
 				entity.add(Anchor);
@@ -1082,6 +1087,25 @@ export class RuntimeDocument implements ProjectDocument<SceneNode> {
 				entity.set(Scale, { [name === 'scaleX' ? 'x' : 'y']: toNumber(value) ?? 1 });
 				return;
 			}
+			case 'pivotX':
+			case 'pivotY': {
+				const { entity, props } = node;
+				if (entity.has(Sequential)) return;
+
+				// One trait for both axes: absent, the node turns about its
+				// anchor (a group about its origin), so an axis left out of a
+				// pivot that has the other is 0, like an unset x.
+				const x = toNumber(props.pivotX);
+				const y = toNumber(props.pivotY);
+				if (x === undefined && y === undefined) {
+					entity.remove(Pivot);
+					return;
+				}
+
+				entity.add(Pivot);
+				entity.set(Pivot, { x: x ?? 0, y: y ?? 0 });
+				return;
+			}
 			case 'constrainX':
 			case 'constrainY': {
 				const { entity, props } = node;
@@ -1121,6 +1145,71 @@ export class RuntimeDocument implements ProjectDocument<SceneNode> {
 			case 'cornerRadiusBottomRight':
 			case 'cornerRadiusBottomLeft': {
 				this.syncCornerRadii(node);
+				return;
+			}
+			case 'pointCount': {
+				if (entity.get(Geometry)?.value !== GeometryType.POLYGON) return;
+				const count = toNumber(value);
+				if (count === undefined) {
+					entity.remove(PointCount);
+				} else {
+					entity.add(PointCount);
+					entity.set(PointCount, { value: clampPointCount(count) });
+				}
+				return;
+			}
+			case 'd': {
+				if (typeof value !== 'string') {
+					entity.remove(VectorPath);
+					if (entity.has(PathData)) entity.set(PathData, { value: "" });
+					return;
+				}
+
+				const { geometry, error } = parsePath(value);
+
+				if (error !== null) {
+					console.warn(`[path] ${error} in d="${value}"`);
+				}
+
+				entity.add(VectorPath);
+				entity.set(VectorPath, { geometry });
+				if (entity.has(PathData)) entity.set(PathData, { value });
+				return;
+			}
+			case 'viewBox': {
+				const numbers = typeof value === 'string' ? value.trim().split(/[\s,]+/).map(Number) : Array.isArray(value) ? value : [];
+				const [x, y, width, height] = numbers;
+				if (numbers.length !== 4 || numbers.some((n) => !Number.isFinite(n)) || width! <= 0 || height! <= 0) {
+					entity.remove(ViewBox);
+					if (entity.has(PathData)) entity.set(PathData, { viewBox: undefined });
+					return;
+				}
+				entity.add(ViewBox);
+				entity.set(ViewBox, { x: x!, y: y!, width: width!, height: height! });
+				if (entity.has(PathData)) entity.set(PathData, { viewBox: [x!, y!, width!, height!] });
+				return;
+			}
+			case 'fillRule': {
+				if (entity.has(PathData)) entity.set(PathData, { fillRule: value === 'evenodd' ? 'evenodd' : 'nonzero' });
+				if (value === 'evenodd') {
+					entity.add(EvenOdd);
+				} else {
+					entity.remove(EvenOdd);
+				}
+				return;
+			}
+			case 'trimStart':
+			case 'trimEnd':
+			case 'trimOffset': {
+				const start = toNumber(node.props.trimStart);
+				const end = toNumber(node.props.trimEnd);
+				const offset = toNumber(node.props.trimOffset);
+				if (start === undefined && end === undefined && offset === undefined) {
+					entity.remove(PathTrim);
+					return;
+				}
+				entity.add(PathTrim);
+				entity.set(PathTrim, { start: start ?? 0, end: end ?? 1, offset: offset ?? 0 });
 				return;
 			}
 			case 'blendMode': {
@@ -1259,6 +1348,28 @@ export class RuntimeDocument implements ProjectDocument<SceneNode> {
 			case 'miterLimit': {
 				if (!entity.has(Stroke)) return;
 				entity.set(StrokeStyle, { miterLimit: toNumber(value) ?? 10 });
+				return;
+			}
+			case 'dash':
+			case 'dashGap':
+			case 'dashOffset': {
+				if (!entity.has(Stroke)) return;
+				const dash = toNumber(node.props.dash);
+				const gap = toNumber(node.props.dashGap);
+				const offset = toNumber(node.props.dashOffset);
+				if (!Array.isArray(node.props.dash) && dash === undefined && gap === undefined && offset === undefined) {
+					entity.remove(StrokeDash);
+					return;
+				}
+				// An unset gap is the dash length as written; a `dash` track
+				// leaves it there.
+				entity.add(StrokeDash);
+				entity.set(StrokeDash, {
+					value: Array.isArray(node.props.dash) ? [...node.props.dash] : undefined,
+					dash: Math.max(0, dash ?? 0),
+					gap: Math.max(0, gap ?? dash ?? 0),
+					offset: offset ?? 0,
+				});
 				return;
 			}
 			case 'type': {
@@ -1499,6 +1610,25 @@ export class RuntimeDocument implements ProjectDocument<SceneNode> {
 				if (entity.has(ColorStop)) {
 					entity.set(ColorStop, { offset: toNumber(value) ?? 0 });
 				}
+				return;
+			}
+			case 'x1':
+			case 'y1':
+			case 'x2':
+			case 'y2': {
+				if (entity.get(Paint)?.value !== PaintType.LINEAR_GRADIENT) return;
+				entity.add(LinearGradient);
+				entity.set(LinearGradient, { [name]: toNumber(value) ?? LINEAR_GRADIENT_DEFAULTS[name as keyof typeof LINEAR_GRADIENT_DEFAULTS] });
+				return;
+			}
+			case 'cx':
+			case 'cy':
+			case 'rx':
+			case 'ry': {
+				const paint = entity.get(Paint)?.value;
+				if (paint !== PaintType.RADIAL_GRADIENT && paint !== PaintType.ANGULAR_GRADIENT) return;
+				entity.add(EllipticalGradient);
+				entity.set(EllipticalGradient, { [name]: toNumber(value) ?? ELLIPTICAL_GRADIENT_DEFAULTS[name as keyof typeof ELLIPTICAL_GRADIENT_DEFAULTS] });
 				return;
 			}
 			case 'fontSize': {
@@ -1744,6 +1874,10 @@ export class RuntimeDocument implements ProjectDocument<SceneNode> {
 		const value = node.props.value;
 		const property = getParentEntity(node.entity)?.get(KeyframeTrack)?.property;
 		if (property) validateMotionValue(trackProperty(property) ?? '', value);
+		if (property === 'path') {
+			node.entity.set(Keyframe, { value: 0, path: typeof value === 'string' ? parsePath(value).geometry : null, stringValue: typeof value === 'string' ? value : undefined, arrayValue: undefined });
+			return;
+		}
 		if (property === 'path.d' || property === 'spatial.path3d') {
 			node.entity.set(Keyframe, { value: 0, arrayValue: undefined, stringValue: (property === 'path.d' ? parsePathData : parsePath3D)(value ?? '') });
 			return;

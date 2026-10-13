@@ -70,10 +70,9 @@ export function PartialAssetItem(props: PartialAssetItemProps) {
             as="div"
             data-selected={props.selected}
             class="relative aspect-video w-full overflow-clip rounded bg-muted after:pointer-events-none after:absolute after:inset-0 after:rounded after:opacity-0 after:ring-2 after:ring-inset after:ring-ring after:z-10 data-[selected=true]:after:opacity-100"
-            classList={{ "animate-pulse": !failed() }}
           >
             <div class="absolute inset-0 flex items-center justify-center text-muted-foreground">
-              <Show when={failed()} fallback={<Icon name="spinner-loader" class="size-6 animate-spin" />}>
+              <Show when={failed()} fallback={<Icon name="spinner-loader" class="size-6" />}>
                 <Icon name="alert-warning" class="size-6 text-destructive" />
               </Show>
             </div>

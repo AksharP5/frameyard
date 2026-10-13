@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import { For, Show } from "solid-js";
+import { createMemo, For, Show } from "solid-js";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Icon } from "@/components/ui/icon";
@@ -10,7 +10,8 @@ import { ItemRow } from "@/components/ui/item-row";
 import { PanelSection } from "@/components/ui/panel-section";
 import { toast } from "somoto";
 import { useWorld } from "@diffusionstudio/koota-solid";
-import { Tool, ToolType } from "@diffusionstudio/runtime";
+import { findGeometryAsset, Tool, ToolType } from "@diffusionstudio/runtime";
+import { useDerived } from "@/engine/hooks";
 import { removeObjectMask, useObjectMasks } from "@/engine/object-mask";
 
 import type { Entity } from "koota";
@@ -31,7 +32,12 @@ export function TrackingSettings(props: TrackingSettingsProps) {
   const world = useWorld();
   const entity = () => props.selection[0]!;
 
-  const { footage, masks: tracks } = useObjectMasks(entity);
+  const groups = useObjectMasks(entity);
+  const footage = useDerived(() => {
+    const asset = findGeometryAsset(world, entity());
+    return asset?.type === "VIDEO" ? asset : null;
+  });
+  const tracks = createMemo(() => groups().flatMap(group => group.masks).filter(track => track.asset.recipe?.source === footage()?.id));
 
   const handleRemove = async (track: ObjectMaskSource) => {
     try {

@@ -5,7 +5,7 @@
 
 import { existsSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
-import { Command, Option } from "commander";
+import { Argument, Command, Option } from "commander";
 import { z } from "zod";
 import { version } from "../../../package.json";
 import { toolByName } from "@diffusionstudio/dapi";
@@ -72,6 +72,24 @@ function assetPath(ref: string): string {
   if (existsSync(abs)) return abs;
   if (isAbsolute(ref)) fail(`File not found: ${abs}`);
   return ref;
+}
+
+/** Parsed JSON, or a failure naming what was being read. */
+function json(value: string, what: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch (e) {
+    fail(`${what} is not valid JSON: ${(e as Error).message}`);
+  }
+}
+
+/** Every `{ "path": … }` file reference in a request, resolved as `assetPath` does; the rest untouched. */
+function resolveFileRefs(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(resolveFileRefs);
+  if (typeof value !== "object" || value === null) return value;
+  const entries = Object.entries(value);
+  if (entries.length === 1 && entries[0]![0] === "path" && typeof entries[0]![1] === "string") return { path: assetPath(entries[0]![1]) };
+  return Object.fromEntries(entries.map(([key, item]) => [key, resolveFileRefs(item)]));
 }
 
 /** `x,y` as a point, added to the ones given before; a malformed one becomes NaN for the schema to reject. */
@@ -264,81 +282,76 @@ program
     if (output.issues.some((issue) => issue.severity === "error")) process.exitCode = 1;
   });
 
-const media = program
-  .command("media")
-  .alias("m")
-  .description(
-    "Inspect a media file by path, without adding it to the project: probe metadata, transcribe speech, grab frames, render visual previews, and analyze with multimodal models. Local files work with or without an open project; library paths need one.",
-  );
+const media = program;
 
 media
   .command("probe")
-  .description(describe("media_probe"))
-  .argument("<path>", field("media_probe", "path"))
-  .action((ref: string) => run("media_probe", { path: assetPath(ref) }));
+  .description(describe("probe"))
+  .argument("<path>", field("probe", "path"))
+  .action((ref: string) => run("probe", { path: assetPath(ref) }));
 
 media
   .command("transcribe")
-  .description(describe("media_transcribe"))
-  .argument("<path>", field("media_transcribe", "path"))
-  .option("-o, --output <path>", field("media_transcribe", "output"))
-  .action((ref: string, opts: Omit<ToolInput<"media_transcribe">, "path">) =>
-    run("media_transcribe", { path: assetPath(ref), ...opts, output: opts.output && resolve(opts.output) }),
+  .description(describe("transcribe"))
+  .argument("<path>", field("transcribe", "path"))
+  .option("-o, --output <path>", field("transcribe", "output"))
+  .action((ref: string, opts: Omit<ToolInput<"transcribe">, "path">) =>
+    run("transcribe", { path: assetPath(ref), ...opts, output: opts.output && resolve(opts.output) }),
   );
 
 media
   .command("grab")
   .alias("sample")
-  .description(describe("media_grab"))
-  .argument("<path>", field("media_grab", "path"))
-  .option("-t, --times <time...>", field("media_grab", "times"))
-  .option("-c, --count <n>", field("media_grab", "count"), numeric)
-  .option("-a, --auto", field("media_grab", "auto"))
-  .option("-s, --start <time>", field("media_grab", "start"))
-  .option("-e, --end <time>", field("media_grab", "end"))
-  .option("-q, --quality <preset>", field("media_grab", "quality"))
-  .option("-S, --separate", field("media_grab", "separate"))
-  .option("--per-sheet <n>", field("media_grab", "perSheet"), numeric)
-  .option("--uncapped", field("media_grab", "uncapped"))
-  .option("-o, --output <dir>", field("media_grab", "output"))
-  .action((ref: string, opts: Omit<ToolInput<"media_grab">, "path">) =>
-    run("media_grab", { path: assetPath(ref), ...opts, output: opts.output && resolve(opts.output) }),
+  .description(describe("grab"))
+  .argument("<path>", field("grab", "path"))
+  .option("-t, --times <time...>", field("grab", "times"))
+  .option("-c, --count <n>", field("grab", "count"), numeric)
+  .option("-a, --auto", field("grab", "auto"))
+  .option("-s, --start <time>", field("grab", "start"))
+  .option("-e, --end <time>", field("grab", "end"))
+  .option("-q, --quality <preset>", field("grab", "quality"))
+  .option("-S, --separate", field("grab", "separate"))
+  .option("--per-sheet <n>", field("grab", "perSheet"), numeric)
+  .option("--uncapped", field("grab", "uncapped"))
+  .option("-o, --output <dir>", field("grab", "output"))
+  .action((ref: string, opts: Omit<ToolInput<"grab">, "path">) =>
+    run("grab", { path: assetPath(ref), ...opts, output: opts.output && resolve(opts.output) }),
   );
 
 media
   .command("filmstrip")
   .alias("film")
-  .description(describe("media_filmstrip"))
-  .argument("<path>", field("media_filmstrip", "path"))
-  .option("-s, --start <time>", field("media_filmstrip", "start"))
-  .option("-e, --end <time>", field("media_filmstrip", "end"))
-  .option("-x, --scale <factor>", field("media_filmstrip", "scale"), numeric)
-  .option("-o, --output <path>", field("media_filmstrip", "output"))
-  .action((ref: string, opts: Omit<ToolInput<"media_filmstrip">, "path">) =>
-    run("media_filmstrip", { path: assetPath(ref), ...opts, output: opts.output && resolve(opts.output) }),
+  .description(describe("filmstrip"))
+  .argument("<path>", field("filmstrip", "path"))
+  .option("-s, --start <time>", field("filmstrip", "start"))
+  .option("-e, --end <time>", field("filmstrip", "end"))
+  .option("-x, --scale <factor>", field("filmstrip", "scale"), numeric)
+  .option("-o, --output <path>", field("filmstrip", "output"))
+  .action((ref: string, opts: Omit<ToolInput<"filmstrip">, "path">) =>
+    run("filmstrip", { path: assetPath(ref), ...opts, output: opts.output && resolve(opts.output) }),
   );
 
 media
   .command("waveform")
   .alias("wave")
-  .description(describe("media_waveform"))
-  .argument("<path>", field("media_waveform", "path"))
-  .option("-s, --start <time>", field("media_waveform", "start"))
-  .option("-e, --end <time>", field("media_waveform", "end"))
-  .option("-x, --scale <factor>", field("media_waveform", "scale"), numeric)
-  .option("-o, --output <path>", field("media_waveform", "output"))
-  .action((ref: string, opts: Omit<ToolInput<"media_waveform">, "path">) =>
-    run("media_waveform", { path: assetPath(ref), ...opts, output: opts.output && resolve(opts.output) }),
+  .description(describe("waveform"))
+  .argument("<path>", field("waveform", "path"))
+  .option("-s, --start <time>", field("waveform", "start"))
+  .option("-e, --end <time>", field("waveform", "end"))
+  .option("-x, --scale <factor>", field("waveform", "scale"), numeric)
+  .option("-o, --output <path>", field("waveform", "output"))
+  .action((ref: string, opts: Omit<ToolInput<"waveform">, "path">) =>
+    run("waveform", { path: assetPath(ref), ...opts, output: opts.output && resolve(opts.output) }),
   );
 
 media
   .command("listen")
-  .description(describe("media_listen"))
-  .argument("<path>", field("media_listen", "path"))
-  .option("-p, --prompt <str>", field("media_listen", "prompt"))
-  .option("-s, --start <time>", field("media_listen", "start"))
-  .option("-e, --end <time>", field("media_listen", "end"))
-  .action((ref: string, opts: Omit<ToolInput<"media_listen">, "path">) => run("media_listen", { path: assetPath(ref), ...opts }));
+  .description(describe("listen"))
+  .argument("<path>", field("listen", "path"))
+  .option("-p, --prompt <str>", field("listen", "prompt"))
+  .option("-s, --start <time>", field("listen", "start"))
+  .option("-e, --end <time>", field("listen", "end"))
+  .action((ref: string, opts: Omit<ToolInput<"listen">, "path">) => run("listen", { path: assetPath(ref), ...opts }));
 
 media
   .command("segment")
@@ -360,6 +373,47 @@ media
   .action((ref: string, opts: Omit<ToolInput<"media_segment">, "path"> & { point?: ToolInput<"media_segment">["points"] }) => {
     const { point: points, ...rest } = opts;
     return run("media_segment", { path: assetPath(ref), ...rest, points, output: opts.output && maskOutput(opts.output) });
+  });
+
+program
+  .command("generate")
+  .alias("gen")
+  .description(describe("generate"))
+  .addArgument(new Argument("<model>", field("generate", "model")).choices(toolByName("generate").input.shape.model.options))
+  .argument(
+    "[fields]",
+    `the model's other fields as one JSON object, e.g. '{"aspectRatio":"16:9","images":[{"path":"./ref.png"}]}'; a { "path" } that exists relative to the working directory is sent as its absolute path; an "audio" field also takes { "scene": "<id>" }, the scene's mix`,
+  )
+  .option("-p, --prompt <text>", "the request's `prompt`, without JSON quoting; wins over one in the fields")
+  .option(
+    "-o, --output <path>",
+    `${field("generate", "output")}; a path starting with . resolves against the working directory`,
+  )
+  .option("--max-credits <n>", field("generate", "maxCredits"), numeric)
+  .option("--estimate", field("generate", "estimate"))
+  .action((model: ToolInput<"generate">["model"], fields: string | undefined, opts: { prompt?: string; output?: string; maxCredits?: number; estimate?: boolean }) => {
+    const parsed = fields === undefined ? {} : json(fields, "fields");
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) fail("fields must be a JSON object.");
+    const request = resolveFileRefs(parsed) as Record<string, unknown>;
+    return run("generate", {
+      ...request,
+      model,
+      ...(opts.prompt === undefined ? {} : { prompt: opts.prompt }),
+      output: opts.output && maskOutput(opts.output),
+      maxCredits: opts.maxCredits,
+      estimate: opts.estimate,
+    });
+  });
+
+program
+  .command("job")
+  .description(`${describe("job")} Exits 1 when the job failed or was canceled.`)
+  .argument("<id>", field("job", "id"))
+  .option("--cancel", field("job", "cancel"))
+  .action(async (id: string, opts: { cancel?: boolean }) => {
+    const output = await call("job", { id, cancel: opts.cancel }).catch(appError);
+    console.log(JSON.stringify(output));
+    if (output.status === "failed" || output.status === "canceled") process.exitCode = 1;
   });
 
 program
@@ -426,7 +480,10 @@ program
 // Explicit argv convention: the packaged wrapper runs this bundle on
 // Electron in ELECTRON_RUN_AS_NODE mode, where commander would otherwise
 // detect Electron and drop the script path from argv.
-program.parseAsync(process.argv, { from: "node" }).catch((error: unknown) => {
+const commandIndex = process.argv[2] === "--project" ? 4 : process.argv[2]?.startsWith("--project=") ? 3 : 2;
+const argv = ["media", "m"].includes(process.argv[commandIndex] ?? "") ? process.argv.toSpliced(commandIndex, 1) : process.argv;
+
+program.parseAsync(argv, { from: "node" }).catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
 });

@@ -33,8 +33,9 @@ Additional [native 3D](./spatial.md) and paint tracks:
 | Light | `intensity`, `distance`, `decay`, `coneAngle`, `penumbra`, `targetX`, `targetY`, `targetZ` |
 | Volume | `density`, `noiseScale`, `flowSpeed`, `scatter` |
 | Linear gradient | `x1`, `y1`, `x2`, `y2` |
-| Radial gradient | `centerX`, `centerY`, `radiusX`, `radiusY`, `focalX`, `focalY` |
-| Stroke pattern | `dashOffset` |
+| Radial/angular gradient | `cx`, `cy`, `rx`, `ry`, plus legacy `centerX`, `centerY`, `radiusX`, `radiusY`, `focalX`, `focalY` |
+| Stroke pattern | `dash`, `dashGap`, `dashOffset` |
+| Vector path trim | `trimStart`, `trimEnd`, `trimOffset` |
 
 ## Semantics
 

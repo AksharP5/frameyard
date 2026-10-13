@@ -13,14 +13,14 @@ The JSX code syntax specified in [jsx/](../jsx/README.md) is **pseudo-SVG**, mir
 
 A tool is named as MCP lists it, and the CLI spelling follows from the name:
 
-- `_` in a tool name is a space on the command line: `media_grab` is `dapi media grab`. The `media` group is also `m`.
+- Media commands are top-level: `grab` is `dapi grab`. Existing `dapi media grab` and `dapi m grab` invocations and `media_grab` MCP names remain compatibility aliases.
 - A tool's first field is the positional argument: `capture`'s `id` is `dapi capture <id>`.
 - Every other field is an option in kebab-case: `perSheet` is `--per-sheet`, `separate` is `--separate`. Short forms are listed on each page.
 - Times are written the same way everywhere: seconds (`1.5`), frames at the project's rate (`45f`), or a clock string (`1:30`, `00:01:30`). Times in **results** are plain seconds.
 
 ## Results
 
-Every tool returns one JSON object, its *structured content*. Over MCP that is the result's `structuredContent`, repeated as a text block for clients that ignore structured content; the CLI prints it to stdout, unchanged. Tools that render images (`capture`, `media_grab`, `media_filmstrip`, `media_waveform`, `media_segment`, `screenshot`) write PNGs to disk and return their paths; over MCP a result of at most four images, none over a megabyte, also carries them inline as image content, so a contact sheet arrives in context without opening anything.
+Every tool returns one JSON object, its *structured content*. Over MCP that is the result's `structuredContent`, repeated as a text block for clients that ignore structured content; the CLI prints it to stdout, unchanged. Tools that render images (`capture`, `grab`, `filmstrip`, `waveform`, `media_segment`, `screenshot`) write PNGs to disk and return their paths; over MCP a result of at most four images, none over a megabyte, also carries them inline as image content, so a contact sheet arrives in context without opening anything.
 
 ## Errors
 
@@ -30,7 +30,7 @@ Every tool runs inside the app, so the app has to be running. Over MCP that is a
 
 Frameyard's default local mode has no Diffusion Studio account or hosted generation
 service. `models` and `voices` return empty lists, `whoami` returns `null`, and
-`media_listen` is unavailable. Local transcription, media inspection, capture,
+`listen` is unavailable. Local transcription, media inspection, capture,
 editing, and export still work. See [local setup](../../linux.md).
 
 ## The tools
@@ -43,13 +43,15 @@ editing, and export still work. See [local setup](../../linux.md).
 | [`capture`](./capture.md) | `dapi capture` | Capture frames |
 | [`check`](./check.md) | `dapi check` | Check structure |
 | [`export`](./export.md) | `dapi export` | Export scene |
-| [`media_probe`](./media/probe.md) | `dapi media probe` | Probe media |
-| [`media_grab`](./media/grab.md) | `dapi media grab` | Grab frames |
-| [`media_transcribe`](./media/transcribe.md) | `dapi media transcribe` | Transcribe speech |
-| [`media_filmstrip`](./media/filmstrip.md) | `dapi media filmstrip` | Filmstrip preview |
-| [`media_waveform`](./media/waveform.md) | `dapi media waveform` | Waveform preview |
-| [`media_listen`](./media/listen.md) | `dapi media listen` | Hosted audio analysis; unavailable in local mode |
-| [`media_segment`](./media/segment.md) | `dapi media segment` | Segment and track an object locally |
+| [`probe`](./probe.md) | `dapi probe` | Probe media |
+| [`grab`](./grab.md) | `dapi grab` | Grab frames |
+| [`transcribe`](./transcribe.md) | `dapi transcribe` | Transcribe speech |
+| [`filmstrip`](./filmstrip.md) | `dapi filmstrip` | Filmstrip preview |
+| [`waveform`](./waveform.md) | `dapi waveform` | Waveform preview |
+| [`listen`](./listen.md) | `dapi listen` | Hosted audio analysis; unavailable in local mode |
+| [`media_segment`](./media/segment.md) | `dapi segment` | Segment and track an object locally |
+| [`generate`](./generate.md) | `dapi generate` | Start hosted generation or local SAM tracking |
+| [`job`](./job.md) | `dapi job` | Poll or cancel a generation job |
 | [`agent_tool`](../../skills/editor.md) | `dapi tool` | Use native editor tools |
 | [`models`](./models.md) | `dapi models` | Hosted generation models; empty in local mode |
 | [`voices`](./voices.md) | `dapi voices` | Hosted speech voices; empty in local mode |
@@ -63,8 +65,9 @@ editing, and export still work. See [local setup](../../linux.md).
 How the surface is divided:
 
 - **The project loop.** [`open`](./open.md) a folder, edit its JSX, [`context`](./context.md) for what the source cannot say, [`capture`](./capture.md) and [`check`](./check.md) to verify, [`export`](./export.md) when asked.
-- **Media inspection** (`media_*`): a file by path, without adding it to the project. Absolute paths and URLs work with or without an open project; library paths (`b-roll/clip.mp4`) need one.
+- **Media inspection**: a file by path, without adding it to the project. Absolute paths and URLs work with or without an open project; library paths (`b-roll/clip.mp4`) need one.
 - **Masks.** [`media_segment`](./media/segment.md) segments and tracks an object in footage and writes the mask file a `<mask src>` names.
+- **Generation.** [`generate`](./generate.md) starts a job; [`job`](./job.md) reports or cancels it. The [model reference](../models.md) lists its fields. Local `sam-2.1` works without an account; API models need a hosted build and account.
 - **What a declaration may name.** [`fonts`](./fonts.md) lists installed fonts. In a hosted build, [`models`](./models.md) and [`voices`](./voices.md) list choices for [`generate.*`](../jsx/generate.md).
 - **The app and the machine.** [`whoami`](./whoami.md), [`logs`](./logs.md), [`screenshot`](./screenshot.md), [`window`](./window.md), [`report`](./report.md).
 

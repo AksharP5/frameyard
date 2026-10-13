@@ -1,6 +1,6 @@
 # context
 
-Report the current app context: the folder new projects are created in (always reported), the folder of the project the app has open (null when none is), where its playhead sits in seconds, the registered font families, where its `generate.*` declarations stand, and the progress of `media_segment` tracks running in the background. Poll it to wait for generations and tracks without blocking.
+Report the current app context: the folder new projects are created in (always reported), the folder of the project the app has open (null when none is), where its playhead sits in seconds, and the registered font families.
 
 | | |
 | --- | --- |
@@ -26,28 +26,10 @@ One JSON object:
   projectDir:   string | null;   // absolute open project folder — where the JSX being edited lives; null when none is open
   currentTime:  number | null;   // playhead in the active scene, in seconds; null if no scene is active
   fontFamilies: string[];        // families registered in the running world, valid as `fontFamily`
-  generations:  {                // every generated source in the project, and where it stands
-    element: string | null;      // the element's source stamp, `<file>:<id>`; null for an entity no element produced
-    name:    string | null;      // the element's `name`, when it has one
-    state:   "generating" | "failed" | "done";
-    error?:  string;             // what it failed with, on `failed` rows
-    asset?:  string;             // the library path it landed as, on `done` rows
-  }[];
-  masks: {                       // media_segment tracks started while this project is open, oldest first
-    id:       string;            // the track's id, the same across polls
-    src:      string;            // the mask's library path, for <mask src>; the file is there once done
-    video:    string;            // the footage tracked, as media_segment was given it
-    state:    "loading" | "tracking" | "done" | "failed";
-    progress: number | null;     // 0..1: the model's download while loading, the frames masked while tracking; 1 once done
-    error?:   string;            // what it failed with, on `failed` rows
-    image?:   string;            // absolute path of a contact sheet of tracked frames, on `done` rows
-    model, frameRate, start, end, frames;           // the span, as media_segment returned it
-    bbox?, area?, score?, iou?, lost?, weak?;       // what was found, on `done` rows — see media_segment
-  }[];
 }
 ```
 
-With no project open (the app sits at the dashboard) the report is just `{ rootDir, projectDir: null }` with empty lists: there is no playhead, no world, and no fonts to speak of. Open one with [`open`](./open.md).
+With no project open (the app sits at the dashboard) the report is just `{ rootDir, projectDir: null }`: there is no playhead, no world, and no fonts to speak of. Open one with [`open`](./open.md).
 
 `rootDir` is reported whether or not a project is open — it is where a caller with nothing open goes to create or find one.
 

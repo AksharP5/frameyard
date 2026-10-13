@@ -178,8 +178,8 @@ test('later text renders sample edited stops, paint geometry, dimensions and can
 test('shadow-free text skips font and stroke setup while visible shadows retain the widest stroke', () => {
   const f = fixture();
   try {
-    const thin = f.world.spawn(Stroke, Paint, Computed({ strokeWidth: 2 }));
-    const wide = f.world.spawn(Stroke, Paint, Computed({ strokeWidth: 5 }));
+    const thin = f.world.spawn(Stroke, Paint, Color, Computed({ strokeWidth: 2 }));
+    const wide = f.world.spawn(Stroke, Paint, Color, Computed({ strokeWidth: 5 }));
     f.text.add(Color);
     f.text.set(Cache, { strokes: [thin, wide] });
     f.render();

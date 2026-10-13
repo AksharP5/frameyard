@@ -22,6 +22,9 @@ import {
   isCaption,
   isGroup,
   isClipPath,
+  isEllipse,
+  isPath,
+  isPolygon,
   isScene,
   isSequence,
   isText,
@@ -254,11 +257,11 @@ export function NodeLayer(props: LayerRowProps) {
                 class="size-4 shrink-0 flex items-center justify-center overflow-clip invisible group-hover/layers:visible focus-ring rounded-sm"
               >
                 <Show when={props.layer.expandable}>
-                  <Icon name={props.expanded ? "chevron-down" : "chevron-right"} class="size-6 hover:text-foreground" />
+                  <Icon name={props.expanded ? "chevron-down" : "chevron-right"} class="hover:text-foreground" />
                 </Show>
               </button>
               <div class="size-4 shrink-0 flex items-center justify-center overflow-clip mr-0.5">
-                <Icon name={icon()} class="size-6" />
+                <Icon name={icon()} />
               </div>
               <Show when={isSequence(entity()) && editingState.target() === entity()}>
                 <span class="text-[10px] text-primary px-0.5" title="Target for source edits">T</span>
@@ -430,6 +433,9 @@ function getLayerIcon(world: World, layer: TimelineNode) {
   if (isCaption(entity)) return "captions-small";
   if (isText(entity)) return "text-small";
   if (entity.has(Audio)) return "audio-small";
+  if (isEllipse(entity)) return "tool.ellipse-small";
+  if (isPolygon(entity)) return "tool.polygon-small";
+  if (isPath(entity)) return "vector-path";
 
   switch (findGeometryAsset(world, entity)?.type) {
     case 'IMAGE':

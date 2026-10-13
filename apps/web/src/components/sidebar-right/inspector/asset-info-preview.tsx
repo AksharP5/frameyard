@@ -237,7 +237,7 @@ export function AssetInfoPreview(props: { asset: Asset }) {
                 variant="default"
                 onClick={togglePlayback}
               >
-                <Icon name={playing() ? "controls-pause" : "controls-play"} class="size-6" />
+                <Icon name={playing() ? "controls-pause" : "controls-play"} />
               </TooltipTrigger>
               <TooltipContent>{playing() ? "Pause" : "Play"}</TooltipContent>
             </Tooltip>

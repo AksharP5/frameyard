@@ -76,7 +76,6 @@ export const CenteredSelectMenu = <Value extends string>(
         class={cx(
           "flex h-7 items-center rounded-md bg-input pl-2 pr-0 text-xs text-foreground outline-none transition-[box-shadow,border-color]",
           "border border-transparent",
-          "focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
           "data-[expanded]:border-ring data-[expanded]:ring-1 data-[expanded]:ring-inset data-[expanded]:ring-ring",
           props.triggerClass,
         )}
@@ -85,7 +84,7 @@ export const CenteredSelectMenu = <Value extends string>(
           {selectedOption()?.label ?? ""}
         </span>
         <span class="grid h-7 w-6 place-items-center overflow-clip text-muted-foreground">
-          <Icon name="chevron-down" class="size-6" />
+          <Icon name="chevron-down" />
         </span>
       </PopoverTrigger>
 
@@ -127,7 +126,7 @@ export const CenteredSelectMenu = <Value extends string>(
               >
                 <span class="flex h-7 w-6 shrink-0 items-center justify-center overflow-clip">
                   <Listbox.ItemIndicator>
-                    <Icon name="confirm-check" class="size-6" />
+                    <Icon name="confirm-check" />
                   </Listbox.ItemIndicator>
                 </span>
                 <span class="min-w-0 flex-1 truncate text-xs">

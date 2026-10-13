@@ -10,6 +10,8 @@ export type SearchInputProps = {
   placeholder: string;
   value: string;
   onValue: (value: string) => void;
+  ref?: (el: HTMLInputElement) => void;
+  onKeyDown?: (e: KeyboardEvent) => void;
 };
 
 export function SearchInput(props: SearchInputProps) {
@@ -19,12 +21,15 @@ export function SearchInput(props: SearchInputProps) {
     <div class="mx-2 relative flex h-11 shrink-0 items-center border-b border-border">
       <Icon name="search" class="text-muted-foreground" />
       <input
-        ref={input}
+        ref={(element) => { input = element; props.ref?.(element); }}
         type="text"
         value={props.value}
         onInput={(e) => props.onValue(e.currentTarget.value)}
         onKeyDown={(e) => {
+          props.onKeyDown?.(e);
+          if (e.defaultPrevented) return;
           if (e.key === "Escape" && props.value) { e.preventDefault(); clear(); }
+          if (e.key === "Escape") return;
           e.stopPropagation();
         }}
         placeholder={props.placeholder}

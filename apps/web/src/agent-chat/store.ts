@@ -33,6 +33,7 @@ import { mainBridge } from "@/lib/ipc";
 import { localMode } from "@/lib/local-mode";
 import { prepareChatDraft } from "@/components/agent/chat-draft";
 import { store as settings } from "@/init";
+import { track } from "@/lib/analytics";
 import { createStoredSignal } from "@/lib/store";
 import { projectRoute } from "@/hooks/use-project-route";
 import type { ProjectInfo } from "@/projects";
@@ -305,6 +306,13 @@ export type SendOptions = {
 export async function send(options: SendOptions): Promise<string> {
   const key = draftKey(options.projectId, options.chatId);
   const selected = root.active()[options.projectId];
+  track("prompt_sent", {
+    new_chat: !options.chatId,
+    harness: options.model.harness,
+    model: options.model.model,
+    length: options.text.length,
+    attachments: options.attachments.length,
+  });
   const optimistic: Item = {
     id: `optimistic-${Date.now()}`,
     kind: "user",
@@ -423,7 +431,14 @@ export async function startChat(options: StartChatOptions): Promise<void> {
     return;
   }
   try {
-    await send({ projectId, cwd: options.project.dir, chatId: null, text: options.text, attachments: options.attachments, model: options.model });
+    await send({
+      projectId,
+      cwd: options.project.dir,
+      chatId: null,
+      text: options.text,
+      attachments: options.attachments,
+      model: options.model,
+    });
   } catch (error) {
     setActiveChat(projectId, null);
     const key = draftKey(projectId, null);

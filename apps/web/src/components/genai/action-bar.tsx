@@ -5,6 +5,7 @@
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { Separator } from "@/components/ui/separator";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,76 +14,54 @@ import {
   DropdownMenuPortal,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { createMemo, Show } from "solid-js";
+import { createMemo, Show, type JSX } from "solid-js";
 import { useGenerationRecords } from "./use-generation-records";
-import { useGenerateImage } from "./use-generate-image";
-import { useGenerateVideo } from "./use-generate-video";
-import { useGenerateVoice } from "./use-generate-voice";
-import { useGenerateAudio } from "./use-generate-audio";
+import { useGenerate } from "./use-generate";
 import { useAutoCaptions } from "./use-auto-captions";
 import { useMediaSelection } from "./selection";
 import { useTransforms } from "./use-transforms";
-import { createDefaultConfig } from "./prompt-input";
+import { formatCost } from "./use-estimate";
+import { restoreConfig } from "./saved-config";
 import { toast } from "somoto";
 import { localMode } from "@/lib/local-mode";
 
-import type { GenerationConfig } from "./schemas";
+import type { GenerationConfig } from "./types";
 
 interface ActionBarProps {
   openPromptInput?(config: GenerationConfig): void;
 }
 
 export function ActionBar(props: ActionBarProps) {
-  const { imageNodes, videoNodes } = useMediaSelection();
-  const { isOn, toggle } = useTransforms();
+  const { imageMedia, videoMedia } = useMediaSelection();
+  const { run: runTransform, price } = useTransforms();
 
-  const { generate: generateImage } = useGenerateImage();
-  const { generate: generateVideo } = useGenerateVideo();
-  const { generate: generateVoice } = useGenerateVoice();
-  const { generate: generateAudio } = useGenerateAudio();
+  const { rerun } = useGenerate();
   const { generate: autoCaptions, hasScene } = useAutoCaptions();
-  const { isGenerated, totalCredits, firstConfig } = useGenerationRecords();
+  const { isGenerated, totalCredits, firstJob, firstConfig } = useGenerationRecords();
 
-  const isImage = createMemo(() => imageNodes().length > 0);
-  const isVideo = createMemo(() => videoNodes().length > 0);
+  const isImage = createMemo(() => imageMedia().length > 0);
+  const isVideo = createMemo(() => videoMedia().length > 0);
 
   const visible = createMemo(() => {
     return hasScene() || (!localMode && (isImage() || isVideo()));
   })
 
   const handleRerun = () => {
-    const config = firstConfig();
-    if (!config) {
-      toast("No generation config found", { description: "This asset wasn't generated with a prompt." });
+    const job = firstJob();
+    if (!job) {
+      toast("No generation found", { description: "This asset wasn't generated with a prompt." });
       return;
     }
 
-    const promise = (() => {
-      switch (config.mode) {
-        case "IMAGE":
-          return generateImage(config);
-        case "VIDEO":
-          return generateVideo(config);
-        case "VOICE":
-          return generateVoice(config);
-        case "AUDIO":
-          return generateAudio(config);
-      }
-    })();
-
-    promise.catch((err) => {
-      toast("Rerun failed", {
-        description: err instanceof Error ? err.message : String(err),
-      });
-    });
+    rerun(job.request);
   };
 
   const handleEditWithPrompt = () => {
-    props.openPromptInput?.(createDefaultConfig("IMAGE"));
+    props.openPromptInput?.(restoreConfig("IMAGE"));
   };
 
   const handleMakeVideo = () => {
-    props.openPromptInput?.(createDefaultConfig("VIDEO"));
+    props.openPromptInput?.(restoreConfig("VIDEO"));
   };
 
   const handleReuse = () => {
@@ -106,24 +85,12 @@ export function ActionBar(props: ActionBarProps) {
           </Show>
           <Show when={!localMode && isImage()}>
             <div class="flex gap-1 items-center">
-              <Button
-                variant="ghost"
-                class="gap-0 pl-0.5 text-muted-foreground"
-                classList={{ "text-foreground": isOn("removeBackground") }}
-                onClick={() => toggle("removeBackground")}
-              >
-                <Icon name="ai-generate" />
+              <TransformButton icon="ai-generate" credits={price("removeBackground")} onClick={() => runTransform("removeBackground")}>
                 Remove background
-              </Button>
-              <Button
-                variant="ghost"
-                class="gap-0 pl-0.5 text-muted-foreground"
-                classList={{ "text-foreground": isOn("upscale") }}
-                onClick={() => toggle("upscale")}
-              >
-                <Icon name="arrow-scale" />
+              </TransformButton>
+              <TransformButton icon="arrow-scale" credits={price("upscale")} onClick={() => runTransform("upscale")}>
                 Upscale
-              </Button>
+              </TransformButton>
             </div>
             <Separator orientation="vertical" class="min-h-5" />
             <div class="flex gap-1 items-center">
@@ -144,21 +111,21 @@ export function ActionBar(props: ActionBarProps) {
                   <DropdownMenuPortal>
                     <DropdownMenuContent>
                       <div class="flex items-center gap-1 px-0 pr-2 h-7">
-                        <Icon name="ai-generate" class="size-6 text-muted-foreground" />
+                        <Icon name="ai-credits" class="text-muted-foreground" />
                         <span class="text-xs text-muted-foreground">{totalCredits()} AI credits used</span>
                       </div>
                       <Separator class="my-1" />
                       <DropdownMenuGroup>
                         <DropdownMenuItem onSelect={handleMakeVideo}>
-                          <Icon name="film-video-export" class="size-6 mr-2 text-foreground" />
+                          <Icon name="film-video-export" class="mr-2 text-foreground" />
                           Make video
                         </DropdownMenuItem>
                         <DropdownMenuItem onSelect={handleRerun}>
-                          <Icon name="rerun" class="size-6 mr-2 text-foreground" />
+                          <Icon name="rerun" class="mr-2 text-foreground" />
                           Rerun
                         </DropdownMenuItem>
                         <DropdownMenuItem onSelect={handleReuse}>
-                          <Icon name="reuse-settings" class="size-6 mr-2 text-foreground" />
+                          <Icon name="reuse-settings" class="mr-2 text-foreground" />
                           Reuse
                         </DropdownMenuItem>
                       </DropdownMenuGroup>
@@ -170,24 +137,9 @@ export function ActionBar(props: ActionBarProps) {
           </Show>
           <Show when={!localMode && isVideo()}>
             <div class="flex gap-1 items-center">
-              <Button
-                variant="ghost"
-                class="gap-0 pl-0.5 text-muted-foreground"
-                classList={{ "text-foreground": isOn("addAudio") }}
-                onClick={() => toggle("addAudio")}
-              >
-                <Icon name="generate-audio" />
-                Add audio
-              </Button>
-              <Button
-                variant="ghost"
-                class="gap-0 pl-0.5 text-muted-foreground"
-                classList={{ "text-foreground": isOn("upscale") }}
-                onClick={() => toggle("upscale")}
-              >
-                <Icon name="arrow-scale" />
+              <TransformButton icon="arrow-scale" credits={price("upscale")} onClick={() => runTransform("upscale")}>
                 Upscale
-              </Button>
+              </TransformButton>
               <Show when={isGenerated()}>
                 <Separator orientation="vertical" class="min-h-5" />
                 <DropdownMenu placement="right">
@@ -202,13 +154,13 @@ export function ActionBar(props: ActionBarProps) {
                   <DropdownMenuPortal>
                     <DropdownMenuContent>
                       <div class="flex items-center gap-1 px-0 pr-2 h-7">
-                        <Icon name="ai-generate" class="size-6 text-muted-foreground" />
+                        <Icon name="ai-credits" class="text-muted-foreground" />
                         <span class="text-xs text-muted-foreground">{totalCredits()} AI credits used</span>
                       </div>
                       <Separator class="my-1" />
                       <DropdownMenuGroup>
                         <DropdownMenuItem onSelect={handleRerun}>
-                          <Icon name="rerun" class="size-6 mr-2 text-foreground" />
+                          <Icon name="rerun" class="mr-2 text-foreground" />
                           Rerun
                         </DropdownMenuItem>
                       </DropdownMenuGroup>
@@ -221,5 +173,30 @@ export function ActionBar(props: ActionBarProps) {
         </div>
       </Show>
     </>
+  );
+}
+
+type TransformButtonProps = {
+  icon: string;
+  /** What running it costs; a blurred stand-in while that isn't known. */
+  credits: number | undefined;
+  onClick(): void;
+  children: JSX.Element;
+};
+
+/** A paid action, its price on hover. */
+function TransformButton(props: TransformButtonProps) {
+  return (
+    <Tooltip>
+      <TooltipTrigger as={Button} variant="ghost" class="gap-0 pl-0.5 text-muted-foreground" onClick={props.onClick}>
+        <Icon name={props.icon} />
+        {props.children}
+      </TooltipTrigger>
+      <TooltipContent class="h-6 py-0">
+        <Show when={props.credits} fallback={<span class="blur-[3px] select-none">This will cost 000 credits</span>}>
+          {(credits) => formatCost(credits())}
+        </Show>
+      </TooltipContent>
+    </Tooltip>
   );
 }

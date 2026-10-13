@@ -1,9 +1,7 @@
 import { type Entity, type World } from 'koota';
-import {
-  Anchor, Cache, Computed, Culled, LocalTransform, UniformScale, KeyframeTrack,
-  Scene, SceneCamera, Scene3D, Geometry, WorldBounds, WorldTransform,
-} from '../traits';
+import { Cache, Computed, Culled, LocalTransform, UniformScale, KeyframeTrack, Scene, SceneCamera, Scene3D, Geometry, WorldBounds, WorldTransform } from '../traits';
 import { GeometryType } from '../constants';
+import { entityPivot } from '../queries/interaction';
 import { store } from '../world/store';
 import { getParentEntity } from '../queries/hierarchy';
 import { aabbFromTransformedRect, multiply2D, translate2D, type Mat2D } from '../math';
@@ -75,9 +73,7 @@ export function computeSpatialTransforms(world: World): void {
       const id = entity.id();
       const x = computed.positionX[id] + computed.offsetX[id];
       const y = computed.positionY[id] + computed.offsetY[id];
-      const anchor = entity.get(Anchor);
-      const pivotX = (computed.anchorX[id] ?? anchor?.x ?? .5) * computed.width[id];
-      const pivotY = (computed.anchorY[id] ?? anchor?.y ?? .5) * computed.height[id];
+      const { x: pivotX, y: pivotY } = entityPivot(world, entity);
       const affine = { a: local.a[id]!, b: local.b[id]!, c: local.c[id]!, d: local.d[id]!, e: local.e[id]!, f: local.f[id]! };
       // Keep the existing affine transform, inserting tilt around the same anchor.
       const tilt = multiply4(

@@ -27,7 +27,7 @@ app version, platform, and Electron version. Add reproduction commands with
 
 The issue is submitted immediately, with no review step: the call returns once the issue exists. Filing goes through the [`gh`](https://cli.github.com) CLI, which must be installed and authenticated (`gh auth login`) on this machine; without it nothing is filed. It runs in the app's main process, so no project needs to be open.
 
-This is for defects in the tooling, not for problems inside a project: a composition that looks wrong, a node in the wrong place, or a generation that missed the prompt are editing problems, not reported here.
+This is for defects in the tooling, not for problems inside a project: a composition that looks wrong or a node in the wrong place are editing problems, not reported here.
 
 ## Output
 

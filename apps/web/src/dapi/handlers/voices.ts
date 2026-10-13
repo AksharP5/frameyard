@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import { PROMPT_INPUT_VOICE_OPTIONS } from "@/components/genai/config";
+import { ELEVENLABS_VOICE_OPTIONS } from "@/components/genai/config";
 import { localMode } from "@/lib/local-mode";
 
 import type { ToolHandler } from "../handler";
@@ -10,5 +10,5 @@ import type { ToolHandler } from "../handler";
 export const voices: ToolHandler<"voices"> = async () => ({
   voices: localMode
     ? []
-    : PROMPT_INPUT_VOICE_OPTIONS.map((v) => ({ id: v.value, label: v.label, description: v.description })),
+    : ELEVENLABS_VOICE_OPTIONS.map((v) => ({ id: v.value, label: v.label, description: v.description })),
 });

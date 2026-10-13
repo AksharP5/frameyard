@@ -194,11 +194,11 @@ export function FontDropdown(props: FontDropdownProps) {
       <PopoverTrigger
         class={cx(
           "bg-input h-7 hover:bg-input/80 text-foreground [&_svg:not([class*='text-'])]:text-muted-foreground flex w-full min-w-0 items-center gap-0 rounded-md pl-2 pr-0 text-xs whitespace-nowrap transition-colors outline-none",
-          "relative overflow-hidden after:pointer-events-none after:absolute after:inset-0 after:rounded-md after:opacity-0 after:ring-1 after:ring-inset after:ring-ring after:z-20 focus-visible:after:opacity-100 justify-between",
+          "relative overflow-hidden after:pointer-events-none after:absolute after:inset-0 after:rounded-md after:opacity-0 after:ring-1 after:ring-inset after:ring-ring after:z-20 justify-between",
         )}
       >
         <span class="truncate">{props.family}</span>
-        <Icon name="chevron-down" class="size-6 shrink-0 text-muted-foreground" />
+        <Icon name="chevron-down" class="shrink-0 text-muted-foreground" />
       </PopoverTrigger>
       <PopoverPortal>
         <PopoverContent
@@ -240,7 +240,7 @@ export function FontDropdown(props: FontDropdownProps) {
                           aria-label="Filter fonts"
                           class="text-muted-foreground data-expanded:bg-accent data-expanded:text-foreground"
                         >
-                          <Icon name="preferences-adjust" class="size-6" />
+                          <Icon name="preferences-adjust" />
                         </Button>
                       )}
                     />
@@ -255,7 +255,7 @@ export function FontDropdown(props: FontDropdownProps) {
                       <DropdownMenuItem tone="neutral" class="gap-1 px-0 pr-2" onSelect={() => changeCategory(option.value)}>
                         <span class="flex h-7 w-6 shrink-0 items-center justify-center">
                           <Show when={category() === option.value}>
-                            <Icon name="confirm-check" class="size-6 text-popover-foreground" />
+                            <Icon name="confirm-check" class="text-popover-foreground" />
                           </Show>
                         </span>
                         <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{option.label}</span>
@@ -279,7 +279,7 @@ export function FontDropdown(props: FontDropdownProps) {
                 <div class="flex flex-col items-start gap-2 px-2 pb-1 text-xs text-muted-foreground">
                   <span>Allow access to use the fonts installed on this machine.</span>
                   <Button variant="secondary" class="text-foreground gap-0" onClick={handleGrantAccess}>
-                    <Icon name="lock-closed-small" class="size-6" />
+                    <Icon name="lock-closed-small" />
                     <span class="mr-3">Grant Access</span>
                   </Button>
                 </div>
@@ -415,7 +415,7 @@ function FontRow(props: FontRowProps) {
     >
       <span class="flex h-7 w-6 shrink-0 items-center justify-center">
         <Show when={props.selected}>
-          <Icon name="confirm-check" class="size-6 text-popover-foreground" />
+          <Icon name="confirm-check" class="text-popover-foreground" />
         </Show>
       </span>
       <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{props.entry.family}</span>

@@ -12,23 +12,8 @@
  * timeline is the same edit as typing its start into the inspector.
  */
 
-import {
-	AdjustmentLayer,
-	ChildOf,
-	ClipDragOrigin,
-	Computed,
-	Geometry,
-	Group,
-	KeyframeDragOrigin,
-	Sequential,
-	TrimDragOrigin,
-	findClosestParentGeometry,
-	framesToSeconds,
-	getParentEntity,
-	getEntityTree,
-	store,
-} from '@diffusionstudio/runtime';
-import { Or } from 'koota';
+import { AdjustmentLayer, ChildOf, ClipDragOrigin, Computed, Geometry, Group, Keyframe, KeyframeDragOrigin, Selected, Sequential, TrimDragOrigin, findClosestParentGeometry, framesToSeconds, getParentEntity, getEntityTree, store } from '@diffusionstudio/runtime';
+import { Or, Not } from 'koota';
 
 import { resolveSequentialOverlaps } from '../overlap';
 import { getDocumentEditor } from '../editor';
@@ -73,6 +58,9 @@ export function updateDragGestures(world: World, surface: TimelineSurfaceState):
 	if (!scene) return;
 	const resolution = getResolution(world, scene);
 	if (world.query(NODES, ClipDragOrigin).length) applyClipDrag(world, surface, resolution);
+	if (world.query(KeyframeDragOrigin, Selected).length) {
+		for (const keyframe of world.query(Keyframe, Selected, Not(KeyframeDragOrigin))) beginKeyframeDrag(keyframe);
+	}
 	for (const keyframe of world.query(KeyframeDragOrigin)) applyKeyframeDrag(world, surface, keyframe, resolution);
 }
 
@@ -177,6 +165,12 @@ function earliestDraggedStart(world: World): number {
 		earliest = Math.min(earliest, origins.start[entity.id()] ?? 0);
 	}
 	return Number.isFinite(earliest) ? earliest : 0;
+}
+
+/** Notes where `keyframe` is, in its clip's own time. */
+export function beginKeyframeDrag(keyframe: Entity): void {
+	keyframe.add(KeyframeDragOrigin);
+	keyframe.set(KeyframeDragOrigin, { time: keyframe.get(Keyframe)?.time ?? 0 });
 }
 
 /** Notes where `entity`'s edges are, so a trim can be measured from them. */

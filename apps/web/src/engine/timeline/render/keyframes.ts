@@ -14,6 +14,7 @@ import {
 } from '@diffusionstudio/runtime';
 
 import { getDocumentEditor } from '../../editor';
+import { beginKeyframeDrag } from '../drag';
 import { KEYFRAME_TRACK_HEIGHT } from '../config';
 import { applyKeyframeDrag } from '../drag';
 import { getRowTransform } from '../layout';
@@ -104,7 +105,7 @@ export function renderKeyframeTrack(
 
 		if (x + HITBOX_HALF < viewportLeft || x - HITBOX_HALF > viewportRight) continue;
 
-		handleKeyframe(world, surface, keyframe, time, x, centerY, resolution);
+		handleKeyframe(world, surface, keyframe, x, centerY, resolution);
 
 		const selected = keyframe.has(Selected);
 		ctx.strokeStyle = selected ? surface.colors.border.ring : COLOR;
@@ -133,16 +134,11 @@ export function renderKeyframeTrack(
 	ctx.restore();
 }
 
-/**
- * Selecting and moving one keyframe. A keyframe's time is a prop of its
- * element, so a drag of it is an edit like any other; the drag is measured
- * from where it started, in the clip's own time.
- */
+/** Selecting one keyframe, and starting a drag of it. */
 function handleKeyframe(
 	world: World,
 	surface: TimelineSurfaceState,
 	keyframe: Entity,
-	time: number,
 	x: number,
 	centerY: number,
 	resolution: number,
@@ -168,8 +164,7 @@ function handleKeyframe(
 	}
 
 	if (dragging && !keyframe.has(KeyframeDragOrigin)) {
-		keyframe.add(KeyframeDragOrigin);
-		keyframe.set(KeyframeDragOrigin, { time });
+		beginKeyframeDrag(keyframe);
 		applyKeyframeDrag(world, surface, keyframe, resolution);
 	}
 }

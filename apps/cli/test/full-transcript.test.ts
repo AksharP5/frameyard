@@ -7,6 +7,7 @@ import type { Asset, AssetLibrary, PartialAsset, Transcript } from "@diffusionst
 import type { Entity, World } from "koota";
 import { transcriptionWindows, mergeTranscriptWindow } from "../../web/src/utils/transcription-windows.ts";
 import { parseTranscript } from "../../web/src/components/agent/transcript-data.ts";
+import { generateRequest, transcript } from "@diffusionstudio/api-contract";
 
 const compiled = await build({
   entryPoints: [fileURLToPath(new URL("../../web/src/utils/gen-ai.ts", import.meta.url))],
@@ -16,7 +17,7 @@ const compiled = await build({
   } }],
 });
 
-function fixture(duration = 12) {
+function fixture(duration = 12, localMode = true) {
   const symbols = Object.fromEntries(["Ai", "AssetId", "Audio", "Computed", "FrameRate", "Hidden", "Muted", "Paint", "Project", "Source", "Workarea"].map((name) => [name, Symbol(name)]));
   const workarea = { start: 60, end: 120 };
   const scene = { get: (trait: symbol) => trait === symbols.Source ? { value: "index.tsx:main" } : trait === symbols.Workarea ? workarea : trait === symbols.Computed ? { start: 90, end: duration * 30, duration: (duration - 3) * 30 } : undefined };
@@ -27,6 +28,7 @@ function fixture(duration = 12) {
   const calls = { render: 0, transcribe: 0, flush: 0, disposed: 0 };
   const rendered: { start: number; end: number }[] = [];
   const captureCodes: (string | undefined)[] = [];
+  const network = { uploads: 0, requests: [] as unknown[] };
   let failure: Error | undefined;
   let hasAudio = true;
   let words: Transcript | ((range: { start: number; end: number }) => Transcript) = [{ text: "early late", words: [{ text: "early", start: 0.1, end: 0.5 }, { text: "late", start: 9, end: 10 }] }];
@@ -54,17 +56,23 @@ function fixture(duration = 12) {
       }
     },
     fail(partial: PartialAsset, error: string) { partial.state = "error"; partial.error = error; },
-    async store(blob: Blob, options: { name: string; folder: string; generation: { key: string } }) {
-      const asset: Asset = { type: "TRANSCRIPT", id: String(stored.length), path: `${options.folder}/${options.name}`, source: `assets/${options.folder}/${options.name}`, mimeType: "application/json", createdAt: "now", generation: options.generation, handle: { getFile: async () => new File([blob], options.name) } };
+    async store(blob: Blob, options: { name: string; folder: string; generation: { key: string }; job?: string }) {
+      const asset: Asset = { type: "TRANSCRIPT", id: String(stored.length), path: `${options.folder}/${options.name}`, source: `assets/${options.folder}/${options.name}`, mimeType: "application/json", createdAt: "now", generation: options.generation, job: options.job, handle: { getFile: async () => new File([blob], options.name) } };
       const partial = partials.findIndex((entry) => entry.generation.key === options.generation.key);
       if (partial >= 0) partials.splice(partial, 1);
       stored.push({ blob, asset });
       return asset;
     },
-    async flush() { calls.flush++; },
+    async settle() { calls.flush++; },
   };
   const dependencies: Record<string, unknown> = {
-    "@diffusionstudio/jsx": { parseSource: () => ({ locator: "main" }) },
+    "@diffusionstudio/jsx": {
+      parseSource: () => ({ locator: "main" }),
+      isAssetRef: (input: unknown) => typeof input === "object" && input !== null && "spec" in input,
+      getAssetSpec: (ref: { spec: unknown }) => ref.spec,
+      isTransformSpec: (spec: { type: string }) => ["upscale", "removeBackground", "addAudio"].includes(spec.type),
+      isTransformType: (type: string) => ["upscale", "removeBackground", "addAudio"].includes(type),
+    },
     "@diffusionstudio/runtime": { ...symbols, GenAi: class {}, getEntityTree: () => hasAudio ? [audio] : [], PaintType: { VIDEO: "video" } },
     "@diffusionstudio/assets": {
       GENERATED_DIR: "generated",
@@ -92,20 +100,93 @@ function fixture(duration = 12) {
       return { segments: typeof words === "function" ? words(range) : words };
     } },
     "@/utils/transcription-windows": { transcriptionWindows, mergeTranscriptWindow },
-    "@/lib/local-mode": { localMode: true },
+    "@/lib/local-mode": { localMode, hostedServiceUnavailable: "Hosted services are off in local mode." },
     "@/utils": { assert },
     "somoto": { toast: { error() {} } },
-    "@/components/genai/config": {}, "@/lib/uploads": {}, "@/lib/analytics": {}, "@/lib/trpc": {},
+    "@/components/genai/config": { defaultModelOption: (mode: string) => ({
+      id: { IMAGE: "flux-2-klein", VIDEO: "seedance-2.5", VOICE: "gemini-3.8-flash-tts", AUDIO: "elevenlabs-music" }[mode],
+      voices: [{ value: "Zephyr" }],
+    }) },
+    "@/lib/uploads": { uploadFile: async () => {
+      assert.equal(localMode, false, "local generation must not upload media");
+      network.uploads++;
+      return { kind: "asset", id: "input" };
+    } },
+    "@/lib/jobs": {
+      runJob: async (request: unknown) => {
+        assert.equal(localMode, false, "local generation must not start hosted jobs");
+        network.requests.push(request);
+        return { id: "job-one", status: "succeeded", assets: [{ url: "data:application/json,%5B%5D", filename: "result.json" }] };
+      },
+      jobFailure: () => "The generation failed.",
+    },
+    "@diffusionstudio/api-contract": { generateRequest, transcript },
   };
   const module = { exports: {} as typeof import("../../web/src/utils/gen-ai") };
   runInThisContext(`(function(require,module,exports){${compiled.outputFiles[0].text}\n})`)((name: string) => {
     assert.ok(name in dependencies, `Unexpected dependency ${name}`);
     return dependencies[name];
   }, module, module.exports);
-  const ai = new module.exports.EditorGenAi(library as unknown as AssetLibrary, "test", "/project");
+  const ai = new module.exports.EditorGenAi(library as unknown as AssetLibrary, "/project");
   const transcribe = (seed: number) => ai.transcribe({ get: (trait: symbol) => trait === symbols.FrameRate ? { value: 30 } : undefined } as unknown as World, scene as unknown as Entity, seed);
-  return { transcribe, stored, calls, rendered, captureCodes, scene, symbols, workarea, setWords: (next: typeof words) => { words = next; }, failRender: (error: Error) => { failure = error; }, removeAudio: () => { hasAudio = false; } };
+  return { ai, library, partials, network, transcribe, stored, calls, rendered, captureCodes, scene, symbols, workarea, setWords: (next: typeof words) => { words = next; }, failRender: (error: Error) => { failure = error; }, removeAudio: () => { hasAudio = false; } };
 }
+
+test("legacy declarations resolve their original default-model cache before new defaults or hosted calls", async () => {
+  const f = fixture();
+  const key = JSON.stringify({ type: "image", model: "flux-2-turbo", prompt: "cached frame", aspectRatio: "16:9", refIds: [] });
+  const asset = await f.library.store(new Blob(['[]']), { name: "frame.json", folder: "generated", generation: { key } });
+  const ref = { spec: { type: "image", prompt: "cached frame" } } as unknown as import("@diffusionstudio/jsx").AssetRef;
+  assert.equal(await f.ai.resolve(ref), asset);
+  assert.equal(f.partials.length, 0);
+  assert.equal(f.stored.length, 1);
+});
+
+test("uncached local generation records one explicit failure and never uploads", async (t) => {
+  t.mock.method(console, "error", () => {});
+  const f = fixture();
+  const ref = { spec: { type: "image", prompt: "new frame" } } as unknown as import("@diffusionstudio/jsx").AssetRef;
+  await assert.rejects(f.ai.resolve(ref), /Hosted services are off in local mode/);
+  await assert.rejects(f.ai.resolve(ref), /Hosted services are off in local mode/);
+  assert.equal(f.partials.length, 1);
+  assert.equal(f.partials[0].state, "error");
+  assert.equal(f.stored.length, 0);
+});
+
+test("uncached hosted declarations use v2 requests and retain both cache key and job provenance", async () => {
+  const f = fixture(12, false);
+  const ref = { spec: { type: "image", prompt: "new frame" } } as unknown as import("@diffusionstudio/jsx").AssetRef;
+  const asset = await f.ai.resolve(ref);
+  assert.deepEqual(JSON.parse(JSON.stringify(f.network.requests)), [{ model: "flux-2-klein", prompt: "new frame", aspectRatio: "16:9", count: 1 }]);
+  assert.equal(asset.job, "job-one");
+  assert.equal(asset.generation?.key, JSON.stringify({ type: "image", model: "flux-2-klein", prompt: "new frame", aspectRatio: "16:9", refIds: [] }));
+  assert.equal(f.partials.length, 0);
+  assert.equal(await f.ai.resolve(ref), asset);
+  assert.equal(f.network.requests.length, 1);
+});
+
+test("new seeded requests fail explicitly instead of silently losing the seed", async (t) => {
+  t.mock.method(console, "error", () => {});
+  const f = fixture(12, false);
+  const ref = { spec: { type: "image", prompt: "new frame", seed: 4 } } as unknown as import("@diffusionstudio/jsx").AssetRef;
+  await assert.rejects(f.ai.resolve(ref), /does not support seeded generation/);
+  assert.deepEqual(f.network, { uploads: 0, requests: [] });
+  assert.equal(f.stored.length, 0);
+});
+
+test("a failed transcript save is reported and cached retries persist before returning", async (t) => {
+  t.mock.method(console, "error", () => {});
+  const f = fixture();
+  const settle = f.library.settle;
+  f.library.settle = async () => { throw new Error("Manifest is not writable"); };
+  await assert.rejects(f.transcribe(1), /Manifest is not writable/);
+  assert.equal(f.calls.transcribe, 1);
+  await assert.rejects(f.transcribe(1), /Manifest is not writable/);
+  assert.equal(f.calls.transcribe, 1);
+  f.library.settle = settle;
+  assert.equal(await f.transcribe(1), f.stored[0].asset);
+  assert.equal(f.calls.transcribe, 1);
+});
 
 test("full scene transcription ignores the export range, preserves word times, and persists before returning", async () => {
   const f = fixture();

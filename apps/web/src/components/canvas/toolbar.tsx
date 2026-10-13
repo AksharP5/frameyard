@@ -57,6 +57,9 @@ const canvasTools = [
     shortcut: "R",
     description: "Rectangle",
   },
+  { type: ToolType.ELLIPSE, icon: "tool.ellipse", label: "Ellipse", shortcut: "O", description: "Ellipse" },
+  { type: ToolType.POLYGON, icon: "tool.polygon", label: "Polygon", shortcut: undefined, description: "Polygon" },
+  { type: ToolType.PEN, icon: "tool.pen", label: "Pen", shortcut: "P", description: "Draw and edit vector paths" },
   {
     type: ToolType.TEXT,
     icon: "tool.text",
@@ -125,6 +128,8 @@ export function CanvasTools(props: { rail?: boolean }) {
   const world = useWorld();
   const selectedTool = useTool();
 
+  const active = (tool: ToolType) => selectedTool() === tool || (tool === ToolType.PEN && selectedTool() === ToolType.PATH_EDIT);
+
   const handleToolChange = (tool: ToolType) => {
     world.set(Tool, { value: tool });
   };
@@ -147,15 +152,15 @@ export function CanvasTools(props: { rail?: boolean }) {
                 size="icon-square"
                 aria-label={tool.label}
                 aria-keyshortcuts={tool.shortcut}
-                aria-pressed={selectedTool() === tool.type}
+                aria-pressed={active(tool.type)}
                 class={
                   props.rail
                     ? "focus-tool"
-                    : selectedTool() === tool.type
+                    : active(tool.type)
                       ? "text-foreground"
                       : "text-muted-foreground"
                 }
-                variant={selectedTool() === tool.type ? "default" : "ghost"}
+                variant={active(tool.type) ? "default" : "ghost"}
                 onClick={() => handleToolChange(tool.type)}
               >
                 <Icon

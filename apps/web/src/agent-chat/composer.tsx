@@ -16,7 +16,7 @@ import type { SkillCatalog } from "@/components/agent/use-codex-capabilities";
 
 import type { HarnessId, ModelRef } from "@diffusionstudio/agent-chat";
 
-import { AttachmentTile, DropOverlay, createDropZone, mergeAttachments, pickAttachments, type Attachment } from "./attachments";
+import { AttachmentTile, DropOverlay, createDropZone, createPasteHandler, mergeAttachments, pickAttachments, type Attachment } from "./attachments";
 import { ModelPicker } from "./model-picker";
 import { PromptInput } from "./prompt-input";
 import { removeSkillMention } from "./skill-mentions";
@@ -57,6 +57,7 @@ type ComposerProps = {
 export function Composer(props: ComposerProps) {
   const attach = (added: Attachment[]) => props.onAttachments(mergeAttachments(props.attachments, added));
   const drop = createDropZone(attach);
+  const paste = (event: ClipboardEvent) => createPasteHandler(attach, props.onFiles)(event);
 
   const canSend = () => (!props.running || props.steering) && !props.waiting && !props.blocked && !props.sendDisabled && props.model !== null && (props.hasContent ?? (props.text.trim().length > 0 || props.attachments.length > 0));
 
@@ -85,6 +86,7 @@ export function Composer(props: ComposerProps) {
         const files = Array.from(event.dataTransfer?.files ?? []);
         if (files.length) props.onFiles(files);
       }}
+      onPaste={paste}
     >
       <div class="flex min-h-0 flex-col gap-2 overflow-y-auto">
         <Show when={props.attachments.length > 0}>

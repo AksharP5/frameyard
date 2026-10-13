@@ -2,21 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import {
-  Audio,
-	AssetId,
-	findGeometryAsset,
-	hasHtmlPaint,
-	hasSurfacePaint,
-	isAdjustmentLayer,
-	isCaption,
-	isGroup,
-	isClipPath,
-	isRect,
-	isScene,
-	isSequence,
-	isText,
-} from '@diffusionstudio/runtime';
+import { Audio, AssetId, findGeometryAsset, hasHtmlPaint, hasSurfacePaint, isAdjustmentLayer, isCaption, isGroup, isClipPath, isEllipse, isPath, isPolygon, isRect, isScene, isSequence, isText } from '@diffusionstudio/runtime';
 
 import { COLORS } from './constants';
 
@@ -88,6 +74,9 @@ export function getClipFallbackName(world: World, entity: Entity): string {
 			return 'Audio';
 	}
 
+	if (isEllipse(entity)) return 'Ellipse';
+	if (isPolygon(entity)) return 'Polygon';
+	if (isPath(entity)) return 'Path';
 	return isRect(entity) ? 'Rectangle' : 'Layer';
 }
 

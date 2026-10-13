@@ -5,30 +5,24 @@
 import { getAssetSpec, isAssetRef, isTransformSpec, isTransformType, parseSource } from "@diffusionstudio/jsx";
 import {
   Ai, AssetId, Audio, Computed, FrameRate, GenAi, getAssetFile, getEntityTree, Hidden, Muted,
-  Paint, PaintType, Project, Source, Workarea,
+  Paint, PaintType, Source, Workarea,
 } from "@diffusionstudio/runtime";
 import { createEncoder } from "@diffusionstudio/encoder";
 import { createCapture } from "@/engine/capture";
 import { assetName, GENERATED_DIR, isPartialAsset } from "@diffusionstudio/assets";
-import {
-  PROMPT_INPUT_AUDIO_MODEL_OPTIONS,
-  PROMPT_INPUT_IMAGE_MODEL_OPTIONS,
-  PROMPT_INPUT_VIDEO_MODEL_OPTIONS,
-  PROMPT_INPUT_VOICE_MODEL,
-  PROMPT_INPUT_VOICE_OPTIONS,
-} from "@/components/genai/config";
-import { assert, mimeTypeToExtension } from "@/utils";
-import { uploadBlob } from "@/lib/uploads";
-import { track } from "@/lib/analytics";
-import { trpc } from "@/lib/trpc";
-import { localMode } from "@/lib/local-mode";
+import { defaultModelOption } from "@/components/genai/config";
+import { generateRequest, transcript as transcriptSchema } from "@diffusionstudio/api-contract";
+import { assert } from "@/utils";
+import { uploadFile } from "@/lib/uploads";
+import { jobFailure, runJob } from "@/lib/jobs";
+import { hostedServiceUnavailable, localMode } from "@/lib/local-mode";
 import { transcribeFile } from "@/utils/local-transcription";
 import { transcriptionWindows, mergeTranscriptWindow } from "@/utils/transcription-windows";
 import { toast } from "somoto";
 
 import type { AspectRatio, AssetInput, AssetRef, AssetSpecInput, GenerateSpec, TransformType } from "@diffusionstudio/jsx";
 import type { Asset, AssetLibrary, AssetType, PartialAsset, ReserveOptions, Transcript } from "@diffusionstudio/assets";
-import type { FileRef } from "@diffusionstudio/api-contract";
+import type { AssetRef as UploadedAssetRef, Job } from "@diffusionstudio/api-contract";
 import type { ExportResult } from "@diffusionstudio/encoder";
 import type { Entity, World } from "koota";
 
@@ -94,15 +88,13 @@ class ReportedError extends Error {}
 
 /** Creates the project's GenAi over `library` and attaches it as the world's Ai. */
 export function attachAi(world: World, library: AssetLibrary, dir?: string): EditorGenAi {
-  const ai = new EditorGenAi(library, world.get(Project)?.id ?? "project", dir);
+  const ai = new EditorGenAi(library, dir);
   world.set(Ai, ai);
   return ai;
 }
 
 export class EditorGenAi extends GenAi {
   private readonly library: AssetLibrary;
-  /** Prefixes upload keys, so referenced assets land project-unique in the bucket. */
-  private readonly projectId: string;
   /** The project's folder, so a transcription's capture compiles the sources as they are now. */
   private readonly dir?: string;
 
@@ -117,10 +109,9 @@ export class EditorGenAi extends GenAi {
   private readonly inflight = new Map<string, Promise<Asset>>();
   private transcriptionQueue: Promise<void> = Promise.resolve();
 
-  public constructor(library: AssetLibrary, projectId: string, dir?: string) {
+  public constructor(library: AssetLibrary, dir?: string) {
     super();
     this.library = library;
-    this.projectId = projectId;
     this.dir = dir;
   }
 
@@ -172,7 +163,10 @@ export class EditorGenAi extends GenAi {
     run: (partial: PartialAsset) => Promise<Asset>,
   ): Promise<Asset> {
     const known = this.library.generated(key);
-    if (known && !isPartialAsset(known)) return known;
+    if (known && !isPartialAsset(known)) {
+      await this.library.settle();
+      return known;
+    }
     if (known?.state === "error") throw new ReportedError(known.error || "Generation failed");
 
     const running = this.inflight.get(key);
@@ -213,6 +207,19 @@ export class EditorGenAi extends GenAi {
       throw error instanceof ReportedError ? error : reportFailure(error, title);
     }
 
+    // Default models changed with the API; a cached declaration still names
+    // the bytes its original defaults produced, including retired models.
+    if (!isResolvedTransform(resolved) && !isTransformSpec(spec)) {
+      const legacy = {
+        ...resolved,
+        model: spec.type === "voice" ? "elevenlabs-v3" : spec.model ?? {
+          image: "flux-2-turbo", video: "kling-3-pro", audio: "elevenlabs-music",
+        }[spec.type],
+        ...(spec.type === "voice" && spec.voice === undefined ? { voice: "CwhRBWXzGAHq8TQ4Fs17" } : {}),
+      };
+      if (this.library.generated(JSON.stringify(legacy))) resolved = legacy;
+    }
+
     return this.generated(
       JSON.stringify(resolved),
       () => ({ ...this.describe(resolved), title }),
@@ -245,7 +252,7 @@ export class EditorGenAi extends GenAi {
         const refs = await Promise.all((spec.refs ?? []).map((ref) => this.resolveInput(ref)));
         return {
           type: "image",
-          model: spec.model ?? PROMPT_INPUT_IMAGE_MODEL_OPTIONS[0].id,
+          model: spec.model ?? defaultModelOption("IMAGE").id,
           prompt: spec.prompt,
           aspectRatio: spec.aspectRatio ?? "16:9",
           seed: spec.seed,
@@ -259,7 +266,7 @@ export class EditorGenAi extends GenAi {
         ]);
         return {
           type: "video",
-          model: spec.model ?? PROMPT_INPUT_VIDEO_MODEL_OPTIONS[0].id,
+          model: spec.model ?? defaultModelOption("VIDEO").id,
           prompt: spec.prompt,
           aspectRatio: spec.aspectRatio ?? "16:9",
           duration: spec.duration ?? 5,
@@ -270,18 +277,21 @@ export class EditorGenAi extends GenAi {
         };
       }
       case "voice": {
+        const model = defaultModelOption("VOICE");
+        const voice = spec.voice ?? model.voices?.[0]?.value;
+        assert(voice, "The voice model has no default voice");
         return {
           type: "voice",
-          model: PROMPT_INPUT_VOICE_MODEL,
+          model: model.id,
           prompt: spec.prompt,
-          voice: spec.voice ?? PROMPT_INPUT_VOICE_OPTIONS[0].value,
+          voice,
           seed: spec.seed,
         };
       }
       case "audio": {
         return {
           type: "audio",
-          model: spec.model ?? PROMPT_INPUT_AUDIO_MODEL_OPTIONS[0].id,
+          model: spec.model ?? defaultModelOption("AUDIO").id,
           prompt: spec.prompt,
           duration: spec.duration,
           seed: spec.seed,
@@ -296,37 +306,12 @@ export class EditorGenAi extends GenAi {
    * reserved, so the refusal is recorded like any other and not asked again.
    */
   private async runGeneration(spec: ResolvedGeneration, partial: PartialAsset): Promise<Asset> {
-    if (spec.type === "video") checkVideoConstraints(spec);
-
-    const startedAt = performance.now();
-    track("generation_started", {
-      mode: spec.type,
-      model: spec.model,
-      prompt_length: spec.prompt.length,
-      ...("aspectRatio" in spec ? { aspect_ratio: spec.aspectRatio } : {}),
-      ...(spec.type === "image" ? { reference_count: spec.refIds.length } : {}),
-    });
-
-    try {
-      const { name, results, generationId } = await this.requestGeneration(spec);
-      assert(results.length > 0, "No results returned from the model");
-
-      const asset = await this.store(results[0].url, name, { key: partial.generation.key, id: generationId });
-      track("generation_completed", {
-        mode: spec.type,
-        model: spec.model,
-        duration_ms: Math.round(performance.now() - startedAt),
-      });
-      return asset;
-    } catch (err) {
-      track("generation_failed", {
-        mode: spec.type,
-        model: spec.model,
-        duration_ms: Math.round(performance.now() - startedAt),
-        error: err instanceof Error ? err.message.slice(0, 200) : "unknown",
-      });
-      throw err;
-    }
+    assert(!localMode, hostedServiceUnavailable);
+    const job = await this.requestGeneration(spec);
+    assert(job.status === "succeeded", jobFailure(job));
+    const file = job.assets[0];
+    assert(file, "No results returned from the model");
+    return this.store(file, partial.generation.key, job.id);
   }
 
   /** Encodes the scene's audio, transcribes it, and stores the transcript in place of `partial`. */
@@ -334,6 +319,7 @@ export class EditorGenAi extends GenAi {
     const frameRate = world.get(FrameRate)?.value ?? 30;
     const duration = (scene.get(Computed)?.end ?? 0) / frameRate;
     let transcript: Transcript = [];
+    let jobId: string | undefined;
     let code: string | undefined;
 
     for (const window of transcriptionWindows(duration, frameRate)) {
@@ -365,9 +351,14 @@ export class EditorGenAi extends GenAi {
       const segments = localMode
         ? (await transcribeFile(audioFile, this.dir)).segments
         : await (async () => {
-          const fileRef = await uploadBlob(audioFile, uploadId);
-          assert(fileRef, "Failed to upload the scene audio for transcription");
-          return (await trpc.transcribe.mutate({ audio: fileRef })).results;
+          const job = await runJob({ model: "universal-3.5-pro", audio: await uploadFile(audioFile) }, () => {});
+          assert(job.status === "succeeded", jobFailure(job));
+          const file = job.assets[0];
+          assert(file, "The transcription returned nothing");
+          const response = await fetch(file.url);
+          assert(response.ok, `Failed to fetch the transcript: ${response.status}`);
+          jobId = job.id;
+          return transcriptSchema.parse(await response.json());
         })();
       transcript = mergeTranscriptWindow(transcript, segments, window);
     }
@@ -381,11 +372,12 @@ export class EditorGenAi extends GenAi {
       name: assetName(partial),
       folder: GENERATED_DIR,
       generation: { key },
+      job: jobId,
     });
 
     // The new file can trigger the project watcher before the library's normal
     // debounce; persist the generation key before that reload.
-    await this.library.flush();
+    await this.library.settle();
     return asset;
   }
 
@@ -405,126 +397,80 @@ export class EditorGenAi extends GenAi {
    * like a spec a model cannot take: recorded, and not asked again.
    */
   private async runTransform(spec: ResolvedTransform, partial: PartialAsset): Promise<Asset> {
+    assert(!localMode, hostedServiceUnavailable);
+    assert(spec.type !== "addAudio", "The current generation API does not support transform.addAudio. Import a soundtrack instead.");
     const asset = this.library.get(spec.inputId);
     assert(asset, `Input asset ${spec.inputId} not found`);
     checkTransformInput(spec.type, asset);
-
-    const startedAt = performance.now();
-    track("generation_started", { mode: spec.type });
-
-    try {
-      const input = await this.uploadInput(asset.id);
-      const { url, generationId } = await this.requestTransform(spec.type, asset, input);
-      const stored = await this.store(url, assetName(partial), { key: partial.generation.key, id: generationId });
-
-      track("generation_completed", {
-        mode: spec.type,
-        duration_ms: Math.round(performance.now() - startedAt),
-      });
-      return stored;
-    } catch (err) {
-      track("generation_failed", {
-        mode: spec.type,
-        duration_ms: Math.round(performance.now() - startedAt),
-        error: err instanceof Error ? err.message.slice(0, 200) : "unknown",
-      });
-      throw err;
-    }
+    const input = await this.uploadInput(asset.id);
+    const job = await this.requestTransform(spec.type, asset, input);
+    assert(job.status === "succeeded", jobFailure(job));
+    const file = job.assets[0];
+    assert(file, "The model returned nothing");
+    return this.store(file, partial.generation.key, job.id);
   }
 
-  private requestTransform(type: TransformType, asset: Asset, input: FileRef) {
+  private requestTransform(type: Exclude<TransformType, "addAudio">, asset: Asset, input: UploadedAssetRef): Promise<Job> {
     switch (type) {
       case "removeBackground":
-        return trpc.removeBackground.mutate({ image: input });
+        return runJob({ model: "bria-rmbg-2.0", image: input }, () => {});
       case "upscale":
-        return isMoving(asset.type)
-          ? trpc.upscaleVideo.mutate({ video: input })
-          : trpc.upscaleImage.mutate({ image: input });
-      case "addAudio":
-        return trpc.addAudioToVideo.mutate({ video: input });
+        return runJob(isMoving(asset.type)
+          ? { model: "bytedance-upscaler", video: input }
+          : { model: "seedvr-2", image: input }, () => {});
     }
   }
 
-  /**
-   * Downloads what a model returned and files it in the library. The name is
-   * the model's, the extension the result's — what came back decides what the
-   * file is called, not what was asked for.
-   */
-  private async store(url: string, name: string, generation: { key: string; id?: string | null }): Promise<Asset> {
-    const response = await fetch(url);
+  /** Downloads the job's result and keeps both the legacy cache key and job provenance. */
+  private async store(file: Job["assets"][number], key: string, job: string): Promise<Asset> {
+    const response = await fetch(file.url);
     assert(response.ok, `Failed to fetch the generated asset: ${response.status}`);
-    const blob = await response.blob();
-
-    return this.library.store(blob, {
-      name: name + resultExtension(url, blob),
+    const asset = await this.library.store(await response.blob(), {
+      name: file.filename,
       folder: GENERATED_DIR,
-      generation,
+      generation: { key },
+      job,
     });
+    await this.library.settle();
+    return asset;
   }
 
-  private requestGeneration(spec: ResolvedGeneration) {
+  private async requestGeneration(spec: ResolvedGeneration): Promise<Job> {
+    assert(spec.seed === undefined, "The current generation API does not support seeded generation. Remove seed to request new media.");
+    let request: unknown;
     switch (spec.type) {
-      case "image": {
-        return (async () => {
-          const images = spec.refIds.length > 0
-            ? await Promise.all(spec.refIds.map((id) => this.uploadInput(id)))
-            : undefined;
-
-          return await trpc.generateImage.mutate({
-            model: spec.model,
-            prompt: spec.prompt,
-            aspectRatio: spec.aspectRatio,
-            count: 1,
-            seed: spec.seed,
-            images,
-          });
-        })();
-      }
+      case "image":
+        request = {
+          model: spec.model, prompt: spec.prompt, aspectRatio: spec.aspectRatio, count: 1,
+          images: spec.refIds.length ? await Promise.all(spec.refIds.map((id) => this.uploadInput(id))) : undefined,
+        };
+        break;
       case "video": {
-        return (async () => {
-          const [startFrame, endFrame] = await Promise.all([
-            spec.startFrameId ? this.uploadInput(spec.startFrameId) : undefined,
-            spec.endFrameId ? this.uploadInput(spec.endFrameId) : undefined,
-          ]);
-
-          return await trpc.generateVideo.mutate({
-            model: spec.model,
-            prompt: spec.prompt,
-            aspectRatio: spec.aspectRatio,
-            duration: spec.duration,
-            generateAudio: spec.audio,
-            seed: spec.seed,
-            startFrame,
-            endFrame,
-          });
-        })();
+        assert(!spec.audio, "The current generation API does not support the audio option. Import a soundtrack instead.");
+        const [startFrame, endFrame] = await Promise.all([
+          spec.startFrameId ? this.uploadInput(spec.startFrameId) : undefined,
+          spec.endFrameId ? this.uploadInput(spec.endFrameId) : undefined,
+        ]);
+        request = {
+          model: spec.model, prompt: spec.prompt, aspectRatio: spec.aspectRatio,
+          duration: spec.duration, startFrame, endFrame,
+        };
+        break;
       }
-      case "voice": {
-        return trpc.textToSpeech.mutate({
-          model: spec.model,
-          prompt: spec.prompt,
-          voice: spec.voice,
-          seed: spec.seed,
-        });
-      }
-      case "audio": {
-        return trpc.generateSound.mutate({
-          model: spec.model,
-          prompt: spec.prompt,
-          duration: spec.duration,
-          seed: spec.seed,
-        });
-      }
+      case "voice":
+        request = { model: spec.model, prompt: spec.prompt, voice: spec.voice };
+        break;
+      case "audio":
+        request = { model: spec.model, prompt: spec.prompt, duration: spec.duration };
+        break;
     }
+    return runJob(generateRequest.parse(request), () => {});
   }
 
-  /** Uploads a referenced asset for the model to read; the bucket key is project-unique. */
-  private async uploadInput(assetId: string) {
+  private async uploadInput(assetId: string): Promise<UploadedAssetRef> {
     const asset = this.library.get(assetId);
     assert(asset, `Referenced asset ${assetId} not found`);
-    const uploaded = await uploadBlob(await getAssetFile(asset), `${this.projectId}-${assetId}`);
-    assert(uploaded, `Failed to upload referenced asset ${assetId}`);
-    return uploaded;
+    return uploadFile(await getAssetFile(asset));
   }
 }
 
@@ -562,24 +508,6 @@ function provisionalName(prompt: string): string {
   if (text.length <= PROVISIONAL_NAME_LENGTH) return text || "Generation";
   const cut = text.lastIndexOf(" ", PROVISIONAL_NAME_LENGTH);
   return `${text.slice(0, cut > 0 ? cut : PROVISIONAL_NAME_LENGTH)}…`;
-}
-
-/**
- * What to call a generated result: the extension its type implies, falling
- * back to the one its URL carries. Neither is guaranteed — some models hand
- * back a plain slug (`.../files/young-man-city-skyline`), some servers say
- * only `application/octet-stream` — so this can come back empty, and the
- * library reads the bytes instead. The name is what the file is identified
- * by once on disk, so getting it right saves that guess.
- */
-function resultExtension(url: string, blob: Blob): string {
-  const fromType = blob.type ? mimeTypeToExtension(blob.type) : ".bin";
-  if (fromType !== ".bin") return fromType;
-
-  const fileName = url.split(/[?#]/)[0]!.split("/").pop() ?? "";
-  const dot = fileName.lastIndexOf(".");
-  const fromUrl = dot > 0 ? fileName.slice(dot + 1) : "";
-  return fromUrl && fromUrl.length <= 5 ? `.${fromUrl}` : "";
 }
 
 /**
@@ -626,17 +554,4 @@ function sceneHasAudio(world: World, scene: Entity): boolean {
     if (entity.has(Audio) || entity.get(Paint)?.value === PaintType.VIDEO) return true;
   }
   return false;
-}
-
-/**
- *  Per-model constraints (`dapi models video`); unknown models are left to the server.
- */
-function checkVideoConstraints(spec: Extract<ResolvedGeneration, { type: "video" }>): void {
-  const model = PROMPT_INPUT_VIDEO_MODEL_OPTIONS.find((option) => option.id === spec.model);
-  if (!model) return;
-
-  assert(model.aspectRatios.includes(spec.aspectRatio), `${spec.model} does not support aspect ratio ${spec.aspectRatio}`);
-  assert(model.durations.includes(`${spec.duration}s`), `${spec.model} does not support a duration of ${spec.duration}s`);
-  assert(!spec.audio || model.features.includes("audio"), `${spec.model} does not support audio generation`);
-  assert(spec.endFrameId === undefined || model.features.includes("end-frame"), `${spec.model} does not support an end frame`);
 }

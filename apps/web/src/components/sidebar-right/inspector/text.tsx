@@ -219,11 +219,13 @@ export function TextPanel(props: TextPanelProps) {
         <ControlledTextField
           aria-label="Font size"
           class="flex-1"
+          icon={<Icon name="text.font-size" />}
           value={fontSize()}
           onNumber={(v) => editor.editProperty(entity(), 'fontSize', v)}
           step={1}
           min={1}
           autoSelect
+          sliderEnabled
           limitEvents
         />
       </ControlRow>
@@ -232,7 +234,7 @@ export function TextPanel(props: TextPanelProps) {
         <ControlRow label="Color">
           <ColorOpacityRow label="Text color" color={color()} onChangeColor={changeColor} onClick={() => setColorOpen(true)} />
         </ControlRow>
-        <FloatingInspector open={colorOpen} anchorRef={() => colorAnchor}>
+        <FloatingInspector open={colorOpen} anchorRef={() => colorAnchor} onClose={() => setColorOpen(false)}>
           <FloatingInspectorHeader>
             <FloatingInspectorTitle>Text color</FloatingInspectorTitle>
             <Button variant="ghost" size="icon-square" class="ml-auto" aria-label="Close text color" onClick={() => setColorOpen(false)}><Icon name="close-remove" /></Button>

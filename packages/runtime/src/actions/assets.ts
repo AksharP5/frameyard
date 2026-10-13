@@ -6,26 +6,18 @@
 // goes through the AssetLibrary (@diffusionstudio/assets); these are the
 // lookups the decoders and hosts share.
 
-import { Ai, AssetId, Library, Paint, SourceFrameRate } from '../traits';
+import { AssetId, Library, Paint, SourceFrameRate } from '../traits';
 import { PaintType } from '../constants';
 import { readMediaFile } from '@diffusionstudio/assets';
 
 import type { Entity, World } from 'koota';
 import type { Asset, AssetLibrary, MaskAsset, SequenceAsset } from '@diffusionstudio/assets';
-import type { GenAi } from '../ai';
 
 /** The world's asset library; throws when the host attached none. */
 export function getLibrary(world: World): AssetLibrary {
 	const library = world.get(Library);
 	if (!library) throw new Error('This world has no asset library');
 	return library;
-}
-
-/** The world's generation service; throws when the host attached none. */
-export function getAi(world: World): GenAi {
-	const ai = world.get(Ai);
-	if (!ai) throw new Error('This world cannot generate assets (no Ai attached)');
-	return ai;
 }
 
 /**

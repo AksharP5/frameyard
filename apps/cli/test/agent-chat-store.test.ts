@@ -34,6 +34,7 @@ function fixture(config: { localMode?: boolean; desktop?: boolean; nativeSendErr
   const dependencies: Record<string, unknown> = {
     'solid-js': solid, 'solid-js/store': store,
     somoto: { toast: { error: noop } },
+    '@/lib/analytics': { track: noop },
     '@/lib/local-mode': { localMode: config.localMode ?? false },
     '@desktop/main-channels': { MAIN_CHANNELS: { CODEX_REQUEST: 'codex:request' } },
     '@/lib/ipc': { mainBridge: { call: async (_channel: string, request: CodexRequest) => {

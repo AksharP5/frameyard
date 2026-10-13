@@ -25,7 +25,7 @@ export function RemoveButton(props: RemoveButtonProps) {
       type="button"
       aria-label={props.label}
       class={cx(
-        "relative size-5 shrink-0 overflow-clip rounded-full border border-border bg-canvas text-foreground transition-colors hover:border-border-input hover:bg-muted focus-ring",
+        "relative size-5 shrink-0 overflow-clip rounded-full border border-border bg-canvas text-foreground transition-colors hover:border-border-input hover:bg-muted",
         props.class,
       )}
       onClick={props.onClick}
@@ -35,7 +35,7 @@ export function RemoveButton(props: RemoveButtonProps) {
           grid child falls back to the start edge instead of centring. */}
       <Icon
         name="close-remove-small"
-        class="absolute left-1/2 top-1/2 size-6 -translate-x-1/2 -translate-y-1/2"
+        class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
       />
     </button>
   );

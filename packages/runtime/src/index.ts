@@ -1,5 +1,4 @@
 export * from './constants';
-export * from './ai';
 export * from './traits';
 export * from './world/create-world';
 export * from './world/observers';
@@ -12,3 +11,4 @@ export * from './math';
 export * from './media';
 export * from './fonts';
 export * from './utils';
+export * from './ai';

@@ -11,12 +11,13 @@ import { models } from "./models";
 import { voices } from "./voices";
 import { whoami } from "./whoami";
 import { screenshot } from "./screenshot";
-import { mediaProbe } from "./media-probe";
-import { mediaTranscribe } from "./media-transcribe";
-import { mediaFilmstrip } from "./media-filmstrip";
-import { mediaWaveform } from "./media-waveform";
-import { mediaListen } from "./media-listen";
+import { probe } from "./probe";
+import { transcribe } from "./transcribe";
+import { filmstrip } from "./filmstrip";
+import { waveform } from "./waveform";
+import { listen } from "./listen";
 import { mediaSegment } from "./media-segment";
+import { generate, job } from "./generate";
 
 import type { Handlers } from "../handler";
 
@@ -31,11 +32,19 @@ export const handlers: Handlers = {
   voices,
   whoami,
   screenshot,
-  media_probe: mediaProbe,
-  media_grab: async (...args) => (await import("./media-grab")).mediaGrab(...args),
-  media_transcribe: mediaTranscribe,
-  media_filmstrip: mediaFilmstrip,
-  media_waveform: mediaWaveform,
-  media_listen: mediaListen,
+  probe,
+  grab: async (...args) => (await import("./grab")).grab(...args),
+  transcribe,
+  filmstrip,
+  waveform,
+  listen,
+  generate,
+  job,
+  media_probe: (args, ctx) => probe(args, ctx),
+  media_grab: async (...args) => (await import("./grab")).grab(...args),
+  media_transcribe: (args, ctx) => transcribe(args, ctx),
+  media_filmstrip: (args, ctx) => filmstrip(args, ctx),
+  media_waveform: (args, ctx) => waveform(args, ctx),
+  media_listen: (args, ctx) => listen(args, ctx),
   media_segment: mediaSegment,
 };

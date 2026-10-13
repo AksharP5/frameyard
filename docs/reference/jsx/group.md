@@ -10,7 +10,7 @@ A container whose children remain individual editable layers. A group derives it
 
 ## Props
 
-A group takes the [common](./elements.md#common-props) **transform** (`x`, `y`, `z`, `offsetX`, `offsetY`, `rotation`, `rotationX`, `rotationY`, `scale`, `scaleX`, `scaleY`, `anchorX`, `anchorY`, `skewX`, `skewY`, `flipX`, `flipY`, `opacity`), **composite** (`blendMode`, `hidden`) and **timing** (`start`, `end`) props.
+A group takes the [common](./elements.md#common-props) **transform** (`x`, `y`, `z`, `offsetX`, `offsetY`, `pivotX`, `pivotY`, `rotation`, `rotationX`, `rotationY`, `scale`, `scaleX`, `scaleY`, `anchorX`, `anchorY`, `skewX`, `skewY`, `flipX`, `flipY`, `opacity`), **composite** (`blendMode`, `hidden`) and **timing** (`start`, `end`) props.
 
 A group has no painted surface of its own: use a child `<rect>` as its background. `<effect>`, `<animation>` and `<keyframeTrack>` children are valid; an effect on a group filters its children together.
 
@@ -19,6 +19,18 @@ A group has no painted surface of its own: use a child `<rect>` as its backgroun
 Canvas resizing of a spatial group changes its scale, retaining every child's authored size and coordinates. Removing both authored dimensions restores automatic bounds.
 
 `physics={true}` or a physics options object creates a local simulation world for descendant rigid bodies. Gravity and spring anchors use the group's coordinates. See [native physics](./spatial.md#physics).
+
+## Pivot
+
+A group turns about its **pivot** — `pivotX`/`pivotY`, px in its children's coordinates — not about its box. Without one an unsized group turns about its origin, as an SVG `<g>` does. An explicitly sized group retains its fractional anchor pivot:
+
+```tsx
+<group x={100} y={100} rotation={45} pivotX={200} pivotY={150}>
+  <rect x={100} y={100} width={200} height={100} />
+</group>
+```
+
+The pivot is fixed where it is written: moving, adding or animating children never moves the point the group turns about. The editor's group action writes one at the center of the members as they stand when the group is made.
 
 ## Timing
 

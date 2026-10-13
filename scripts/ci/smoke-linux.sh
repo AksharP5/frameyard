@@ -12,7 +12,7 @@ cat > "$project/package.json" <<'JSON'
 JSON
 cat > "$project/index.tsx" <<'JSX'
 export default function Smoke() {
-  return <stage id="smoke-stage">
+  return <stage id="smoke-stage" camera={[0.3, 0, 0, 0.3, 20, 10]}>
     <scene id="smoke" width={640} height={360} active>
       <group id="content" end={1}>
         <rect id="background" width={640} height={360} fill="#143a58" />

@@ -1,8 +1,4 @@
-import {
-  Computed, Group, KeepAspectRatio, UniformScale, entityLocalMat, entityWorldMat,
-  findKeyframeTrackEntity, getParentEntity, getPropertyPaths, getSelection,
-  invert2D, multiply2D, projectParentPlane, spatialNode, transformPoint,
-} from '@diffusionstudio/runtime';
+import { Computed, Group, KeepAspectRatio, UniformScale, entityLocalMat, entityPivot, entityWorldMat, findKeyframeTrackEntity, getParentEntity, getPropertyPaths, getSelection, invert2D, multiply2D, projectParentPlane, spatialNode, transformPoint } from '@diffusionstudio/runtime';
 import { ANIMATABLE_PROPERTIES, type AnimatableProperty } from '@diffusionstudio/jsx';
 import type { Entity, World } from 'koota';
 import type { Point } from '@diffusionstudio/runtime';
@@ -17,7 +13,7 @@ function snapshotNode(world: World, entity: Entity) {
   const plane = entityWorldMat(world, entity);
   const pointer = world.get(Pointer)!;
   const grabbed = transformPoint(invert2D(plane), pointer.dragStartX, pointer.dragStartY);
-  const pivot = { x: computed.anchorX * computed.width, y: computed.anchorY * computed.height };
+  const pivot = entityPivot(world, entity);
   const rx = computed.rotationX * Math.PI / 180, ry = computed.rotationY * Math.PI / 180;
   const sinX = Math.sin(rx), cosX = Math.cos(rx), sinY = Math.sin(ry), cosY = Math.cos(ry);
   // The node's local linear transform, including tilt, roll, skew, scale and flips.
@@ -108,11 +104,15 @@ export function resizeSpatialGesture(world: World, factor: Point): boolean {
     const c = snapshot.computed;
     const deltaWidth = c.width * (sx - 1), deltaHeight = c.height * (sy - 1);
     const fixed = { x: c.originX + opposite.x * c.width, y: c.originY + opposite.y * c.height };
-    const change = snapshot.linear((snapshot.pivot.x - fixed.x) * (sx - 1), (snapshot.pivot.y - fixed.y) * (sy - 1));
+    const nextPivot = snapshot.group ? snapshot.pivot : entityPivot(world, snapshot.entity, c.width + deltaWidth, c.height + deltaHeight);
+    const deltaPivot = { x: nextPivot.x - snapshot.pivot.x, y: nextPivot.y - snapshot.pivot.y };
+    const change = snapshot.group
+      ? snapshot.linear((snapshot.pivot.x - fixed.x) * (sx - 1), (snapshot.pivot.y - fixed.y) * (sy - 1))
+      : snapshot.linear(deltaPivot.x - fixed.x * (sx - 1), deltaPivot.y - fixed.y * (sy - 1));
     write(world, snapshot, [
       ...sizeWrites(snapshot, sx, sy),
-      ['x', c.positionX + change.x - (snapshot.group ? 0 : c.anchorX * deltaWidth)],
-      ['y', c.positionY + change.y - (snapshot.group ? 0 : c.anchorY * deltaHeight)],
+      ['x', c.positionX + change.x - deltaPivot.x],
+      ['y', c.positionY + change.y - deltaPivot.y],
       ['z', c.positionZ + change.z],
     ]);
     return true;

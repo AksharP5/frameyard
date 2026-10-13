@@ -4,8 +4,9 @@
 
 import type { Entity } from 'koota';
 import { GeometryType } from '../constants';
-import { Computed, Geometry, PathData } from '../traits';
-import type { PathProps } from '@diffusionstudio/jsx';
+import { Computed, Geometry, PathData, PointCount, VectorPath, ViewBox, EvenOdd } from '../traits';
+import { formatPath, trimPath } from '../math/path';
+import { polygonVertices } from '../math/shape';
 
 const PARAMETERS: Record<string, number> = { M: 2, L: 2, H: 1, V: 1, C: 6, S: 4, Q: 4, T: 2, A: 7, Z: 0 };
 const TOKEN = /[a-zA-Z]|[-+]?(?:\d*\.\d+|\d+\.?\d*)(?:[eE][-+]?\d+)?/g;
@@ -69,7 +70,7 @@ function pathTokens(d: string): PathTokens {
   return parsed;
 }
 
-export function parsePathViewBox(value: unknown): PathProps['viewBox'] {
+export function parsePathViewBox(value: unknown): [number, number, number, number] | undefined {
   if (value === undefined || value === null) return undefined;
   if (!Array.isArray(value) || value.length !== 4 || !value.every((part) => typeof part === 'number' && Number.isFinite(part))) {
     throw new Error('Path viewBox must be [x, y, width, height]');
@@ -103,28 +104,50 @@ export function interpolatePathData(from: string, to: string, progress: number):
   }).join(' ');
 }
 
+/** The same trimmed outline used by the ordinary renderer, as SVG data for projected masks. */
+function drawnPathData(entity: Entity): string {
+  const computed = entity.get(Computed)!;
+  const geometry = computed.path ?? entity.get(VectorPath)?.geometry;
+  if (!geometry) return computed.pathData;
+  const start = computed.trimStart ?? 0, end = computed.trimEnd ?? 1, offset = computed.trimOffset ?? 0;
+  if (start === 0 && end === 1) return computed.pathData || formatPath(geometry);
+  return formatPath(trimPath(geometry, start, end, offset));
+}
+
+function pathViewBox(entity: Entity): [number, number, number, number] | undefined {
+  const box = entity.get(ViewBox);
+  return box ? [box.x, box.y, box.width, box.height] : entity.get(PathData)?.viewBox;
+}
+
 const renderedPaths = new Map<string, Path2D>();
 
 /** Local-space geometry for fill, stroke and clip. Null lets existing rect/text rendering continue. */
 export function geometryPath(entity: Entity): Path2D | null {
   const type = entity.get(Geometry)?.value;
-  if (type !== GeometryType.PATH && type !== GeometryType.ELLIPSE) return null;
+  if (type !== GeometryType.PATH && type !== GeometryType.ELLIPSE && type !== GeometryType.POLYGON) return null;
   const computed = entity.get(Computed)!;
   const { width, height } = computed;
-  const data = entity.get(PathData);
-  const key = JSON.stringify([type, width, height, computed.pathData, data?.viewBox]);
+  const data = type === GeometryType.PATH ? drawnPathData(entity) : "";
+  const viewBox = pathViewBox(entity);
+  const count = entity.get(PointCount)?.value ?? 3;
+  const key = JSON.stringify([type, width, height, data, viewBox, count]);
   const cached = renderedPaths.get(key);
   if (cached) return cached;
   const path = new Path2D();
   if (type === GeometryType.ELLIPSE) {
     path.ellipse(width / 2, height / 2, Math.abs(width) / 2, Math.abs(height) / 2, 0, 0, Math.PI * 2);
-  } else if (data?.viewBox) {
-    const [x, y, sourceWidth, sourceHeight] = data.viewBox;
+  } else if (type === GeometryType.POLYGON) {
+    const vertices = polygonVertices(count, width, height);
+    path.moveTo(vertices[0]!.x, vertices[0]!.y);
+    for (let i = 1; i < vertices.length; i++) path.lineTo(vertices[i]!.x, vertices[i]!.y);
+    path.closePath();
+  } else if (viewBox) {
+    const [x, y, sourceWidth, sourceHeight] = viewBox;
     const sx = width / sourceWidth;
     const sy = height / sourceHeight;
-    path.addPath(new Path2D(computed.pathData), { a: sx, b: 0, c: 0, d: sy, e: -x * sx, f: -y * sy });
+    path.addPath(new Path2D(data), { a: sx, b: 0, c: 0, d: sy, e: -x * sx, f: -y * sy });
   } else {
-    path.addPath(new Path2D(computed.pathData));
+    path.addPath(new Path2D(data));
   }
   if (renderedPaths.size >= 256) renderedPaths.delete(renderedPaths.keys().next().value!);
   renderedPaths.set(key, path);
@@ -137,11 +160,11 @@ type ProjectPoint = (x: number, y: number) => Point;
 /** Curves are sampled after projection so the mask follows the rendered plane, including holes. */
 export function projectedGeometryPath(entity: Entity, mapPoint: ProjectPoint, tolerance = 0.5): Path2D | null {
   const type = entity.get(Geometry)?.value;
-  if (type !== GeometryType.PATH && type !== GeometryType.ELLIPSE) return null;
+  if (type !== GeometryType.PATH && type !== GeometryType.ELLIPSE && type !== GeometryType.POLYGON) return null;
   const computed = entity.get(Computed)!;
   const { width, height } = computed;
   const result = new Path2D();
-  const viewBox = entity.get(PathData)?.viewBox;
+  const viewBox = pathViewBox(entity);
   const project: ProjectPoint = type === GeometryType.PATH && viewBox
     ? (x, y) => mapPoint((x - viewBox[0]) * width / viewBox[2], (y - viewBox[1]) * height / viewBox[3])
     : mapPoint;
@@ -162,7 +185,14 @@ export function projectedGeometryPath(entity: Entity, mapPoint: ProjectPoint, to
     result.closePath();
     return result;
   }
-  const parts = pathTokens(computed.pathData).parts;
+  if (type === GeometryType.POLYGON) {
+    const vertices = polygonVertices(entity.get(PointCount)?.value ?? 3, width, height);
+    move(vertices[0]!);
+    for (let i = 1; i < vertices.length; i++) line(vertices[i]!);
+    result.closePath();
+    return result;
+  }
+  const parts = pathTokens(drawnPathData(entity)).parts;
   let current: Point = { x: 0, y: 0 };
   let start = current;
   let control = current;
@@ -279,5 +309,5 @@ function arcCurve(from: Point, to: Point, rx: number, ry: number, degrees: numbe
 
 /** Fill and clip share the authored SVG winding rule. */
 export function geometryFillRule(entity: Entity): CanvasFillRule {
-  return entity.get(PathData)?.fillRule ?? 'nonzero';
+  return entity.has(EvenOdd) ? 'evenodd' : entity.get(PathData)?.fillRule ?? 'nonzero';
 }

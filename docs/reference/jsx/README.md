@@ -33,14 +33,14 @@ export default function Project() {
 | [stage.md](./stage.md) | `<stage>`: the root, canvas background and camera, canvas placement |
 | [scene.md](./scene.md) | `<scene>`: the clipped, playable frame and the timeline its children sit on |
 | [elements.md](./elements.md) | Element-to-node mapping, coordinates and sizing, the shared property table |
-| [group.md](./group.md), [rect.md](./rect.md), [path.md](./path.md), [text.md](./text.md), [video.md](./video.md), [image.md](./image.md), [audio.md](./audio.md) | Per-element props |
+| [group.md](./group.md), [rect.md](./rect.md), [ellipse.md](./ellipse.md), [polygon.md](./polygon.md), [path.md](./path.md), [text.md](./text.md), [video.md](./video.md), [image.md](./image.md), [audio.md](./audio.md) | Per-element props |
 | [fonts.md](./fonts.md) | Fonts for `<text>` and HTML: local families, `dapi fonts` |
 | [paints.md](./paints.md) | `<solidPaint>`, gradients, `<colorStop>`, `<imagePaint>` / `<videoPaint>` |
 | [styles.md](./styles.md) | `<stroke>`, `<shadow>`, `<effect>`: outlines, drop shadows and filters |
 | [html.md](./html.md) | `<html>`: reactive HTML children drawn into the box |
 | [surface-paint.md](./surface-paint.md) | `<surface>`: a ref-provided canvas you draw into, sampled every frame |
 | [shader-paint.md](./shader-paint.md) | `<shaderPaint>`: a WGSL fragment shader over the media paint below it |
-| [media.md](./media.md) | `src` resolution (paths, URLs, asset ids, `AssetRef`), image sequences, transforms, adding an asset to the library |
+| [media.md](./media.md) | `src` resolution (paths, URLs, asset ids), image sequences, adding an asset to the library |
 | [timing.md](./timing.md) | `start` / `end` / `sourceIn` / `sourceOut` / `playbackRate`, time formats |
 | [keyframes.md](./keyframes.md) | Keyframe animation and easing |
 | [motion-workspace.md](./motion-workspace.md) | Motion library, inspector controls and editable animation conversion |
