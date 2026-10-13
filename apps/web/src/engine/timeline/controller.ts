@@ -259,6 +259,7 @@ export function createTimelineController(world: World) {
 			const { deltaX, deltaY } = normalizeWheel(event);
 			const resolution = getResolution(world, scene);
 			const scrollX = getScrollX(world, scene);
+			const [wheelX, wheelY] = shiftScroll(event.shiftKey, deltaX, deltaY);
 
 			if (event.altKey || event.ctrlKey || event.metaKey) {
 				const delta = clamp(deltaY, -ZOOM_DELTA_CLAMP, ZOOM_DELTA_CLAMP);
@@ -269,10 +270,10 @@ export function createTimelineController(world: World) {
 				);
 
 				zoomTimelineView(world, scene, next, surface.layout.width);
-			} else if (Math.abs(deltaX) > Math.abs(deltaY)) {
-				setScrollX(world, scene, scrollX + (deltaX * SCROLL_X_SENSITIVITY) / resolution);
+			} else if (Math.abs(wheelX) > Math.abs(wheelY)) {
+				setScrollX(world, scene, scrollX + (wheelX * SCROLL_X_SENSITIVITY) / resolution);
 			} else {
-				setScrollY(world, scene, getScrollY(world, scene) + deltaY);
+				setScrollY(world, scene, getScrollY(world, scene) + wheelY);
 				applyVerticalScroll();
 			}
 
@@ -287,12 +288,13 @@ export function createTimelineController(world: World) {
 
 		withScene((scene) => {
 			const { deltaX, deltaY } = normalizeWheel(event);
+			const [wheelX, wheelY] = shiftScroll(event.shiftKey, deltaX, deltaY);
 
-			if (Math.abs(deltaX) > Math.abs(deltaY)) {
-				layerScrollX += deltaX;
+			if (Math.abs(wheelX) > Math.abs(wheelY)) {
+				layerScrollX += wheelX;
 				applyLayerScrollX();
 			} else {
-				setScrollY(world, scene, getScrollY(world, scene) + deltaY);
+				setScrollY(world, scene, getScrollY(world, scene) + wheelY);
 				applyVerticalScroll();
 			}
 
@@ -427,4 +429,16 @@ function normalizeWheel(event: WheelEvent): { deltaX: number; deltaY: number } {
 			: 1;
 
 	return { deltaX: event.deltaX * scale, deltaY: event.deltaY * scale };
+}
+
+/**
+ * The deltas as the gesture meant them. With Shift held the wheel is a
+ * sideways one, but only a trackpad and macOS say so in the event: on
+ * Windows and Linux a mouse keeps reporting it on `deltaY`, because the
+ * browser swaps its default action rather than the event's axes. A delta
+ * that arrived on its own axis wins over one that has to be borrowed.
+ */
+function shiftScroll(shift: boolean, deltaX: number, deltaY: number): [number, number] {
+	if (!shift) return [deltaX, deltaY];
+	return Math.abs(deltaY) > Math.abs(deltaX) ? [deltaY, 0] : [deltaX, 0];
 }

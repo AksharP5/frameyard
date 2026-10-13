@@ -3,13 +3,14 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 import { realpathSync } from "node:fs";
-import { mkdir, mkdtemp, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { TimecodedImage, ToolArgs, ToolName, ToolOutput, ToolResult } from "@diffusionstudio/dapi";
+import { generatedPath } from "@diffusionstudio/dapi";
+import type { GenerationResult, TimecodedImage, ToolArgs, ToolName, ToolOutput, ToolResult } from "@diffusionstudio/dapi";
 
 /** A file the tool wrote, kept in memory only long enough to decide whether to inline it. */
 export type WrittenImage = { path: string; png: Uint8Array };
@@ -50,18 +51,27 @@ export async function present(name: ToolName, args: unknown, result: unknown): P
     }
     case "capture":
       return presentImages(result as ToolResult<"capture">, (args as ToolArgs<"capture">).output, "capture");
+    case "grab":
     case "media_grab":
       return presentImages(result as ToolResult<"media_grab">, (args as ToolArgs<"media_grab">).output, "grab");
+    case "filmstrip":
     case "media_filmstrip":
       return presentPreview(result as ToolResult<"media_filmstrip">, (args as ToolArgs<"media_filmstrip">).output, "filmstrip");
+    case "waveform":
     case "media_waveform":
       return presentPreview(result as ToolResult<"media_waveform">, (args as ToolArgs<"media_waveform">).output, "waveform");
     case "screenshot":
       return presentScreenshot(result as ToolResult<"screenshot">, (args as ToolArgs<"screenshot">).output);
+    case "transcribe":
     case "media_transcribe":
       return presentTranscript(result as ToolResult<"media_transcribe">, (args as ToolArgs<"media_transcribe">).output);
     case "media_segment":
       return presentSegment(result as ToolResult<"media_segment">, (args as ToolArgs<"media_segment">).output);
+    case "generate":
+      if ((args as ToolArgs<"generate">).estimate) return { output: result, images: [] };
+      return presentJob(result as GenerationResult);
+    case "job":
+      return presentJob(result as GenerationResult);
     case "context":
       return presentContext(result as ToolResult<"context">);
     default:
@@ -127,10 +137,26 @@ async function presentTranscript(transcript: ToolResult<"media_transcribe">, out
   return { output: presented, images: [] };
 }
 
-async function writePrivateFile(path: string, data: Uint8Array | string): Promise<void> {
+async function writePrivateFile(path: string, data: Uint8Array | string | ReadableStream<Uint8Array>): Promise<void> {
   const temporary = join(dirname(path), `.dapi-${randomUUID()}.tmp`);
   try {
-    await writeFile(temporary, data, { flag: "wx", mode: 0o600 });
+    if (typeof data === "string" || data instanceof Uint8Array) {
+      await writeFile(temporary, data, { flag: "wx", mode: 0o600 });
+    } else {
+      const file = await open(temporary, "wx", 0o600);
+      const reader = data.getReader();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          await file.writeFile(value);
+        }
+      } finally {
+        await reader.cancel().catch(() => undefined);
+        reader.releaseLock();
+        await file.close();
+      }
+    }
     await rename(temporary, path);
   } catch (error) {
     await unlink(temporary).catch(() => undefined);
@@ -180,6 +206,68 @@ async function presentContext(result: ToolResult<"context">): Promise<Presented>
     masks.push(image === undefined ? row : { ...row, image });
   }
   return { output: { ...result, masks }, images };
+}
+
+/** Files of succeeded jobs saved to disk, by job id: the first poll that sees a job succeed saves them, the rest reuse the paths. */
+const jobFiles = new Map<string, Promise<string[]>>();
+
+/** Pictures of local jobs, by job id: each is written to the temp dir, and shown inline, the first poll it comes with. */
+const jobImages = new Map<string, string>();
+
+/**
+ * A job's files bound for disk are saved once it has succeeded — downloaded
+ * from their `url`, or written from the `bytes` a local model made — to
+ * `saveTo` (see `generatedPath`; a file already there is written over, as the
+ * other tools' outputs are) or under their own names into a directory of the
+ * job's own under the temp dir, and their `url` or `bytes` is swapped for the
+ * `path`. Files the renderer saved into the library arrive with their paths.
+ * A local job's picture goes to the temp dir, named in `details.image`.
+ */
+async function presentJob({ job, saveTo, image }: GenerationResult): Promise<Presented> {
+  const images: WrittenImage[] = [];
+  let shown = job;
+  if (image) {
+    let path = jobImages.get(job.id);
+    if (path === undefined) {
+      path = join(tempDir(), `dapi-${job.id}.png`);
+      await writePrivateFile(path, image);
+      jobImages.set(job.id, path);
+      images.push({ path, png: image });
+    }
+    shown = { ...job, details: { ...job.details, image: path } };
+  }
+
+  const pending = job.assets.filter((file) => file.url !== undefined || file.bytes !== undefined);
+  if (job.status !== "succeeded" || pending.length === 0) return { output: shown, images };
+
+  let paths = jobFiles.get(job.id);
+  if (!paths) {
+    const temp = join(tempDir(), `dapi-generate-${job.id}`);
+    const targets = job.assets.map((file, i) =>
+      saveTo === null ? join(temp, basename(file.filename)) : generatedPath(saveTo, file.filename, i, job.assets.length),
+    );
+    paths = saveAll(job.assets, targets);
+    paths.catch(() => jobFiles.delete(job.id));
+    jobFiles.set(job.id, paths);
+  }
+  const written = await paths;
+  const assets = job.assets.map(({ url: _url, bytes: _bytes, ...file }, i) => ({ ...file, path: written[i] }));
+  return { output: { ...shown, assets }, images };
+}
+
+async function saveAll(files: GenerationResult["job"]["assets"], targets: string[]): Promise<string[]> {
+  for (const [i, file] of files.entries()) {
+    await mkdir(dirname(targets[i]!), { recursive: true });
+    await writePrivateFile(targets[i]!, file.bytes ?? (await download(file.url!, file.filename)));
+  }
+  return targets;
+}
+
+async function download(url: string, filename: string): Promise<ReadableStream<Uint8Array>> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Could not download ${filename} (${response.status})`);
+  if (!response.body) throw new Error(`Could not download ${filename}: the response has no body.`);
+  return response.body;
 }
 
 function screenshotFilename(taken: Date): string {

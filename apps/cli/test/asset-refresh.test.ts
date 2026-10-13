@@ -12,6 +12,60 @@ const compiled = await build({
 });
 const { AssetLibrary } = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString("base64")}`) as typeof import("../../../packages/assets/src/library.ts");
 
+test("job provenance and generation cache keys survive saving, media refresh, relinking, and deduplication", async () => {
+  let manifest: Manifest = { version: 1, folders: [], assets: [] };
+  const files = new Map<string, File>();
+  let mtime = 0;
+  const fs: ProjectFS = {
+    async readManifest() { return manifest; },
+    async writeManifest(value) { manifest = structuredClone(value); },
+    async list() { return []; },
+    async stat(source) {
+      const file = files.get(source);
+      return file ? { size: file.size, mtime: file.lastModified } : null;
+    },
+    async file(source) {
+      const file = files.get(source);
+      if (!file) throw new Error(`Missing ${source}`);
+      return file;
+    },
+    async write(source, blob) { files.set(source, new File([blob], "captions.json", { lastModified: ++mtime })); },
+    async remove(source) { files.delete(source); },
+  };
+  const library = new AssetLibrary(fs);
+  try {
+    const generation = { key: "transcript:local-v5:main:1" };
+    const first = await library.store(new Blob(['[{"text":"first"}]'], { type: "application/json" }), {
+      name: "captions.json", generation, job: "job-one",
+    });
+    await library.settle();
+    await library.load();
+    assert.equal(library.get(first.path)?.job, "job-one");
+    assert.deepEqual(library.get(first.path)?.generation, generation);
+
+    files.set(first.source, new File(['[{"text":"refreshed"}]'], "captions.json", { lastModified: ++mtime }));
+    await library.load();
+    const refreshed = library.get(first.path)!;
+    assert.notEqual(refreshed.id, first.id);
+    assert.equal(refreshed.job, "job-one");
+    assert.deepEqual(refreshed.generation, generation);
+
+    files.set("/replacement.json", new File(['[{"text":"replacement"}]'], "replacement.json", { lastModified: ++mtime }));
+    const relinked = await library.relink(refreshed, "/replacement.json");
+    assert.equal(relinked.job, "job-one");
+    const duplicate = await library.store(new Blob(['[{"text":"replacement"}]'], { type: "application/json" }), {
+      name: "new-take.json", generation, job: "job-two",
+    });
+    assert.equal(duplicate, relinked);
+    assert.equal(duplicate.job, "job-two");
+    await library.settle();
+    await library.load();
+    assert.equal(library.get(first.path)?.job, "job-two");
+    assert.deepEqual(library.get(first.path)?.generation, generation);
+    assert.equal(manifest.assets.length, 1);
+  } finally { await library.dispose(); }
+});
+
 test("replacing bytes at the same asset path rebinds live clips and records the new identity", async () => {
   let file = new File(['[{"text":"first render"}]'], "captions.json", { type: "application/json", lastModified: 1 });
   let manifest: Manifest = { version: 1, folders: [], assets: [] };
@@ -170,6 +224,8 @@ test("sequence frame rate survives import and reopen, and metadata-only edits re
     if (original.type !== "SEQUENCE") return;
     assert.equal(original.frameRate, 60);
     assert.equal(original.duration, 1);
+    const generation = { key: "generated-sequence" };
+    library.update(original, { generation, job: "sequence-job" });
     await library.settle();
     await library.load();
     assert.equal((await library.get("title.frames")!.handle.getFile()).name, "frame0000.png");
@@ -181,6 +237,8 @@ test("sequence frame rate survives import and reopen, and metadata-only edits re
     if (revised.type !== "SEQUENCE") return;
     assert.equal(revised.duration, 2);
     assert.equal(revised.frameRate, 30);
+    assert.equal(revised.job, "sequence-job");
+    assert.deepEqual(revised.generation, generation);
     assert.notEqual(revised.id, original.id);
     assert.deepEqual(relinks, [original.id]);
     files.delete(".sequence.json");

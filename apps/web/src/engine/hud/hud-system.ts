@@ -7,8 +7,8 @@ import {
 	Active, Computed, Culled, FrameRate, Geometry, Group, Hidden,
 	HitRegions, Hovering, Name, Playback, RenderSurface, Root, Selected,
 	Sequential, ChildOf,
-	entityQuad, entityWorldMat, getMaskSelection, getSelectionMask, getSourceFailure,
-	invert2D, isGenerating,
+	entityQuad, entityWorldMat, getGeneratingLabel, getGeneratingProgress, getMaskSelection, getSelectionMask, getSourceFailure,
+	invert2D,
 	multiply2D, rectToQuad, rotate2D, scale2D, store, transformPoint,
 	translate2D,
 } from '@diffusionstudio/runtime';
@@ -23,6 +23,9 @@ import { getMarqueeQuad } from '../input/snapping';
 import { getMountedNameInput } from './name-input';
 import { drawPathControls } from './path-controls';
 import { drawObjectMasks } from '../object-mask';
+import { drawGradientTool, isGradientTool } from '../gradient-tool';
+import { drawDrawTool } from '../draw-tool';
+import { drawPathEditor, drawPenTool, isPathEditing } from '../path-tool';
 
 import type { Entity, World } from 'koota';
 import type { Mat2D } from '@diffusionstudio/runtime';
@@ -50,8 +53,10 @@ export function hudSystem(world: World): void {
 	}
 
 	// The mask is in the way of the thing it is around while that thing is
-	// being moved, so it steps aside for the gesture.
-	const mask = world.get(Hud)?.mode === 'moving' ? null : getSelectionMask(world);
+	// being moved, so it steps aside for the gesture; its handles would sit
+	// on a gradient's while that is being placed, and on a path's vertices
+	// while those are being edited.
+	const mask = world.get(Hud)?.mode === 'moving' || isGradientTool(world) || isPathEditing(world) ? null : getSelectionMask(world);
 
 	if (mask) {
 		drawSelectionMask(world, ctx, mask, resolution);
@@ -61,6 +66,10 @@ export function hudSystem(world: World): void {
 
 	drawMarquee(world, ctx, resolution);
 	drawObjectMasks(world, ctx, resolution);
+	drawGradientTool(world, ctx, resolution);
+	drawDrawTool(world, ctx, resolution);
+	drawPenTool(world, ctx, resolution);
+	drawPathEditor(world, ctx, resolution);
 }
 
 function drawSnapLines(world: World, ctx: Ctx2D, resolution: number): void {
@@ -109,11 +118,14 @@ function drawHoverOutlines(world: World, ctx: Ctx2D, resolution: number): void {
 
 /**
  * The bar above a top-level node: play button, name, active badge, duration.
- * It sits in the node's own rotation, one line above its top edge.
+ * It sits in the node's own rotation, one line above its top edge. A node in
+ * generation is headed by what the generation is doing instead of its name,
+ * and by its progress where the duration would be.
  */
 function drawHeader(world: World, ctx: Ctx2D, entity: Entity, resolution: number): void {
 	const failure = getSourceFailure(entity);
-	const label = failure || (isGenerating(entity) ? 'Generating...' : entity.get(Name)?.value);
+	const generating = getGeneratingLabel(world, entity);
+	const label = failure || generating || entity.get(Name)?.value;
 	if (!label) return;
 
 	const header = getHeaderLayout(world, entity, resolution);
@@ -198,16 +210,18 @@ function drawHeader(world: World, ctx: Ctx2D, entity: Entity, resolution: number
 		ctx.fillText('Active', 0, 0);
 	}
 
-	if (playback && (fitted?.width ?? 0) + badgeWidth + 60 < header.width) {
+	const trailing = generating
+		? getGeneratingProgress(entity)
+		: playback
+			? formatDuration(world, entity)
+			: undefined;
+
+	if (trailing && (fitted?.width ?? 0) + badgeWidth + 60 < header.width) {
 		ctx.setTransform(header.mat.a, header.mat.b, header.mat.c, header.mat.d, header.mat.e, header.mat.f);
 		ctx.translate(header.width, 3);
 		ctx.textAlign = 'right';
 		ctx.textBaseline = 'top';
 		ctx.font = '400 11px JetBrains Mono';
-
-		const seconds = (store(world, Computed).duration[entity.id()] ?? 0) / (world.get(FrameRate)?.value ?? 30);
-		const minutes = Math.floor(seconds / 60).toString().padStart(2, '0');
-		const rest = Math.floor(seconds % 60).toString().padStart(2, '0');
 
 		if (selected) {
 			ctx.globalAlpha = 0.7;
@@ -216,9 +230,17 @@ function drawHeader(world: World, ctx: Ctx2D, entity: Entity, resolution: number
 			ctx.fillStyle = 'rgba(121, 121, 121, 1)';
 		}
 
-		ctx.fillText(`${minutes}:${rest}`, 0, 0);
+		ctx.fillText(trailing, 0, 0);
 		ctx.globalAlpha = 1;
 	}
+}
+
+/** A node's duration as `mm:ss`. */
+function formatDuration(world: World, entity: Entity): string {
+	const seconds = (store(world, Computed).duration[entity.id()] ?? 0) / (world.get(FrameRate)?.value ?? 30);
+	const minutes = Math.floor(seconds / 60).toString().padStart(2, '0');
+	const rest = Math.floor(seconds % 60).toString().padStart(2, '0');
+	return `${minutes}:${rest}`;
 }
 
 /**

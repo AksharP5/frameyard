@@ -33,6 +33,8 @@ export type AgentHostConfig = {
   instructions?: string;
   prepareTurn?: AgentHostOptions["prepareTurn"];
   version: string;
+  /** Where uploaded attachments are written; default a folder in the system temp dir. */
+  uploadDir?: string;
   /** For tests: replaces the real harnesses. */
   harnesses?: Harness[];
   log?: (message: string) => void;
@@ -59,6 +61,7 @@ export async function createAgentHost(config: AgentHostConfig): Promise<RunningA
     instructions: config.instructions,
     prepareTurn: config.prepareTurn,
     version: config.version,
+    uploadDir: config.uploadDir,
     log,
   });
   await agentHost.start();

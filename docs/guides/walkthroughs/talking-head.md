@@ -10,9 +10,9 @@ Write the brief first. It records the source files, the target duration (or "kee
 
 The transcript is the spine, so transcribe everything with speech.
 
-- **Transcribe every video and any external audio.** `media_transcribe` writes word-level start/end times to a JSON file — the times you cut on. Run it on each camera take and on any separate recording (a lav or interface track you will sync to).
-- **Render the waveform to read the gaps.** `media_waveform` marks quiet spans in red and returns their times. A transcript gap may hold a laugh, breath, or room tone. Listen before removing it.
-- **Compare repeated takes.** The transcript shows repeated lines. Listen for the clearest delivery, then use `media_grab` near each candidate's first word to check its framing and sharpness.
+- **Transcribe every video and any external audio.** `transcribe` writes word-level start/end times to a JSON file — the times you cut on. Run it on each camera take and on any separate recording (a lav or interface track you will sync to).
+- **Render the waveform to read the gaps.** `waveform` marks quiet spans in red and returns their times. A transcript gap may hold a laugh, breath, or room tone. Listen before removing it.
+- **Compare repeated takes.** The transcript shows repeated lines. Listen for the clearest delivery, then use `grab` near each candidate's first word to check its framing and sharpness.
 
 ## 3. Lay out the A-roll
 
@@ -106,5 +106,5 @@ Keep captions off faces and other important details.
 
 ```tsx
 {/* Hook holds until 00:03; captions begin there. */}
-<captions preset="whisper" verticalAlign="bottom" start={3} sourceIn={3} />
+<captions src="talk.srt" preset="whisper" verticalAlign="bottom" start={3} sourceIn={3} />
 ```

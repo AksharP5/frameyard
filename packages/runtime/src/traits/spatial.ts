@@ -25,6 +25,5 @@ export const SpatialMaterial = trait({
 });
 export const LightSource = trait({ type: 'point' as LightType });
 export const GradientSpace = trait({ value: 'local' as 'local' | 'screen' });
-export const StrokeDash = trait({ value: () => [] as number[] });
 export const PhysicsWorld = trait({ settings: () => null as PhysicsWorldSettings | null });
 export const RigidBody = trait({ settings: () => null as RigidBodySettings | null });

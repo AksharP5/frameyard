@@ -2,17 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-// Asset transcoding and preview rendering (was engine/utils/transcode.ts;
-// the timecode formatters moved to utils/time.ts). Filmstrips and waveforms
+// Asset preview rendering (was engine/utils/transcode.ts; the timecode
+// formatters moved to utils/time.ts). Filmstrips and waveforms
 // draw into an OffscreenCanvas, so everything here is worker-capable.
 
-import { ALL_FORMATS, AudioSampleSink, BlobSource, BufferTarget, CanvasSink, Conversion, Input, InputAudioTrack, Mp4OutputFormat, OggOutputFormat, Output, StreamTarget } from 'mediabunny';
+import { ALL_FORMATS, AudioSampleSink, BlobSource, CanvasSink, Input, InputAudioTrack, Output, OggOutputFormat, Mp4OutputFormat, Conversion, BufferTarget, StreamTarget, type StreamTargetChunk } from 'mediabunny';
 
 import { assert } from '../utils/assert';
 import { formatTimestamp } from '../utils/time';
 import { getAssetFile } from '../actions/assets';
 
-import type { StreamTargetChunk } from 'mediabunny';
 import type { Asset, VideoAsset, AudioAsset } from '@diffusionstudio/assets';
 
 type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;

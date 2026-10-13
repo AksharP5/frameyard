@@ -48,7 +48,7 @@ function SpatialColor(props: { node: Entity; property: "color" | "emissive" | "f
   };
   return <ControlRow label={props.label} ref={anchor}>
     <ColorOpacityRow color={color()} onChangeColor={assignColor} onClick={() => setOpen(true)} keyframe={<Show when={props.property === "color"}><Keyframe target={props.node} property="color" /></Show>} />
-    <FloatingInspector open={open} anchorRef={anchor}>
+    <FloatingInspector open={open} anchorRef={anchor} onClose={() => setOpen(false)}>
       <FloatingInspectorHeader>
         <FloatingInspectorTitle>{props.label}</FloatingInspectorTitle>
         <Button class="ml-auto" variant="ghost" size="icon" aria-label={`Close ${props.label.toLowerCase()} picker`} onClick={() => setOpen(false)}><Icon name="close-remove" /></Button>

@@ -25,8 +25,8 @@ yt-dlp -x --audio-format m4a -o podcast.m4a 'https://example.com/podcast'
 Run local transcription after [`setup:local`](../../linux.md):
 
 ```sh
-dapi media transcribe "$PWD/podcast.m4a" --output "$PWD/transcript.json"
-dapi media waveform "$PWD/podcast.m4a"
+dapi transcribe "$PWD/podcast.m4a" --output "$PWD/transcript.json"
+dapi waveform "$PWD/podcast.m4a"
 ```
 
 The transcript contains segment text and word-level times in source seconds.
@@ -46,7 +46,7 @@ down the source start and end times for the best candidate.
 Tighten both ends against the real audio:
 
 - Search `transcript.json` for the hook line. Put the in-point near its first word and the out-point after the last word of the closing thought.
-- `media_waveform` with `start`/`end` around the cut shows the breaths around those words, so you can open the in-point a beat early and let the out-point land on the silence after the line instead of clipping its tail.
+- `waveform` with `start`/`end` around the cut shows the breaths around those words, so you can open the in-point a beat early and let the out-point land on the silence after the line instead of clipping its tail.
 
 ## 6. Download the segment and lay it out
 
@@ -61,7 +61,7 @@ yt-dlp -f "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b" --merge-output-format m
   --download-sections "*41:08-41:48" -o assets/a-roll/clip-raw.mp4 'https://example.com/podcast'
 ```
 
-Probe the downloaded dimensions with `dapi media probe`. A section download can
+Probe the downloaded dimensions with `dapi probe`. A section download can
 start before the requested point at a source keyframe, so play the downloaded
 clip and set its `sourceIn` and `sourceOut` using the downloaded file's own time.
 
@@ -108,13 +108,13 @@ Add captions after verifying the trim and framing. This example places the
 `classic` preset in the center:
 
 ```tsx
-<captions preset="classic" verticalAlign="center" />
+<captions src="episode.srt" preset="classic" verticalAlign="center" />
 ```
 
 If the caption block lands on the speakers' faces, push it off with `offsetY` rather than changing the framing you just verified:
 
 ```tsx
-<captions preset="classic" verticalAlign="center" offsetY={420} />
+<captions src="episode.srt" preset="classic" verticalAlign="center" offsetY={420} />
 ```
 
 Capture a frame per caption line with `capture` and check readability at delivery size — a caption over a mouth is worse than no caption.

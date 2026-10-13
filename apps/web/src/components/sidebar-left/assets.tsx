@@ -5,7 +5,7 @@
 import { useLayout } from "@/context/layout";
 import { basename, dirname } from "@diffusionstudio/assets";
 import { usePromptInput } from "@/context/prompt-input";
-import { createDefaultConfig } from "@/components/genai/prompt-input";
+import { restoreConfig } from "@/components/genai/saved-config";
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { SidebarTabs } from "@/agent-chat";
 import { Button } from "../ui/button";
@@ -527,7 +527,7 @@ export function Assets(props: { showTabs?: boolean } = {}) {
               </div>
               <div class="flex flex-col gap-2 w-full">
                 <Show when={!localMode}>
-                  <Button variant="secondary" class="w-full" onClick={() => openPromptInput(createDefaultConfig("IMAGE"))}>
+                  <Button variant="secondary" class="w-full" onClick={() => openPromptInput(restoreConfig("IMAGE"))}>
                     Generate with AI
                   </Button>
                 </Show>

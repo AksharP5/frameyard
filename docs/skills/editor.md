@@ -2,11 +2,11 @@
 
 How to understand source material before editing it. Inspect only the modalities the decision turns on — speech, action, music, graphics, or atmosphere may lead, so there is no fixed priority. Sample the picture against what the audio tells you.
 
-- **Always probe first.** `media_probe` reports the container and its tracks, telling you up front whether the file has a video track, an audio track, or both. Everything after branches on that.
-- **Get the lay of the land.** Render a `media_waveform` (audio) and a `media_filmstrip` (video) for a fast, cheap overview of where the loud and quiet stretches fall, and where the visual scene changes are. A filmstrip shows coarse structure and scene state, not crop, framing, readability, or an exact cut frame.
-- **Inspect the audio.** Use `media_waveform` to locate changes in level and `media_transcribe` for spoken words. Frameyard's hosted `media_listen` tool is unavailable in local mode, so do not treat a waveform as evidence of what a non-speech sound is.
-- **Transcribe speech.** For speech, `media_transcribe` writes the full transcript with word-level start/end times to a JSON file and returns its path — search the file for the line you need and read its times from there, rather than loading it whole.
-- **Sample the video against the audio.** Use `media_grab` to pull frames. When the audio has already pointed you at specific moments, feed those timestamps straight in from the transcript or listen output as `times` (e.g. `00:32`, `00:45`). When you need a visual pass without such cues, reach for `auto`: it scans the footage and keeps only the frames where the picture settles into a new visual state, dropping near-duplicates.
+- **Always probe first.** `probe` reports the container and its tracks, telling you up front whether the file has a video track, an audio track, or both. Everything after branches on that.
+- **Get the lay of the land.** Render a `waveform` (audio) and a `filmstrip` (video) for a fast, cheap overview of where the loud and quiet stretches fall, and where the visual scene changes are. A filmstrip shows coarse structure and scene state, not crop, framing, readability, or an exact cut frame.
+- **Inspect the audio.** Use `waveform` to locate changes in level and `transcribe` for spoken words. Frameyard's hosted `listen` tool is unavailable in local mode, so do not treat a waveform as evidence of what a non-speech sound is.
+- **Transcribe speech.** For speech, `transcribe` writes the full transcript with word-level start/end times to a JSON file and returns its path — search the file for the line you need and read its times from there, rather than loading it whole.
+- **Sample the video against the audio.** Use `grab` to pull frames. When the audio has already pointed you at specific moments, feed those timestamps straight in from the transcript or listen output as `times` (e.g. `00:32`, `00:45`). When you need a visual pass without such cues, reach for `auto`: it scans the footage and keeps only the frames where the picture settles into a new visual state, dropping near-duplicates.
 
 # The editing loop
 
@@ -17,6 +17,10 @@ How to understand source material before editing it. Inspect only the modalities
 - `context` reports the open project, current scene, playhead, selection, and assets.
 
 **The source is the document.** A project is a folder of JSX; `open` a folder once, then write the files and save. Saving recompiles and re-renders the canvas.
+
+# Generation
+
+Use `generate` with a model from [the model reference](../reference/models.md), then poll `job` until it succeeds, fails, or is canceled. In local mode only `sam-2.1` runs through this API; local captions and voiceover use Frameyard's native tools. Existing `media_segment` tracking and its `context.masks` progress remain available.
 
 # Compositing
 
@@ -31,7 +35,7 @@ How to understand source material before editing it. Inspect only the modalities
 
 How to confirm a change actually produced what you intended. A clean save does not guarantee a correct-looking composition.
 
-- Run `check` on the scene first. It catches black frames, clips that never become visible, zero-duration or fully transparent nodes, and assets that failed to load or generate.
+- Run `check` on the scene first. It catches black frames, clips that never become visible, zero-duration or fully transparent nodes, and assets that failed to load.
 - Use `capture` on the scene to see what the viewer actually gets.
 - Reconcile captured frames with the brief, and the brief with these guidelines.
 - Verify after every stage, not only at the end — build the composition incrementally so a problem is caught next to the change that caused it.
@@ -58,7 +62,7 @@ How to confirm a change actually produced what you intended. A clean save does n
 
 The authoring reference is served by the app for the installed version: read it there and trust it over memory.
 
-- [JSX reference — elements, timing, paints, generation, captions](../reference/jsx/README.md)
+- [JSX reference — elements, timing, paints, captions](../reference/jsx/README.md)
 - [Tool reference — every tool, its fields, its CLI spelling and its output](../reference/tools/README.md)
 - [Examples — complete compositions, basics through shaders](../examples/README.md)
 - [Easings: which cubic-bezier to use and when](../guides/motion/easings.md)
@@ -74,4 +78,4 @@ Read worked example(s) that match your context.
 
 ## Prompts
 
-- [Local transcription](../reference/tools/media/transcribe.md)
+- [Local transcription](../reference/tools/transcribe.md)

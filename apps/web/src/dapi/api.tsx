@@ -2,13 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+import { DapiError } from "@diffusionstudio/dapi";
+import { useAuth } from "@/context/auth";
 import { createEffect, createContext, useContext, onCleanup } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { useWorld } from "@diffusionstudio/koota-solid";
 import { Project } from "@diffusionstudio/runtime";
-import { DapiError } from "@diffusionstudio/dapi";
 import { useProject } from "@/context/project";
-import { useAuth } from "@/context/auth";
 import { useEngineContext } from "@/engine";
 import { openProjectFolder } from "@/projects";
 import { projectRoute } from "@/hooks/use-project-route";

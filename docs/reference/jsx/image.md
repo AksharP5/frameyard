@@ -12,7 +12,7 @@ All [common props](./elements.md#common-props), plus:
 
 | Prop | Type | Default | Meaning |
 | ---- | ---- | ------- | ------- |
-| `src` | `string \| AssetRef` | **required** | See [media.md](./media.md). |
+| `src` | `string` | **required** | See [media.md](./media.md). |
 | `objectFit` | `"cover" \| "contain" \| "fill"` | `"cover"` | How the source maps into the box. |
 | `frameRate` | `number` | Sequence metadata, otherwise `30` | Overrides the frame rate of a numbered image sequence, which plays on `<image>` as footage does (see [media.md](./media.md#image-sequences)). Does not affect still images. |
 | `error` | `string` | none | Why this element's source never became an asset (see [errors.md](./errors.md#failed-sources)). |

@@ -11,8 +11,10 @@ import { AssetLibrary, MANIFEST_FILE, ASSETS_DIR } from '@diffusionstudio/assets
 import { useTrait, useWorld } from '@diffusionstudio/koota-solid';
 import { authoredElement } from '@diffusionstudio/reconciler';
 import { isAssetRef, mapAssetInputs } from '@diffusionstudio/jsx';
+import type { AssetInput } from '@diffusionstudio/jsx';
 import type { Accessor } from 'solid-js';
 
+import { attachAi } from '@/utils/gen-ai';
 import { createOriginalMediaProvider } from '@/projects/original-media';
 import { createProjectFS } from '@/projects/fs';
 import { ProjectConfig } from './traits';
@@ -21,7 +23,6 @@ import { forgetAssetMedia } from './timeline/media';
 import { forgetAssetPeaks } from './timeline/peaks';
 
 import type { Asset } from '@diffusionstudio/assets';
-import type { AssetInput } from '@diffusionstudio/jsx';
 import type { World } from 'koota';
 
 /**
@@ -37,6 +38,7 @@ export function attachLibrary(world: World, dir: string) {
 	});
 
 	world.set(Library, library);
+	attachAi(world, library, dir);
 	world.set(OriginalMedia, createOriginalMediaProvider(dir));
 
 	return library;

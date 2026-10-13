@@ -67,6 +67,23 @@ test("CLI project flag and environment scope editor tools, workspaces, stdio, an
   assert.deepEqual((await run(["workspace", "open", "video"])).output.input, { action: "open", dir: target });
   assert.deepEqual((await run(["open", "video", "--background"])).output.input, { dir: target, background: true });
   assert.deepEqual((await run(["context"])).output.input, {});
+  for (const args of [
+    ["probe", "clip.mp4"],
+    ["media", "probe", "clip.mp4"],
+    ["--project", "video", "media", "probe", "clip.mp4"],
+    ["--project=video", "m", "probe", "clip.mp4"],
+  ]) {
+    const result = await run(args);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.output.name, "probe");
+    assert.equal(result.output.input.path, "clip.mp4");
+    if (args[0].startsWith("--project")) assert.equal(result.output.input.project, target);
+  }
+  const generated = await run(["--project", "video", "generate", "sam-2.1", '{"video":{"path":"clip.mp4"},"time":0,"points":[{"x":0.5,"y":0.5}]}', "--estimate"]);
+  assert.equal(generated.code, 0, generated.stderr);
+  assert.deepEqual(generated.output.input, {
+    model: "sam-2.1", video: { path: "clip.mp4" }, time: 0, points: [{ x: 0.5, y: 0.5 }], estimate: true, project: target,
+  });
   const invalid = await run(["workspace", "send", "   ", "--project", "video"]);
   assert.equal(invalid.code, 1);
   assert.match(invalid.stderr, /message/);

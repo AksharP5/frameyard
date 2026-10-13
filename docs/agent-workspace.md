@@ -451,6 +451,7 @@ complete scene in the available preview space. This changes only the view.
 
 ## Timeline view
 
+**Shift+wheel** scrolls the timeline horizontally.
 Modifier-wheel zoom anchors to the playhead. If the playhead is offscreen, zoom
 brings it into view. With the timeline focused, **Shift+Z** fits the complete
 scene duration to the timeline width, independently of the playback workarea.
@@ -466,3 +467,7 @@ Alt-drag on a resize handle resizes around the center.
 
 Hidden, locked, and out-of-time items do not intercept canvas clicks. Select those
 items in the timeline or layer list; unlock or reveal them before canvas editing.
+
+The canvas rail includes Rectangle, Ellipse, Polygon and Pen tools. Select a
+vector path to edit its points on the canvas and keyframe its outline or trim
+in Properties. Native 3D paths keep their separate spatial controls.

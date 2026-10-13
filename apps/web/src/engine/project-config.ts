@@ -18,6 +18,9 @@
 // A scene with no entry has nothing set up.
 //
 //   { "export": { "intro": { "format": "mp4", ... } } }
+//
+// `initialized` says the stage has had something on it at least once: until
+// then the project is new, and the canvas offers to make its first scene.
 
 import { createSignal } from 'solid-js';
 import { Source } from '@diffusionstudio/runtime';
@@ -154,6 +157,8 @@ export class ProjectConfig {
 	private readonly rate = createSignal(30);
 	private readonly preview = createSignal<PreviewScale>(1);
 	private readonly ranges = createSignal<Record<string, SourceRange>>({});
+	private readonly loadedSignal = createSignal(false);
+	private readonly initializedSignal = createSignal(false);
 	private writing: Promise<void> = Promise.resolve();
 	public readonly ready: Promise<void>;
 	public readonly frameRate = () => this.rate[0]();
@@ -183,6 +188,13 @@ export class ProjectConfig {
 		this.apply(isRecord(value) ? value : {});
 	}
 
+	public loaded(): boolean { return this.loadedSignal[0](); }
+	public initialized(): boolean { return this.initializedSignal[0](); }
+	public async markInitialized(): Promise<void> {
+		if (this.initialized()) return;
+		await this.update((raw) => ({ ...raw, initialized: true }));
+	}
+
 	public async settle(): Promise<void> { await this.ready; await this.writing; }
 
 	public setFrameRate(frameRate: number): Promise<void> {
@@ -203,6 +215,8 @@ export class ProjectConfig {
 		this.raw = raw;
 		this.exports[1](parseExports(raw.export));
 		this.rate[1](isFrameRate(raw.frameRate) ? raw.frameRate : 30);
+		this.loadedSignal[1](true);
+		this.initializedSignal[1](raw.initialized === true);
 	}
 
 	private update(change: (raw: Record<string, unknown>) => Record<string, unknown>): Promise<void> {

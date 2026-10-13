@@ -135,7 +135,7 @@ export function Soundboard() {
                 <SelectItem item={itemProps.item}><LayerName entity={itemProps.item.rawValue} /></SelectItem>
               )}
             >
-              <SelectTrigger class="text-xs text-muted-foreground hover:text-foreground bg-transparent hover:bg-transparent w-20 focus-visible:after:opacity-0">
+              <SelectTrigger class="text-xs text-muted-foreground hover:text-foreground bg-transparent hover:bg-transparent w-20">
                 <SelectValue<Entity>>{(state) => <LayerName entity={state.selectedOption()} />}</SelectValue>
               </SelectTrigger>
               <SelectPortal>
@@ -167,7 +167,7 @@ export function Soundboard() {
                 <SelectItem item={itemProps.item}><LayerName entity={itemProps.item.rawValue} /></SelectItem>
               )}
             >
-              <SelectTrigger class="text-xs text-muted-foreground hover:text-foreground bg-transparent hover:bg-transparent w-20 focus-visible:after:opacity-0">
+              <SelectTrigger class="text-xs text-muted-foreground hover:text-foreground bg-transparent hover:bg-transparent w-20">
                 <SelectValue<Entity>>{(state) => <LayerName entity={state.selectedOption()} />}</SelectValue>
               </SelectTrigger>
               <SelectPortal>

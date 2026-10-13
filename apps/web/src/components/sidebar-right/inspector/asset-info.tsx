@@ -13,16 +13,18 @@ import {
   formatAssetDate
 } from "@/utils/formatters";
 import { AssetInfoPreview } from "./asset-info-preview";
-import { supabase } from "@/lib/supabase";
-import { toClientConfig } from "@/components/genai/use-generation-records";
 import { useWorld } from "@diffusionstudio/koota-solid";
 import { assetName } from "@diffusionstudio/assets";
 import { useLibrary } from "@/engine/library";
 import { useAssetSelection } from "@/engine/hooks";
 import { insertAssetAtPlayhead, replaceAssetSource } from "@/engine/asset-actions";
-import { retryGeneration } from "@/engine/generations";
+import { modelOption } from "@/components/genai/config";
+import { api } from "@/lib/api";
+import { localMode } from "@/lib/local-mode";
 
 import type { Asset, PartialAsset } from "@diffusionstudio/assets";
+import { retryGeneration } from "@/engine/generations";
+
 
 /** Information about the library entry picked in the assets panel. */
 export function AssetInfoPanel() {
@@ -188,21 +190,7 @@ function AssetDetails() {
 }
 
 export function useAssetMetadataRows(asset: Accessor<Asset | undefined>) {
-  const generationId = createMemo(() => asset()?.generation?.id ?? null);
-
-  const [config] = createResource(() => generationId(), async (id) => {
-    if (!id || !supabase) return undefined;
-    const { data, error } = await supabase
-      .from("usage_records")
-      .select("config")
-      .eq("id", id)
-      .maybeSingle();
-    if (error) {
-      console.error("[asset-info] Failed to load generation record", error);
-      return undefined;
-    }
-    return toClientConfig(data?.config);
-  });
+  const [job] = createResource(() => !localMode && asset()?.job, (id) => api.jobs.get.query({ id }));
 
   return createMemo(() => {
     const a = asset();
@@ -227,9 +215,10 @@ export function useAssetMetadataRows(asset: Accessor<Asset | undefined>) {
         : null;
     const imported = formatAssetDate(a.createdAt);
     const modified = a.stat ? formatAssetDate(a.stat.mtime) : null;
-    const c = config();
-    const prompt = c?.prompt ?? null;
-    const model = c?.model ?? null;
+
+    const generation = a.job && job.latest?.id === a.job ? job.latest : undefined;
+    const prompt = generation && "prompt" in generation.request ? generation.request.prompt ?? null : null;
+    const model = generation ? modelOption(generation.model)?.name ?? generation.model : null;
 
     return [
       { label: "Dimensions", value: dimensions },

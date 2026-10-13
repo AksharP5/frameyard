@@ -19,40 +19,7 @@ import { createElement, createTextNode, insertNode, setProp, spread, use } from 
 
 import type { JSX as SolidJSX } from "solid-js";
 import type { AuthoredTree } from "./document";
-import type {
-  AdjustmentLayerProps,
-  AnimationProps,
-  AudioProps,
-  CaptionsProps,
-  ColorStopProps,
-  EffectProps,
-  MaskProps,
-  GradientPaintProps,
-  GroupProps,
-  HighlightProps,
-  PresetProps,
-  HtmlPaintProps,
-  HtmlProps,
-  ImageProps,
-  KeyframeProps,
-  KeyframeTrackProps,
-  MediaPaintProps,
-  RectProps,
-  PathProps,
-  EllipseProps,
-  SceneProps, Scene3DProps, MeshProps, Path3DProps, PointCloudProps, LightProps, VolumeProps,
-  SequenceProps,
-  ShaderPaintProps,
-  ShadowProps,
-  SolidPaintProps,
-  StageProps,
-  StrokeProps,
-  SurfacePaintProps,
-  SurfaceProps,
-  TextProps,
-  TextRangeProps,
-  VideoProps,
-} from "@diffusionstudio/jsx";
+import type { AdjustmentLayerProps, AnimationProps, AudioProps, CaptionsProps, ColorStopProps, EffectProps, EllipseProps, MaskProps, LinearGradientPaintProps, RadialGradientPaintProps, AngularGradientPaintProps, GroupProps, HighlightProps, PresetProps, HtmlPaintProps, HtmlProps, ImageProps, KeyframeProps, KeyframeTrackProps, MediaPaintProps, PathProps, PolygonProps, RectProps, SceneProps, Scene3DProps, MeshProps, Path3DProps, PointCloudProps, LightProps, VolumeProps, SequenceProps, ShaderPaintProps, ShadowProps, SolidPaintProps, StageProps, StrokeProps, SurfacePaintProps, SurfaceProps, TextProps, TextRangeProps, VideoProps } from "@diffusionstudio/jsx";
 
 /**
  * A component wrapping one host element: creates the node, routes `ref`
@@ -98,8 +65,9 @@ export const Group = hostElement<GroupProps>("Group");
 export const Highlight = hostElement<HighlightProps>("Highlight");
 export const Preset = hostElement<PresetProps>("Preset");
 export const Rect = hostElement<RectProps>("Rect");
-export const Path = hostElement<PathProps>("Path");
 export const Ellipse = hostElement<EllipseProps>("Ellipse");
+export const Polygon = hostElement<PolygonProps>("Polygon");
+export const Path = hostElement<PathProps>("Path");
 export const Video = hostElement<VideoProps>("Video");
 export const Image = hostElement<ImageProps>("Image");
 export const Audio = hostElement<AudioProps>("Audio");
@@ -109,8 +77,9 @@ export const Sequence = hostElement<SequenceProps>("Sequence");
 export const Captions = hostElement<CaptionsProps>("Captions");
 export const AdjustmentLayer = hostElement<AdjustmentLayerProps>("AdjustmentLayer");
 export const SolidPaint = hostElement<SolidPaintProps>("SolidPaint");
-export const LinearGradientPaint = hostElement<GradientPaintProps>("LinearGradientPaint");
-export const RadialGradientPaint = hostElement<GradientPaintProps>("RadialGradientPaint");
+export const LinearGradientPaint = hostElement<LinearGradientPaintProps>("LinearGradientPaint");
+export const RadialGradientPaint = hostElement<RadialGradientPaintProps>("RadialGradientPaint");
+export const AngularGradientPaint = hostElement<AngularGradientPaintProps>("AngularGradientPaint");
 export const ImagePaint = hostElement<MediaPaintProps>("ImagePaint");
 export const VideoPaint = hostElement<MediaPaintProps>("VideoPaint");
 export const ColorStop = hostElement<ColorStopProps>("ColorStop");

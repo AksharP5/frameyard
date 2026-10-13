@@ -10,7 +10,7 @@ vi.mock('@diffusionstudio/runtime', () => ({
   assetSystem: vi.fn(), renderSystem: mocks.render, transformSystem: vi.fn(), playbackSystem: vi.fn(), motionSystem: vi.fn(), syncInteractiveState: vi.fn(),
 }));
 vi.mock('./hud', () => ({ hudSystem: vi.fn() }));
-vi.mock('./traits', () => ({ AssetSelection: 'asset', Hud: 'hud', Keys: 'keys', MODIFIER_KEYS: new Set(), ObjectMaskTool: 'mask', Pointer: 'pointer', PointerEvents: 'events', ProjectConfig: 'config', SnapLines: 'snap' }));
+vi.mock('./traits', () => ({ AssetSelection: 'asset', DrawTool: 'draw', PathEditor: 'path', GradientTool: 'gradient', Hud: 'hud', Keys: 'keys', MODIFIER_KEYS: new Set(), ObjectMaskTool: 'mask', Pointer: 'pointer', PointerEvents: 'events', ProjectConfig: 'config', SnapLines: 'snap' }));
 vi.mock('./input/input-system', () => ({ inputSystem: vi.fn() }));
 vi.mock('./input/shortcuts', () => ({ shortcutSystem: vi.fn() }));
 vi.mock('./timeline', () => ({ clearClipFrames: vi.fn(), clearClipPeaks: vi.fn(), clearMedia: vi.fn(), clearPeaks: vi.fn(), timelineSystem: vi.fn(), TimelineSurface: 'timeline' }));

@@ -29,7 +29,7 @@ function fixture({ draggingId, trimmingId }: { draggingId?: number; trimmingId?:
   const noop = () => {};
   const computed = { start: Array.from({ length: 1000 }, (_, i) => i * 100), end: Array.from({ length: 1000 }, (_, i) => (i + 1) * 100) };
   const dependencies: Record<string, unknown> = {
-    '@diffusionstudio/runtime': { ClipDragOrigin, TrimDragOrigin, store: () => computed, CaptionType: {}, getSourceFailure: noop, fitsChildren: (entity: Entity) => entity.id() !== trimmingId, isGenerating: () => false, isGroup: () => false, isCaption: () => false, isText: () => false },
+    '@diffusionstudio/runtime': { ClipDragOrigin, TrimDragOrigin, store: () => computed, CaptionType: {}, getSourceFailure: noop, fitsChildren: (entity: Entity) => entity.id() !== trimmingId, isGenerating: () => false, getGeneratingLabel: noop, isGroup: () => false, isCaption: () => false, isText: () => false },
     '../../editor': { getDocumentEditor: () => ({ linkedSelection: false, select: (entity: Entity) => selected.push(entity.id()) }) },
     '../../clip-links': { isClipLocked: () => false },
     '../drag': {

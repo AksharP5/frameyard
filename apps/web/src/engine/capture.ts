@@ -116,8 +116,8 @@ export async function createCapture(source: World, node: Entity, options: Captur
 	canvas.style.cssText = 'position:fixed;left:0;top:0;z-index:-9999;opacity:0;will-change:opacity;pointer-events:none;';
 	document.body.appendChild(canvas);
 
-	// Shares the source's assets and generation service — a `src` names the
-	// same file in both — and its fonts, which are loaded into the document
+	// Shares the source's assets — a `src` names the same file in both — and
+	// its fonts, which are loaded into the document
 	// already, so copying the list only tracks them as loaded rather than
 	// having this world add them again.
 	const world = createRuntimeWorld(source.get(Project)?.id ?? '');

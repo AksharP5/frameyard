@@ -73,4 +73,4 @@ the scene's nonnegative timeline and preserves linked offsets.
 | `"HH:MM:SS"` | `"01:02:30"` | Hours, minutes, seconds. |
 | `"HH:MM:SS:FF"` | `"00:00:01:15"` | Non-drop timecode at the project rate. Frame field uses the nominal rounded rate. |
 
-CLI flags documented as taking a `Time` value (e.g. `--times` on [`capture`](../tools/capture.md) and [`media grab`](../tools/media/grab.md)) accept the same formats. Times in command **output** are plain seconds.
+CLI flags documented as taking a `Time` value (e.g. `--times` on [`capture`](../tools/capture.md) and [`grab`](../tools/grab.md)) accept the same formats. Times in command **output** are plain seconds.

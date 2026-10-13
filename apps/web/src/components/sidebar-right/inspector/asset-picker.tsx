@@ -18,7 +18,7 @@ import { Icon } from "@/components/ui/icon";
 import { Separator } from "@/components/ui/separator";
 import { LazyAssetItem } from "@/components/sidebar-left/asset-item";
 import { usePromptInput } from "@/context/prompt-input";
-import { createDefaultConfig } from "@/components/genai/prompt-input";
+import { restoreConfig } from "@/components/genai/saved-config";
 import { assetName } from "@diffusionstudio/assets";
 import { useTrait } from "@diffusionstudio/koota-solid";
 import { AssetId, isScene } from "@diffusionstudio/runtime";
@@ -122,7 +122,7 @@ export function AssetFillPicker(props: AssetFillPickerProps) {
                         variant="ghost"
                         class="text-muted-foreground data-expanded:bg-accent data-expanded:text-foreground"
                       >
-                        <Icon name="preferences-adjust" class="size-6" />
+                        <Icon name="preferences-adjust" />
                       </Button>
                     )}
                   />
@@ -142,11 +142,11 @@ export function AssetFillPicker(props: AssetFillPickerProps) {
                       <div class="flex items-center">
                         <span class="w-6 h-7 shrink-0 flex items-center justify-center">
                           <Show when={assetFilter() === option.value}>
-                            <Icon name="confirm-check" class="size-6 text-popover-foreground" />
+                            <Icon name="confirm-check" class="text-popover-foreground" />
                           </Show>
                         </span>
                         <span class="w-7 h-7 flex items-center justify-center">
-                          <Icon name={option.icon} class="size-6 text-popover-foreground" />
+                          <Icon name={option.icon} class="text-popover-foreground" />
                         </span>
                       </div>
                       <span class="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
@@ -179,7 +179,7 @@ export function AssetFillPicker(props: AssetFillPickerProps) {
           <Button
             variant="secondary"
             class="w-full"
-            onClick={() => openPromptInput(createDefaultConfig("IMAGE"))}
+            onClick={() => openPromptInput(restoreConfig("IMAGE"))}
           >
             Generate with AI
           </Button>

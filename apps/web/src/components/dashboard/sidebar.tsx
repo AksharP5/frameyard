@@ -6,6 +6,7 @@ import { Show, type JSX } from "solid-js";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { useAuth } from "@/context/auth";
+import { planName } from "@/lib/checkout";
 import { useAvatar } from "@/hooks/use-avatar";
 import { cx } from "@/lib/cva";
 import { WorkspaceActivityButton } from '@/components/workspaces/activity';
@@ -24,7 +25,7 @@ export function DashboardSidebarItem(props: DashboardSidebarItemProps) {
       type="button"
       onClick={props.onClick}
       class={cx(
-        "my-0.5 flex h-7 w-full shrink-0 items-center gap-1 rounded-md pl-0 pr-1 hover:bg-accent focus-ring",
+        "my-0.5 flex h-7 w-full shrink-0 items-center gap-1 rounded-md pl-0 pr-1 hover:bg-accent",
         props.class,
       )}
       classList={{ "bg-accent": props.active }}
@@ -32,9 +33,9 @@ export function DashboardSidebarItem(props: DashboardSidebarItemProps) {
       <span class="grid size-7 shrink-0 place-items-center overflow-clip">
         <Show
           when={props.active}
-          fallback={<Icon name={props.icon} class="size-6 text-muted-foreground" />}
+          fallback={<Icon name={props.icon} class="text-muted-foreground" />}
         >
-          <Icon name={props.icon} class="size-6 text-foreground" />
+          <Icon name={props.icon} class="text-foreground" />
         </Show>
       </span>
       <span
@@ -148,7 +149,7 @@ export function DashboardSidebarUser(props: DashboardSidebarUserProps) {
     return user?.user_metadata?.full_name || user?.email || "User";
   };
 
-  const planLabel = () => (auth.isPro() ? "Pro Plan" : "Free Plan");
+  const planLabel = () => `${planName(auth.plan())} Plan`;
 
   const initial = () => displayName().charAt(0).toUpperCase();
   const avatarUrl = useAvatar();
@@ -158,7 +159,7 @@ export function DashboardSidebarUser(props: DashboardSidebarUserProps) {
       <button
         type="button"
         onClick={props.onClick}
-        class="flex w-full items-center gap-2 rounded-md p-2 text-left hover:bg-accent focus-ring"
+        class="flex w-full items-center gap-2 rounded-md p-2 text-left hover:bg-accent"
       >
         <Show
           when={avatarUrl()}
@@ -184,7 +185,7 @@ export function DashboardSidebarUser(props: DashboardSidebarUserProps) {
             {planLabel()}
           </span>
         </div>
-        <Icon name="settings" class="size-6 shrink-0 text-muted-foreground" />
+        <Icon name="settings" class="shrink-0 text-muted-foreground" />
       </button>
     </div>
   );

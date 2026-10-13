@@ -18,6 +18,7 @@ import {
   isCaption,
   isGroup,
   isClipPath,
+  isPath,
   isScene,
   isSequence,
   isText,
@@ -52,7 +53,7 @@ import { InterpolationSettings } from "./interpolation";
 import { HighlightInspector } from "@/components/agent/highlight-inspector";
 import { PresetInspector } from "@/components/agent/preset-inspector";
 import { CameraSettings } from "./camera";
-import { PathSettings } from "./path";
+import { NativePathSettings, PathSettings } from "./path";
 import { KeyframeSettings, LayerKeyframes } from "./keyframes";
 import { MaterialSettings, SceneFinishSettings } from "./scene-finish";
 import { SpatialSettings } from "./spatial";
@@ -203,8 +204,8 @@ export function Inspector(props: { embedded?: boolean } = {}) {
             <PhysicsSettings node={nodes()[0]!} />
           </Show>
 
-          <Show when={includesTarget("shape", "clip-path") && first()?.has(PathData)}>
-            <PathSettings node={nodes()[0]!} />
+          <Show when={includesTarget("shape", "clip-path") && first()?.has(PathData) && !isPath(first()!)}>
+            <NativePathSettings node={nodes()[0]!} />
           </Show>
 
           <Show when={includesTarget("shape", "text", "audio", "scene", "scene3d", "volume", "clip-path")}>
@@ -221,6 +222,10 @@ export function Inspector(props: { embedded?: boolean } = {}) {
 
           <Show when={includesTarget("shape", "scene")}>
             <FillsSettings selection={nodes()} />
+          </Show>
+
+          <Show when={nodes().length === 1 && isPath(nodes()[0]!)}>
+            <PathSettings selection={nodes()} />
           </Show>
 
           <Show when={includesTarget("shape")}>

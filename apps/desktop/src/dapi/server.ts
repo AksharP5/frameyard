@@ -6,7 +6,7 @@ import { realpath } from "node:fs/promises";
 import type { BrowserWindow } from "electron";
 import type { Workspaces } from "../workspaces";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { DapiError, MCP_HOST, MCP_PATH, MCP_PORT, toolByName, tools } from "@diffusionstudio/dapi";
+import { DapiError, isDapiError, MCP_HOST, MCP_PATH, MCP_PORT, toolByName, tools } from "@diffusionstudio/dapi";
 import { authenticatedMcpUrl, readOrCreateMcpToken } from "@diffusionstudio/dapi/mcp-auth-node";
 import { mainHandlers } from "./handlers";
 import { DapiHttpServer } from "./http";
@@ -14,6 +14,7 @@ import { instructions } from "./docs";
 import { RendererCalls } from "./renderer-calls";
 import { serveCatalog } from "./tools-session";
 
+import type { TrackProps } from "@diffusionstudio/api-contract";
 import type { AgentToolResult, LogEntry, ToolArgs, ToolOutput, GenericTool } from "@diffusionstudio/dapi";
 import type { AppWindow, MainContext, MainToolName } from "./handler";
 
@@ -40,6 +41,7 @@ export type DapiServerDeps = {
   onFirstConnection?(): void;
   /** The staged docs: INSTRUCTIONS.md, their path, and the skill headers, all for every session. Null when not staged. */
   docsDir: string | null;
+  onToolCall?(props: TrackProps): void;
   /** Project-aware editing tools retained by Frameyard's native agent bridge. */
   runAgentTool(dir: string, name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<AgentToolResult>;
 };
@@ -113,31 +115,42 @@ export class DapiServer {
     const session = new McpServer({ name: SERVER_NAME, title: "Frameyard", version: this.deps.version }, { instructions: this.instructionsText });
     let project = initialProject;
     serveCatalog(session, async (tool, args, signal) => {
-      const input = args as { project?: string };
-      const target = input.project ?? project ?? this.deps.getDefaultProject?.();
-      if (tool.name === "workspace") {
-        if (!this.deps.workspaceAction) throw new Error("Project workspaces are unavailable");
-        const request = toolByName("workspace").input.parse(args);
-        const result = await this.deps.workspaceAction({ ...request, project: target }, signal);
-        if (request.action === "open" || request.action === "send") project = await realpath(request.dir ?? target!);
-        if (request.action === "close" && project === await realpath(request.dir ?? target!)) project = undefined;
-        return result;
-      }
-      if (tool.name === "open") {
-        const request = toolByName("open").input.parse(args);
-        if (this.deps.workspaces) {
-          const dir = await realpath(request.dir);
-          const window = await this.deps.workspaces.open(dir, signal);
-          project = dir;
-          this.deps.onOpenProject?.(window, !request.background);
-          return this.deps.workspaces.info(dir);
+      const startedAt = performance.now();
+      let error: string | undefined;
+      try {
+        const input = args as { project?: string };
+        const target = input.project ?? project ?? this.deps.getDefaultProject?.();
+        if (tool.name === "workspace") {
+          if (!this.deps.workspaceAction) throw new Error("Project workspaces are unavailable");
+          const request = toolByName("workspace").input.parse(args);
+          const result = await this.deps.workspaceAction({ ...request, project: target }, signal);
+          if (request.action === "open" || request.action === "send") project = await realpath(request.dir ?? target!);
+          if (request.action === "close" && project === await realpath(request.dir ?? target!)) project = undefined;
+          return result;
         }
-        const result = await this.renderer.call(tool.name, args, signal, this.deps.getWindow?.() ?? undefined);
-        project = await realpath(request.dir);
-        return result;
+        if (tool.name === "open") {
+          const request = toolByName("open").input.parse(args);
+          if (this.deps.workspaces) {
+            const dir = await realpath(request.dir);
+            const window = await this.deps.workspaces.open(dir, signal);
+            project = dir;
+            this.deps.onOpenProject?.(window, !request.background);
+            return this.deps.workspaces.info(dir);
+          }
+          const result = await this.renderer.call(tool.name, args, signal, this.deps.getWindow?.() ?? undefined);
+          project = await realpath(request.dir);
+          return result;
+        }
+        if (tool.environment === "main") return await this.runInMain(tool.name as MainToolName, args, signal, target);
+        return await this.runRenderer(tool, args, signal, target);
+      } catch (thrown) {
+        error = isDapiError(thrown) ? thrown.code : "error";
+        throw thrown;
+      } finally {
+        const client = session.server.getClientVersion();
+        this.deps.onToolCall?.({ tool: tool.name, client: client?.name, client_version: client?.version,
+          ok: error === undefined, error, duration_ms: Math.round(performance.now() - startedAt) });
       }
-      if (tool.environment === "main") return this.runInMain(tool.name as MainToolName, args, signal, target);
-      return this.runRenderer(tool, args, signal, target);
     });
     return session;
   }
@@ -145,7 +158,7 @@ export class DapiServer {
   private runRenderer(tool: GenericTool, args: unknown, signal: AbortSignal, project?: string): Promise<unknown> {
     const workspaces = this.deps.workspaces;
     if (project && workspaces) {
-      const heavy = ["export", "capture", "media_segment", "media_filmstrip", "media_waveform"].includes(tool.name);
+      const heavy = ["export", "capture", "generate", "media_segment", "filmstrip", "waveform", "media_filmstrip", "media_waveform"].includes(tool.name);
       return workspaces.run(project, tool.name, signal, (window, jobSignal) =>
         this.renderer.call(tool.name, { ...args as object, project: workspaces.directory(window) }, jobSignal, window, true), heavy);
     }

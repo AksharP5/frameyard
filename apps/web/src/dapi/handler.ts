@@ -2,8 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import type { Accessor } from "solid-js";
 import type { User } from "@supabase/supabase-js";
+import type { Accessor } from "solid-js";
 import type { ToolArgs, ToolName, ToolResult } from "@diffusionstudio/dapi";
 import type { EditorSession } from "./session";
 

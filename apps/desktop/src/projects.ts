@@ -460,9 +460,8 @@ const SOLID_VERSION = "^1.9.10";
 /**
  * The dapi surface as npm scripts: the CLI is how a project is inspected and
  * cut, so its commands belong in the record of the project they act on —
- * `npm run` prints the menu, `npm run <name> -- <args>` runs one. Named after
- * the command rather than its path (`grab`, not `media:grab`): the `media`
- * subcommands have no top-level namesakes to collide with.
+ * `npm run` prints the menu, `npm run <name> -- <args>` runs one, named after
+ * the command.
  */
 const SCRIPTS: Record<string, string> = {
   open: "dapi open .",
@@ -470,11 +469,11 @@ const SCRIPTS: Record<string, string> = {
   check: "dapi check",
   capture: "dapi capture",
   export: "dapi export",
-  probe: "dapi media probe",
-  transcribe: "dapi media transcribe",
-  grab: "dapi media grab",
-  filmstrip: "dapi media filmstrip",
-  waveform: "dapi media waveform",
+  probe: "dapi probe",
+  transcribe: "dapi transcribe",
+  grab: "dapi grab",
+  filmstrip: "dapi filmstrip",
+  waveform: "dapi waveform",
   fonts: "dapi fonts",
   logs: "dapi logs",
   screenshot: "dapi screenshot",
@@ -631,11 +630,11 @@ All of them talk to the running app, except \`fonts\`.
 | \`check\` | \`dapi check <scene-id>\` | Check a scene before export. |
 | \`capture\` | \`dapi capture <id>\` | Render frames of a scene, as an export would, to labelled PNG contact sheets. |
 | \`export\` | \`dapi export <scene-id> <output>\` | Render a scene to a video file. |
-| \`probe\` | \`dapi media probe <id\\|path>\` | Container and per-track metadata, without decoding. |
-| \`transcribe\` | \`dapi media transcribe <id\\|path>\` | Timed speech transcript, word by word. |
-| \`grab\` | \`dapi media grab <id\\|path>\` | Decode frames of a video to labelled PNG contact sheets. |
-| \`filmstrip\` | \`dapi media filmstrip <id\\|path>\` | Thumbnail grid across a window of a video. |
-| \`waveform\` | \`dapi media waveform <id\\|path>\` | Loudness over time, with the silences marked. |
+| \`probe\` | \`dapi probe <id\\|path>\` | Container and per-track metadata, without decoding. |
+| \`transcribe\` | \`dapi transcribe <id\\|path>\` | Timed speech transcript, word by word. |
+| \`grab\` | \`dapi grab <id\\|path>\` | Decode frames of a video to labelled PNG contact sheets. |
+| \`filmstrip\` | \`dapi filmstrip <id\\|path>\` | Thumbnail grid across a window of a video. |
+| \`waveform\` | \`dapi waveform <id\\|path>\` | Loudness over time, with the silences marked. |
 | \`fonts\` | \`dapi fonts\` | Google Fonts and local font families, valid as \`fontFamily\`. |
 | \`logs\` | \`dapi logs\` | Recent console output from the app. |
 | \`screenshot\` | \`dapi screenshot\` | The whole app window as a PNG. |
@@ -836,10 +835,17 @@ export async function duplicateProject(dir: string): Promise<ProjectInfo> {
   return project;
 }
 
-/** Moves the folder to the trash; resolves with the id it had ("" for none), for what is kept outside it. */
+/**
+ * Moves the folder to the trash; resolves with the id it had ("" for none), for what is kept outside it.
+ * A folder that is already gone counts as deleted, so the project can still come off the list.
+ */
 export async function deleteProject(dir: string): Promise<string> {
   const id = recordedId(await readPackage(dir));
-  await shell.trashItem(dir);
+  const info = await stat(dir).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  });
+  if (info) await shell.trashItem(dir);
   unwatchProject(dir);
   return id;
 }

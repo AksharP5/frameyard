@@ -12,7 +12,7 @@ All [common props](./elements.md#common-props), plus:
 
 | Prop | Type | Default | Meaning |
 | ---- | ---- | ------- | ------- |
-| `src` | `string \| AssetRef` | **required** | See [media.md](./media.md). |
+| `src` | `string` | **required** | See [media.md](./media.md). |
 | `objectFit` | `"cover" \| "contain" \| "fill"` | `"cover"` | How the source maps into the box. |
 | `frameRate` | `number` | Sequence metadata, otherwise `30` | Overrides the frame rate of a numbered image sequence. Encoded video carries its own rate (see [media.md](./media.md#image-sequences)). |
 | `volume` | `number` | `0` | Decibels: `0` = unity, negative attenuates (`-6` ≈ half as loud), `-Infinity` = silence. Not linear. |

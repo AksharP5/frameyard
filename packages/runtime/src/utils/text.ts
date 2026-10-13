@@ -11,13 +11,13 @@ import {
 } from '../constants';
 import {
 	Size, Hidden, Paint, Color, BlendMode,
-	Chars, TextStyle, TextRange, TextCache, Cache, Computed,
+	Chars, TextStyle, TextRange, TextCache, Cache, Computed, EllipticalGradient,
 	RenderSurface,
 } from '../traits';
 import { clamp } from '../math/common';
 import { colorToHex } from './color';
 import { applyStrokeStyle, findWidestStroke } from './stroke';
-import { createLinearGradient, createRadialGradient } from '../systems/gradients';
+import { createAngularGradientPattern, createLinearGradient, createRadialGradient, createRadialGradientPattern } from '../systems/gradients';
 
 import type { Entity, World } from 'koota';
 
@@ -282,6 +282,32 @@ function tokenizeText(world: World, entity: Entity) {
 	store(world, TextCache).tokens[entity.id()] = lines;
 }
 
+type EllipticalPatterns = Map<Entity, CanvasPattern | CanvasGradient>;
+
+/**
+ * A radial or angular paint's pattern, made once per text render and kept in
+ * `patterns`: one costs a canvas-sized draw, and it holds for every word,
+ * since the words share the box and the matrix.
+ */
+function getEllipticalPattern(
+	world: World,
+	ctx: Ctx,
+	patterns: EllipticalPatterns,
+	paint: Entity,
+	paintType: PaintType,
+	w: number,
+	h: number,
+): CanvasPattern | CanvasGradient {
+	let pattern = patterns.get(paint);
+	if (!pattern) {
+		pattern = paintType === PaintType.ANGULAR_GRADIENT
+			? createAngularGradientPattern(world, paint, ctx, w, h)
+			: createRadialGradientPattern(world, paint, ctx, w, h);
+		patterns.set(paint, pattern);
+	}
+	return pattern;
+}
+
 /** Renders text tokens directly to the given canvas context. */
 function renderTokens(ctx: Ctx, world: World, entity: Entity): void {
 	const eid = entity.id();
@@ -294,17 +320,22 @@ function renderTokens(ctx: Ctx, world: World, entity: Entity): void {
 	const paintStore = store(world, Paint);
 
 	const savedAlpha = ctx.globalAlpha;
-	// Gradients share the text's transform and bounds; reuse only within this draw.
 	let gradients: Map<Entity, CanvasGradient> | undefined;
 	const gradientFor = (paint: Entity, type: PaintType.LINEAR_GRADIENT | PaintType.RADIAL_GRADIENT): CanvasGradient => {
-		const cached = gradients?.get(paint);
+		gradients ??= new Map();
+		const cached = gradients.get(paint);
 		if (cached) return cached;
 		const gradient = type === PaintType.LINEAR_GRADIENT
 			? createLinearGradient(world, paint, ctx, computed.width[eid]!, computed.height[eid]!)
 			: createRadialGradient(world, paint, ctx, computed.width[eid]!, computed.height[eid]!);
-		(gradients ??= new Map()).set(paint, gradient);
+		gradients.set(paint, gradient);
 		return gradient;
 	};
+
+	// Radial and angular paints' patterns, made on first use.
+	let patterns: EllipticalPatterns | null = null;
+
+	const cache = store(world, Cache);
 
 	// Draw all text shadows
 	{
@@ -361,6 +392,9 @@ function renderTokens(ctx: Ctx, world: World, entity: Entity): void {
 		ctx.textAlign = 'start';
 		ctx.textBaseline = 'top';
 
+		const w = computed.width[eid]!;
+		const h = computed.height[eid]!;
+
 		for (const word of words) {
 			const strokes = getStrokes(world, entity, word.ranges);
 			if (!strokes.length) continue;
@@ -378,16 +412,40 @@ function renderTokens(ctx: Ctx, world: World, entity: Entity): void {
 				if (blendMode !== 0) {
 					ctx.globalCompositeOperation = COMPOSITE_OPERATIONS[blendMode]!;
 				}
-				ctx.globalAlpha = savedAlpha * (computed.opacity[sid] ?? 1);
+				const strokeAlpha = savedAlpha * computed.opacity[sid]!;
+				const strokeCO = ctx.globalCompositeOperation;
 				applyStrokeStyle(ctx, world, stroke);
 
-				const paintType = paintStore.value[sid];
-				if (paintType === PaintType.LINEAR_GRADIENT || paintType === PaintType.RADIAL_GRADIENT) {
-					ctx.strokeStyle = gradientFor(stroke, paintType);
-				} else {
-					ctx.strokeStyle = colorToHex(computed.color[sid] ?? 0x000000);
+				// The stroke's own paint (its `color`, index -1) is intrinsic,
+				// beneath its paint children; each child draws through the same
+				// line at its own opacity and blend mode.
+				const paints = cache.fills[sid] ?? NO_PAINTS;
+				for (let i = -1; i < paints.length; i++) {
+					const own = i < 0;
+					const paint = own ? stroke : paints[i]!;
+					if (!own && paint.has(Hidden)) continue;
+					const pid = paint.id();
+
+					const paintType = paint.has(Paint) ? paintStore.value[pid] : undefined;
+					if (paintType === PaintType.LINEAR_GRADIENT) {
+						ctx.strokeStyle = gradientFor(paint, paintType);
+					} else if (paintType === PaintType.RADIAL_GRADIENT && !paint.has(EllipticalGradient)) {
+						ctx.strokeStyle = gradientFor(paint, paintType);
+					} else if (paintType === PaintType.RADIAL_GRADIENT || paintType === PaintType.ANGULAR_GRADIENT) {
+						ctx.strokeStyle = getEllipticalPattern(world, ctx, patterns ??= new Map(), paint, paintType, w, h);
+					} else if (paint.has(Color)) {
+						ctx.strokeStyle = colorToHex(computed.color[pid]!);
+					} else {
+						// A solid without a Color: a stroke whose color is unset.
+						continue;
+					}
+
+					const paintBlendMode = !own && paint.has(BlendMode) ? blendStore.value[pid] ?? 0 : 0;
+					ctx.globalCompositeOperation = paintBlendMode !== 0 ? COMPOSITE_OPERATIONS[paintBlendMode]! : strokeCO;
+					ctx.globalAlpha = own ? strokeAlpha : strokeAlpha * computed.opacity[pid]!;
+					ctx.strokeText(word.chars, word.x, word.y);
 				}
-				ctx.strokeText(word.chars, word.x, word.y);
+
 				ctx.globalCompositeOperation = savedCO;
 			}
 		}
@@ -396,6 +454,8 @@ function renderTokens(ctx: Ctx, world: World, entity: Entity): void {
 
 	// Draw all text fills
 	{
+		const w = computed.width[eid]!;
+		const h = computed.height[eid]!;
 		ctx.save();
 		ctx.textAlign = 'start';
 		ctx.textBaseline = 'top';
@@ -426,13 +486,17 @@ function renderTokens(ctx: Ctx, world: World, entity: Entity): void {
 				if (blendMode !== 0) {
 					ctx.globalCompositeOperation = COMPOSITE_OPERATIONS[blendMode]!;
 				}
-				ctx.globalAlpha = savedAlpha * (computed.opacity[fid] ?? 1);
+				ctx.globalAlpha = savedAlpha * computed.opacity[fid]!;
 
 				const paintType = paintStore.value[fid];
-				if (paintType === PaintType.LINEAR_GRADIENT || paintType === PaintType.RADIAL_GRADIENT) {
+				if (paintType === PaintType.LINEAR_GRADIENT) {
 					ctx.fillStyle = gradientFor(fill, paintType);
+				} else if (paintType === PaintType.RADIAL_GRADIENT && !fill.has(EllipticalGradient)) {
+					ctx.fillStyle = gradientFor(fill, paintType);
+				} else if (paintType === PaintType.RADIAL_GRADIENT || paintType === PaintType.ANGULAR_GRADIENT) {
+					ctx.fillStyle = getEllipticalPattern(world, ctx, patterns ??= new Map(), fill, paintType, w, h);
 				} else {
-					ctx.fillStyle = colorToHex(computed.color[fid] ?? 0x000000);
+					ctx.fillStyle = colorToHex(computed.color[fid]!);
 				}
 				ctx.fillText(word.chars, word.x, word.y);
 				ctx.globalCompositeOperation = savedCO;
@@ -617,6 +681,9 @@ function getFills(world: World, entity: Entity, ranges: Entity[]): Entity[] {
 
 	return value;
 }
+
+// Stable empty list for strokes without paint children, so the render loop allocates none.
+const NO_PAINTS: Entity[] = [];
 
 function getStrokes(world: World, entity: Entity, ranges: Entity[]): Entity[] {
 	const cache = store(world, Cache);

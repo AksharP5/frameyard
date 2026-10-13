@@ -8,19 +8,15 @@ import { Not, Or } from 'koota';
 import { cubicBezier, steps, spring } from 'animejs';
 
 import { store } from '../world/store';
-import {
-	Geometry, Group, AdjustmentLayer, Hidden, Culled,
-	Computed, Cache, Animation, KeyframeTrack, Keyframe, Chars,
-	UniformScale, Position, Offset, Rotation, Scale, Skew, Size, Opacity,
-	Color, Blur, Volume, Effect, StrokeStyle, CornerRadius, MixedCornerRadius,
-	ColorStop, Anchor, SceneCamera, PathData, LayerMaterial, SceneEffects,
-} from '../traits';
-import { AnimationType, AnimationPhase } from '../constants';
+import { Geometry, Group, AdjustmentLayer, Hidden, Culled, Computed, Cache, Animation, KeyframeTrack, Keyframe, Chars, UniformScale, Position, Offset, Rotation, Scale, Skew, Size, Opacity, Color, Blur, Volume, Effect, StrokeStyle, CornerRadius, MixedCornerRadius, ColorStop, Anchor, SceneCamera, PathData, LayerMaterial, SceneEffects, StrokeDash, LinearGradient, EllipticalGradient, PathTrim, VectorPath } from '../traits';
+import { AnimationType, AnimationPhase, LINEAR_GRADIENT_DEFAULTS, ELLIPTICAL_GRADIENT_DEFAULTS } from '../constants';
 import { revealChars, revealWords, scrambleChars } from '../utils/text-motion';
 import { getLocalWindow } from '../utils/time';
 import { interpolatePathData } from '../utils/path';
+import { interpolatePath, formatPath } from '../math/path';
 
 import type { Entity, Trait, TraitRecord, World } from 'koota';
+import type { PathGeometry } from '../math/path';
 
 /**
  * Reset an entity's Computed values back to its authored trait values.
@@ -78,12 +74,26 @@ export function resetAnimatedValues(world: World, entity: Entity | null, ignore?
 	computed.volume[eid] = read(Volume, 'value', 0);
 	computed.value[eid] = read(Effect, 'value', 0);
 	computed.strokeWidth[eid] = read(StrokeStyle, 'width', 1);
+	computed.dash[eid] = read(StrokeDash, 'dash', 0);
+	computed.dashGap[eid] = read(StrokeDash, 'gap', 0);
+	computed.dashOffset[eid] = read(StrokeDash, 'offset', 0);
 	computed.cornerRadius[eid] = read(CornerRadius, 'value', 0);
 	computed.cornerRadiusTopLeft[eid] = read(MixedCornerRadius, 'topLeft', 0);
 	computed.cornerRadiusTopRight[eid] = read(MixedCornerRadius, 'topRight', 0);
 	computed.cornerRadiusBottomRight[eid] = read(MixedCornerRadius, 'bottomRight', 0);
 	computed.cornerRadiusBottomLeft[eid] = read(MixedCornerRadius, 'bottomLeft', 0);
 	computed.stopOffset[eid] = read(ColorStop, 'offset', 0);
+	computed.gradientX1[eid] = read(LinearGradient, 'x1', LINEAR_GRADIENT_DEFAULTS.x1);
+	computed.gradientY1[eid] = read(LinearGradient, 'y1', LINEAR_GRADIENT_DEFAULTS.y1);
+	computed.gradientX2[eid] = read(LinearGradient, 'x2', LINEAR_GRADIENT_DEFAULTS.x2);
+	computed.gradientY2[eid] = read(LinearGradient, 'y2', LINEAR_GRADIENT_DEFAULTS.y2);
+	computed.gradientCX[eid] = read(EllipticalGradient, 'cx', ELLIPTICAL_GRADIENT_DEFAULTS.cx);
+	computed.gradientCY[eid] = read(EllipticalGradient, 'cy', ELLIPTICAL_GRADIENT_DEFAULTS.cy);
+	computed.gradientRX[eid] = read(EllipticalGradient, 'rx', ELLIPTICAL_GRADIENT_DEFAULTS.rx);
+	computed.gradientRY[eid] = read(EllipticalGradient, 'ry', ELLIPTICAL_GRADIENT_DEFAULTS.ry);
+	computed.trimStart[eid] = read(PathTrim, 'start', 0);
+	computed.trimEnd[eid] = read(PathTrim, 'end', 1);
+	computed.trimOffset[eid] = read(PathTrim, 'offset', 0);
 
 	if (entity.has(UniformScale) && ignore !== UniformScale) {
 		computed.scaleX[eid] = read(UniformScale, 'value', 1);
@@ -97,6 +107,8 @@ export function resetAnimatedValues(world: World, entity: Entity | null, ignore?
 	// Chars straight to the store, so a copy would pin the text a static
 	// node shows. Unset, the renderer reads Chars; text motion overrides it.
 	computed.chars[eid] = undefined;
+	// The same for a path's outline: unset, the renderer reads VectorPath.
+	computed.path[eid] = undefined;
 }
 
 /** Restore only the authored fields a preset animation can change. */
@@ -312,6 +324,14 @@ export function motionSystem(world: World): void {
 			const property = keyframeTrack.property[tid] as PropertyPath;
 			const target = keyframeTrack.target[tid];
 			const keyframes = cache.keyframes[tid] ?? [];
+			if (property === 'path') {
+				const path = samplePathTrack(world, keyframes, localFrame);
+				if (path !== null && target != null) {
+					computed.path[target.id()] = path;
+					computed.pathData[target.id()] = formatPath(path);
+				}
+				continue;
+			}
 			const result = sampleTrack(world, keyframes, localFrame, property);
 			if (result === null || target == null) continue;
             if (property === 'spatial.path3d') { if (typeof result === 'string') computed.path3d[target.id()] = result; continue; }
@@ -507,6 +527,18 @@ export function getPropertyPaths(world: World) {
 			computed: computed.strokeWidth,
 			authored: store(world, StrokeStyle).width,
 		},
+		'stroke.dash': {
+			computed: computed.dash,
+			authored: store(world, StrokeDash).dash,
+		},
+		'stroke.dashGap': {
+			computed: computed.dashGap,
+			authored: store(world, StrokeDash).gap,
+		},
+		'stroke.dashOffset': {
+			computed: computed.dashOffset,
+			authored: store(world, StrokeDash).offset,
+		},
 		'vertexRadius': {
 			computed: computed.cornerRadius,
 			authored: store(world, CornerRadius).value,
@@ -531,9 +563,57 @@ export function getPropertyPaths(world: World) {
 			computed: computed.stopOffset,
 			authored: store(world, ColorStop).offset,
 		},
+		'gradient.x1': {
+			computed: computed.gradientX1,
+			authored: store(world, LinearGradient).x1,
+		},
+		'gradient.y1': {
+			computed: computed.gradientY1,
+			authored: store(world, LinearGradient).y1,
+		},
+		'gradient.x2': {
+			computed: computed.gradientX2,
+			authored: store(world, LinearGradient).x2,
+		},
+		'gradient.y2': {
+			computed: computed.gradientY2,
+			authored: store(world, LinearGradient).y2,
+		},
+		'gradient.cx': {
+			computed: computed.gradientCX,
+			authored: store(world, EllipticalGradient).cx,
+		},
+		'gradient.cy': {
+			computed: computed.gradientCY,
+			authored: store(world, EllipticalGradient).cy,
+		},
+		'gradient.rx': {
+			computed: computed.gradientRX,
+			authored: store(world, EllipticalGradient).rx,
+		},
+		'gradient.ry': {
+			computed: computed.gradientRY,
+			authored: store(world, EllipticalGradient).ry,
+		},
 		'chars': {
 			computed: computed.chars,
 			authored: store(world, Chars).value,
+		},
+		'path': {
+			computed: computed.path,
+			authored: store(world, VectorPath).geometry,
+		},
+		'trim.start': {
+			computed: computed.trimStart,
+			authored: store(world, PathTrim).start,
+		},
+		'trim.end': {
+			computed: computed.trimEnd,
+			authored: store(world, PathTrim).end,
+		},
+		'trim.offset': {
+			computed: computed.trimOffset,
+			authored: store(world, PathTrim).offset,
 		},
 	};
 }
@@ -664,6 +744,48 @@ function sampleTrack(
 
 	if (property === 'color') return lerpColor(startValue, endValue, progress);
 	return startValue + (endValue - startValue) * progress;
+}
+
+/**
+ * Sample a presorted `d` track at a local frame: the outline between the two
+ * keyframes around it (see `interpolatePath`), or the first/last one outside
+ * them. Returns null if no keyframe holds an outline.
+ */
+function samplePathTrack(world: World, keyframes: Entity[], frame: number): PathGeometry | null {
+	const keyframe = store(world, Keyframe);
+	let first = 0;
+	while (first < keyframes.length && keyframe.path[keyframes[first]!.id()] == null) first++;
+	if (first === keyframes.length) return null;
+
+	let last = keyframes.length - 1;
+	while (last > first && keyframe.path[keyframes[last]!.id()] == null) last--;
+	const firstId = keyframes[first]!.id();
+	const lastId = keyframes[last]!.id();
+	if (first === last || frame <= keyframe.time[firstId]!) return keyframe.path[firstId]!;
+	if (frame >= keyframe.time[lastId]!) return keyframe.path[lastId]!;
+
+	// Seek the active interval without filtering or walking a dense track.
+	let low = first + 1;
+	let high = last;
+	while (low < high) {
+		const middle = (low + high) >>> 1;
+		if (keyframe.time[keyframes[middle]!.id()]! < frame) low = middle + 1;
+		else high = middle;
+	}
+	let from = low - 1;
+	let to = low;
+	while (from > first && keyframe.path[keyframes[from]!.id()] == null) from--;
+	while (to < last && keyframe.path[keyframes[to]!.id()] == null) to++;
+
+	const fromId = keyframes[from]!.id();
+	const toId = keyframes[to]!.id();
+	const start = keyframe.time[fromId]!;
+	const span = keyframe.time[toId]! - start;
+	if (span <= 0) return keyframe.path[lastId]!;
+	let progress = Math.max(0, Math.min(1, (frame - start) / span));
+	const easingFn = resolveEasing(keyframe.easing[fromId]);
+	if (easingFn) progress = easingFn(progress);
+	return interpolatePath(keyframe.path[fromId]!, keyframe.path[toId]!, progress);
 }
 
 /**

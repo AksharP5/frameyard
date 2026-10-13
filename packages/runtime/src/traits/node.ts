@@ -8,11 +8,11 @@ import { GeometryType, PaintType, CaptionType, CaptionAlign } from '../constants
 
 import { parsePresetOptions, parseHighlightOptions, type AssetRef, type PathProps, type DepthSortMode } from '@diffusionstudio/jsx';
 
-// Geometric primitive: RECT or TEXT (see GeometryType). Other node-like roles
+// Geometric primitive: RECT, ELLIPSE, POLYGON, PATH or TEXT (see GeometryType). Other node-like roles
 // (group, audio, scene, caption) are layered on top via tag traits.
 export const Geometry = trait({ value: GeometryType.RECT as GeometryType });
 
-export const PathData = trait({ value: "", fillRule: "nonzero" as NonNullable<PathProps["fillRule"]>, viewBox: () => undefined as PathProps["viewBox"] });
+export const PathData = trait({ value: "", fillRule: "nonzero" as NonNullable<PathProps["fillRule"]>, viewBox: () => undefined as [number, number, number, number] | undefined });
 
 // Paint applied to a geometry (or stroke). See PaintType.
 export const Paint = trait({ value: PaintType.SOLID as PaintType });
@@ -50,17 +50,24 @@ export const IsMask = IsClipPath;
 // sub-entities in ChildOf queries).
 export const Shadow = trait();
 
-// Tag for stroke sub-entities: the entity is the stroke's paint (Paint/Color/
-// Opacity/BlendMode like a fill; a missing Paint reads as solid) and carries
-// its own StrokeStyle.
+// Tag for stroke sub-entities: the entity is the stroke's intrinsic paint
+// (Paint/Color/Opacity/BlendMode like a fill; a solid without Color paints
+// nothing), carries its own StrokeStyle, and takes paint children of its own
+// (Cache.fills of the stroke), drawn through the same line above it.
 export const Stroke = trait();
 
 export const Hidden = trait();
 
 export const ClipsContent = trait();
 
-// Tag for entities whose content is still being generated.
-export const Generating = trait();
+export const Generating = trait({ label: '', progress: undefined as number | undefined });
+
+// On a scene that work is running on (being captioned): the stage outlines it
+// with the blue shimmer. A scene is the frame everything else sits in, so it
+// has nothing to stand in with the way a generating node pulses. `start` is
+// when the work began on the world's clock, which the shimmer's turns count
+// from.
+export const Shimmering = trait({ start: 0 });
 
 export const Name = trait({ value: '' });
 
@@ -89,26 +96,18 @@ export const AssetId = trait({ value: '' });
 // and stamps AssetId when the asset lands. Never serialized: a request is
 // this world's business, re-derived from the src on any re-render.
 
-// The `generate.*` declaration a src names, to run through the world's Ai.
-export const GenerationRequest = trait(() => ({ ref: null as AssetRef | null }));
-
 // A source outside the library — a path or URL — to load into memory
 // through the library.
-export const LoadRequest = trait({ value: '' });
-
-// On a `<captions>` element without a src: transcribe the scene it sits
-// under, through the world's Ai. The seed keys the take — the transcript is
-// cached by scene id + seed, so re-running with a seed replays that take and
-// bumping the seed transcribes the scene again. Seed 0 is the default take.
+export const GenerationRequest = trait(() => ({ ref: null as AssetRef | null }));
 export const TranscriptionRequest = trait({ seed: 0 });
+
+export const LoadRequest = trait({ value: '' });
 
 // On an element authored with `syncTo`: the id of the element to align
 // against by listening instead of arithmetic. The asset system waits for both
 // sides' assets to land, cross-correlates the two recordings, and derives
-// Delay/Trim so they coincide on the timeline. Stands (with PendingSync) as a
-// pending source, so a transcription of the scene waits for the clip to land
-// where it will play. Never serialized, for the same reason the requests
-// above are not.
+// Delay/Trim so they coincide on the timeline. Never serialized, for the same
+// reason the requests above are not.
 export const SyncRequest = trait({ value: '' });
 
 // The syncTo measurement inflight, kept while the asset system correlates, so
@@ -124,13 +123,7 @@ export const PendingSource = trait(() => ({ value: undefined as unknown }));
 // Why the entity's src never became an asset: the message of the rejection
 // the asset system saw. Session state, like the requests above: it stands
 // until a resolution for the src starts again, and is never written back to
-// the source. What outlives the session is the library's: a generation that
-// failed stands there as a partial document carrying this same message, and
-// answers the next request for it with the failure rather than another run.
-//
-// `generated` tells a failed generation from a failed load, for whoever
-// reports them: the one is a model refusing or a spec a model cannot take,
-// the other a path that is not there.
+// the source.
 export const SourceError = trait({ value: '', generated: false });
 
 // Sibling order under a ChildOf parent.

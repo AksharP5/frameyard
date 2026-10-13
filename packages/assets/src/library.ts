@@ -36,7 +36,7 @@ import { assetFolder, assetName, basename, dirname, isPartialAsset, joinPath, no
 import type { FsEntry, ProjectFS } from './fs';
 import type { AssetRecord, Manifest } from './manifest';
 import type {
-	Asset, AssetDirectoryHandle, AssetEntry, AssetFileHandle, AssetGeneration, AssetType, PartialAsset, SequenceAsset,
+	Asset, AssetDirectoryHandle, AssetEntry, AssetFileHandle, AssetType, PartialAsset, SequenceAsset,
 } from './types';
 
 /** How long changes pile up before the manifest is written. */
@@ -62,12 +62,11 @@ export interface ImportResult {
 	failed: { source: string; error: Error }[];
 }
 
-export interface ImportOptions {
+export interface ImportOptions extends Partial<Pick<Asset, 'generation' | 'job'>> {
 	/** Library folder to place the asset in; root by default. */
 	folder?: string;
 	/** Library name; the source's file name by default. */
 	name?: string;
-	generation?: AssetGeneration;
 }
 
 export type LibrarySaveState =
@@ -292,7 +291,7 @@ export class AssetLibrary {
 			const frames = sortFrames(await this.fs.list(record.source)).filter((entry) => entry.kind === 'file');
 			const info = await this.sequenceInfo(record.source, frames);
 			if (info.id === record.id) return this.attach(record);
-			return this.describeSequence(record.source, frames, { path: record.path, createdAt: record.createdAt }, info);
+			return this.describeSequence(record.source, frames, { path: record.path, createdAt: record.createdAt, generation: record.generation, job: record.job }, info);
 		}
 
 		const stat = await this.fs.stat(record.source);
@@ -303,6 +302,7 @@ export class AssetLibrary {
 			path: record.path,
 			createdAt: record.createdAt,
 			generation: record.generation,
+			job: record.job,
 		});
 	}
 
@@ -472,7 +472,7 @@ export class AssetLibrary {
 			const name = options.name ?? basename(source);
 			const path = this.reservePath(joinPath(options.folder ?? '', name));
 			try {
-				const asset = await this.describeSource(source, { path, generation: options.generation });
+				const asset = await this.describeSource(source, { path, generation: options.generation, job: options.job });
 				return this.add(asset);
 			} finally { this.reservedPaths.delete(path); }
 		});
@@ -500,7 +500,7 @@ export class AssetLibrary {
 			} while (await this.fs.stat(joinPath(ASSETS_DIR, path)));
 			const source = joinPath(ASSETS_DIR, path);
 			const file = new File([blob], basename(path), { type: blob.type });
-			const asset = await this.describeFile(source, { path, generation: options.generation }, file);
+			const asset = await this.describeFile(source, { path, generation: options.generation, job: options.job }, file);
 			if (this.disposed) throw new Error('The asset library is closed.');
 			const existing = this.map.get(asset.id);
 			if (existing && !isPartialAsset(existing) && !existing.transient) {
@@ -508,6 +508,7 @@ export class AssetLibrary {
 				if (options.generation && existing.generation?.key !== key) {
 					this.update(existing, { generation: options.generation });
 				}
+				if (options.job !== undefined && existing.job !== options.job) this.update(existing, { job: options.job });
 				return existing;
 			}
 			await this.fs.write(source, blob, { exclusive: true });
@@ -518,6 +519,7 @@ export class AssetLibrary {
 			if (options.generation && added.generation?.key !== key) {
 				this.update(added, { generation: options.generation });
 			}
+			if (options.job !== undefined && added.job !== options.job) this.update(added, { job: options.job });
 			written = undefined;
 			if (added.source !== source) await this.fs.remove(source);
 			return added;
@@ -641,6 +643,7 @@ export class AssetLibrary {
 			path: asset.path,
 			createdAt: asset.createdAt,
 			generation: asset.generation,
+			job: asset.job,
 		});
 		const live = this.map.get(from);
 		if (!live || isPartialAsset(live) || live.source !== previousSource) {
@@ -907,6 +910,7 @@ export class AssetLibrary {
 			mimeType,
 			stat: { size: file.size, mtime: file.lastModified },
 			...(meta.generation ? { generation: meta.generation } : {}),
+			...(meta.job !== undefined ? { job: meta.job } : {}),
 			handle: this.fileHandle(source, probe.type === 'VIDEO'),
 			...probe,
 		};
@@ -925,6 +929,8 @@ export class AssetLibrary {
 			source: url,
 			createdAt: meta.createdAt ?? new Date().toISOString(),
 			mimeType,
+			...(meta.generation ? { generation: meta.generation } : {}),
+			...(meta.job !== undefined ? { job: meta.job } : {}),
 			handle,
 			...probe,
 		};
@@ -956,6 +962,8 @@ export class AssetLibrary {
 			source,
 			createdAt: meta.createdAt ?? new Date().toISOString(),
 			mimeType,
+			...(meta.generation ? { generation: meta.generation } : {}),
+			...(meta.job !== undefined ? { job: meta.job } : {}),
 			width: probe.width,
 			height: probe.height,
 			frameRate,
@@ -1017,8 +1025,4 @@ export class AssetLibrary {
 	}
 }
 
-interface DescribeMeta {
-	path: string;
-	createdAt?: string;
-	generation?: AssetGeneration;
-}
+type DescribeMeta = Pick<Asset, 'path'> & Partial<Pick<Asset, 'createdAt' | 'generation' | 'job'>>;

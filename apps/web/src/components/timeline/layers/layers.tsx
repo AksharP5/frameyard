@@ -187,7 +187,7 @@ export function Layers(props: { showTransport?: boolean } = {}) {
               <TooltipTrigger<typeof Button>
                 as={(triggerProps) => (
                   <Button {...triggerProps} variant="ghost" size="icon" onClick={() => splitAtPlayhead(world)}>
-                    <Icon name="split" class="size-6" />
+                    <Icon name="split" />
                   </Button>
                 )}
               />
@@ -203,7 +203,7 @@ export function Layers(props: { showTransport?: boolean } = {}) {
                       {...triggerProps}
                       as={(buttonProps) => (
                         <Button {...buttonProps} variant="ghost" size="icon">
-                          <Icon name="more-three-dots" class="size-6" />
+                          <Icon name="more-three-dots" />
                         </Button>
                       )}
                     />

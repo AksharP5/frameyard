@@ -22,7 +22,6 @@ import { getEditHistory } from '@/engine/history';
 import { timelineEditing } from '@/engine/timeline-editing';
 import { setInspectEntries } from '@/engine/inspect';
 import { attachLibrary, isLibraryFile } from '@/engine/library';
-import { attachAi } from '@/utils/gen-ai';
 import { attachProjectConfig, isProjectConfigFile } from '@/engine/project-config';
 import { rememberProjectBundle } from '@/lib/db';
 import { isCacheFile } from '@diffusionstudio/assets';
@@ -94,8 +93,6 @@ export function EditorPage() {
 
     // The library first: a mounted project's `src` values name its assets.
     const library = attachLibrary(world, dir);
-    // The generation service over it: what `generate.*` sources resolve through.
-    attachAi(world, library, dir);
     // The project's own settings (package.json `diffusion`), next to the scene.
     const config = attachProjectConfig(world, dir);
 

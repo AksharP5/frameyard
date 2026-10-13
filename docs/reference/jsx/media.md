@@ -8,7 +8,7 @@
 - **Remote URL**: e.g. `"https://my.videoarchive.com/audio/clip.wav"`, fetched on mount. Not added to the library.
 - **`AssetRef`**: the value returned by a hosted `generate.*` declaration (see [generate.md](./generate.md)). Hosted generation is unavailable in Frameyard's default local mode.
 
-Resolution is **asynchronous and non-blocking**: the element is on the canvas as soon as the project mounts, showing a generating state until its source lands. A source that never lands leaves the element carrying the reason (see [errors.md](./errors.md#failed-sources)).
+Resolution is **asynchronous and non-blocking**: the element is on the canvas as soon as the project mounts and its paint is attached once its source has loaded. A source that fails to load leaves the element carrying the reason (see [errors.md](./errors.md#failed-sources)).
 
 An `<img>` inside [`<html>`](./html.md) additionally takes a `data:` or `blob:` URL, which goes to the browser as it is.
 
@@ -62,7 +62,7 @@ The inner source is untouched — nothing is overwritten and nothing is lost —
 
 A project's assets are recorded in `assets.yml` next to its entry file: for each asset, its library `path`, where its bytes are (`source`: the absolute path of a file imported from disk, which remains in place, or a project-relative path under `assets/`, whether the app wrote the bytes there or a symlink points at them), and what it was found to be. Folders are listed too, so an empty one survives a reload. Renaming or moving an asset in the panel rewrites the `src` props that named it.
 
-Generations are listed from the moment they are asked for: a partial record (`state: pending`) with no `source` while the model runs, the asset once it lands, and a record in `state: error` carrying the reason when it fails, which stands until removed (see [errors.md](./errors.md#failed-sources)).
+A file a model generated — in the app's prompt box or with [`generate`](../tools/generate.md) — also records the `job` it came from. [`job`](../tools/job.md) with that id returns what was asked for in `request`: the model, the prompt and every other field (an input file appears there as the API's reference to its upload, not as a library path).
 
 ## Adding an asset
 
@@ -76,7 +76,7 @@ mkdir -p assets/b-roll && ln -s ~/Movies/drone.mp4 assets/b-roll/
 <video src="b-roll/drone.mp4" width={1920} height={1080} />
 ```
 
-Link rather than copy: the bytes stay where they are, the project holds nothing but a name for them, and the library still gets a portable path to reach them by. Give `ln -s` an absolute target — a relative link is read against the folder the link sits in, so it breaks as soon as the project moves. A directory of numbered frames is taken in whole, as one [image sequence](#image-sequences), rather than as a file each, and a link to that directory does the same. A download becomes an asset the same way: point [yt-dlp](https://github.com/yt-dlp/yt-dlp) at `assets/b-roll/` with `-o`; `generate.*` results arrive under `assets/generated/` on their own.
+Link rather than copy: the bytes stay where they are, the project holds nothing but a name for them, and the library still gets a portable path to reach them by. Give `ln -s` an absolute target — a relative link is read against the folder the link sits in, so it breaks as soon as the project moves. A directory of numbered frames is taken in whole, as one [image sequence](#image-sequences), rather than as a file each, and a link to that directory does the same. A download becomes an asset the same way: point [yt-dlp](https://github.com/yt-dlp/yt-dlp) at `assets/b-roll/` with `-o`.
 
 A link is the project's, and what it points at is not. Deleting a linked asset in the panel removes the link and stops there.
 
